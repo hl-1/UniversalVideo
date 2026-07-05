@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+downloads/*
+!downloads/.gitkeep
+downloads/_thumbnails/
+config/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+.DS_Store
