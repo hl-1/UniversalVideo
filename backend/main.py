@@ -129,7 +129,7 @@ class DownloadTask:
         )
 
 
-app = FastAPI(title="VideoDream API", version="0.1.0")
+app = FastAPI(title="VideoDream API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -622,6 +622,10 @@ def _browser_executable() -> Path | None:
 
 def _is_probable_video_resource(url: str) -> bool:
     lower = html.unescape(url).lower()
+    if any(token in lower for token in (".css", ".scss", ".less")):
+        return False
+    if "pornhub" in lower or "phncdn.com" in lower:
+        return _is_signed_pornhub_media_url(lower)
     if "phncdn.com" in lower and ".mp4" in lower and not _is_signed_pornhub_media_url(lower):
         return False
     blocked_tokens = (
@@ -651,8 +655,20 @@ def _is_signed_pornhub_media_url(url: str) -> bool:
     lower = html.unescape(url).lower()
     if "phncdn.com" not in lower:
         return False
+    parsed = urlparse(lower)
+    host = parsed.netloc
+    path = parsed.path
+    if host.startswith("pix-") or host.startswith("pix."):
+        return False
+    if any(ext in path for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return False
     if ".m3u8" in lower:
         return True
+    if not path.endswith(".mp4"):
+        return False
+    filename = Path(path).name
+    if not re.search(r"\d+p[_-]\d+k", filename):
+        return False
     return any(token in lower for token in ("token=", "ttl=", "validfrom=", "validto=", "hash=", "ipa=", "burst="))
 
 
@@ -900,6 +916,93 @@ def _extract_browser_page_meta(page: Any, normalized_url: str) -> dict[str, Any]
     return {"title": title, "thumbnail": thumbnail, "author": author, "duration": duration}
 
 
+def _extract_pornhub_player_data(page: Any) -> dict[str, Any]:
+    try:
+        data = page.evaluate(
+            """async () => {
+                const flashKey = Object.keys(window).find((key) => /^flashvars_/.test(key));
+                const flashvars = flashKey ? window[flashKey] : null;
+                if (!flashvars) return {};
+                let mp4Definitions = [];
+                const remote = (flashvars.mediaDefinitions || []).find((item) =>
+                    item && item.format === 'mp4' && String(item.videoUrl || '').includes('/video/get_media')
+                );
+                if (remote?.videoUrl) {
+                    try {
+                        const response = await fetch(remote.videoUrl, {
+                            credentials: 'include',
+                            headers: {
+                                Accept: 'application/json,text/plain,*/*',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            }
+                        });
+                        const text = await response.text();
+                        const parsed = JSON.parse(text);
+                        if (Array.isArray(parsed)) mp4Definitions = parsed;
+                    } catch {}
+                }
+                return {
+                    title: flashvars.video_title || document.querySelector('h1')?.textContent || document.title || '',
+                    thumbnail: flashvars.image_url || '',
+                    duration: flashvars.video_duration || '',
+                    mediaDefinitions: [...mp4Definitions, ...(flashvars.mediaDefinitions || [])]
+                };
+            }"""
+        )
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _pornhub_player_response(url: str, page_meta: dict[str, Any], player_data: dict[str, Any]) -> ParseResponse | None:
+    definitions = player_data.get("mediaDefinitions")
+    if not isinstance(definitions, list):
+        return None
+
+    formats: list[FormatInfo] = []
+    seen: set[str] = set()
+    def sort_key(item: dict[str, Any]) -> tuple[int, int]:
+        height = _safe_int(item.get("height")) or _safe_int(item.get("quality")) or 0
+        media_url = str(item.get("videoUrl") or "").lower()
+        is_direct_mp4 = item.get("format") == "mp4" or "/video/get_media" in media_url
+        preferred = {720: 0, 480: 1, 1080: 2, 240: 3}.get(height, 4)
+        if is_direct_mp4:
+            preferred -= 10
+        return (preferred, -height)
+
+    sorted_defs = sorted((item for item in definitions if isinstance(item, dict)), key=sort_key)
+    for item in sorted_defs:
+        media_url = item.get("videoUrl")
+        if not isinstance(media_url, str) or not media_url or media_url in seen:
+            continue
+        if "/video/get_media" in media_url:
+            continue
+        seen.add(media_url)
+        ext = "mp4" if item.get("format") == "mp4" else _media_ext(media_url)
+        quality = item.get("quality") or item.get("height") or "自动"
+        label = f"{quality}P · HLS" if ext == "m3u8" else f"{quality}P · MP4"
+        formats.append(
+            FormatInfo(
+                format_id=f"sniff:{quote(media_url, safe='')}",
+                label=label,
+                ext="mp4" if ext == "m3u8" else ext,
+                resolution=f"{quality}p" if str(quality).isdigit() else "自动",
+            )
+        )
+
+    if not formats:
+        return None
+
+    return ParseResponse(
+        title=_clean_meta_text(player_data.get("title")) or page_meta.get("title") or "PornHub 视频",
+        thumbnail=_thumbnail_url(player_data.get("thumbnail") or page_meta.get("thumbnail")),
+        duration=_safe_int(player_data.get("duration")) or page_meta.get("duration"),
+        uploader=page_meta.get("author") or "PornHub",
+        webpage_url=url,
+        formats=formats[:8],
+    )
+
+
 def parse_browser_sniffed_page(url: str) -> ParseResponse:
     executable = _browser_executable()
     if not executable:
@@ -907,6 +1010,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
     captured: list[str] = []
     page_meta: dict[str, Any] = {}
+    pornhub_player_data: dict[str, Any] = {}
     page_html = ""
     normalized_url = normalize_url(url)
     cached = _get_sniff_cache(normalized_url)
@@ -979,9 +1083,17 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 local_thumbnail = _capture_page_thumbnail(page, normalized_url)
                 if local_thumbnail:
                     page_meta["thumbnail"] = local_thumbnail
+            if is_pornhub_page:
+                pornhub_player_data = _extract_pornhub_player_data(page)
             page_html = page.content()
         finally:
             browser.close()
+
+    if is_pornhub_page:
+        player_response = _pornhub_player_response(normalized_url, page_meta, pornhub_player_data)
+        if player_response:
+            _set_sniff_cache(normalized_url, player_response)
+            return player_response
 
     for match in re.finditer(r"https?://[^\"'<>\\\s]+", page_html):
         remember(match.group(0))
@@ -1344,6 +1456,16 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
             command = [
                 str(ffmpeg),
                 "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
                 "-headers",
                 f"User-Agent: {DEFAULT_HEADERS['User-Agent']}\r\nReferer: {task.url}\r\n",
                 "-i",
@@ -1357,17 +1479,29 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
             )
+            started_at = time.time()
+            last_size = -1
+            last_growth_at = started_at
             while process.poll() is None:
+                if time.time() - started_at > 180:
+                    process.kill()
+                    raise RuntimeError("HLS 视频流下载超时，请改选 MP4 直链格式或较低清晰度后重试。")
+                current_size = target_path.stat().st_size if target_path.exists() else 0
+                if current_size > last_size:
+                    last_size = current_size
+                    last_growth_at = time.time()
+                elif time.time() - last_growth_at > 30:
+                    process.kill()
+                    raise RuntimeError("HLS 视频流 30 秒没有写入数据，请重新解析后选择其他清晰度重试。")
                 _set_task(task, progress=min(95.0, task.progress + 1.5), message="正在合并 HLS 视频流")
                 time.sleep(1)
             if process.returncode != 0:
-                stderr = process.stderr.read() if process.stderr else ""
-                raise RuntimeError(stderr.strip() or "ffmpeg 下载 HLS 失败。")
+                raise RuntimeError("ffmpeg 下载 HLS 失败，请重新解析后选择其他清晰度重试。")
         else:
             media_headers = {
                 **DEFAULT_HEADERS,
@@ -1375,6 +1509,9 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
             }
             with requests.get(media_url, headers=media_headers, stream=True, timeout=(10, 90)) as response:
                 response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                if content_type.startswith("image/"):
+                    raise RuntimeError("嗅探到的是图片资源，不是视频文件。请重新解析原视频页面后下载。")
                 total = int(response.headers.get("Content-Length") or 0)
                 downloaded = 0
                 with temp_path.open("wb") as file_obj:
@@ -1391,6 +1528,16 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
 
         if not target_path.exists() or target_path.stat().st_size == 0:
             raise RuntimeError("嗅探资源下载结束，但没有生成有效文件。")
+        with target_path.open("rb") as file_obj:
+            header = file_obj.read(12)
+        if (
+            header.startswith(b"\xff\xd8\xff")
+            or header.startswith(b"\x89PNG")
+            or header.strip() in {b"[]", b"{}"}
+            or target_path.stat().st_size < 1024
+        ):
+            target_path.unlink(missing_ok=True)
+            raise RuntimeError("下载结果不是有效视频文件。请重新解析原视频页面，并选择 HLS 格式下载。")
         _set_task(
             task,
             status="finished",
