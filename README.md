@@ -2,13 +2,63 @@
 
 当前版本：`v1.0.0`
 
-VideoDream 是一个轻量视频下载工作台：前端使用 Vue 3 + Vite，后端使用 FastAPI 封装 yt-dlp。首版支持 yt-dlp 可识别的公开视频链接，流程为解析信息、选择格式、创建下载任务、选择保存位置、保存本地文件。
+VideoDream 是一个本地运行的视频下载工作台，前端使用 Vue 3 + Vite，后端使用 FastAPI。它封装 `yt-dlp`、浏览器页面解析和任务下载能力，支持先解析视频信息，再选择格式和保存位置。
+
+## 已支持的网站
+
+### 抖音
+
+- 支持抖音公开视频链接，例如 `https://www.douyin.com/video/...` 和带 `modal_id` 的精选页链接。
+- 使用本机浏览器解析真实视频流。
+- 支持展示真实标题、作者和封面。
+- 封面优先使用页面信息，失败时自动生成本地截图封面。
+
+### YouTube
+
+- 支持公开 YouTube 视频链接。
+- 优先使用浏览器解析可播放资源。
+- 支持音视频分离场景下的自动合并。
+- 遇到机器人校验时，可使用本机授权模式读取本机浏览器登录态。
+
+### PornHub
+
+- 支持原始视频页面链接，例如 `https://cn.pornhub.com/view_video.php?viewkey=...`。
+- 通过页面播放器数据获取真实 `mediaDefinitions`。
+- 在浏览器页面上下文中请求 `get_media`，获取 signed MP4 直链。
+- 默认优先展示可直接下载的 MP4 格式，HLS 作为备用格式。
+- 已过滤缩略图、广告素材、空数组响应等无效资源，避免生成打不开的 MP4。
+
+### B站
+
+- 支持 B站公开公开视频链接。
+- 自动补充常规浏览器请求头。
+- 遇到 412 或登录态校验时，可使用本机授权模式或 cookies 兜底。
+
+### yt-dlp 通用站点
+
+- 其他 `yt-dlp` 支持的公开视频站点会走通用解析能力。
+- 实际可用性取决于目标站点是否公开、是否需要登录态，以及 `yt-dlp` 当前版本支持情况。
+
+## 核心功能
+
+- 输入视频链接并解析标题、封面、作者、时长和可用格式。
+- 选择下载格式。
+- 创建后台下载任务并查看进度。
+- 支持浏览器系统保存对话框，选择本地保存位置。
+- 支持 MP4 直链下载、HLS 转 MP4、音视频合并。
+- 下载结果会校验，避免图片、空响应或无效小文件被当作视频保存。
 
 ## 运行环境
 
-- Node.js 20+，用于前端开发服务和构建。
-- Python 3.11+，用于 FastAPI 后端。
-- ffmpeg，已安装到 `C:\softWare\environment\ffmpeg`，用于音视频合并。
+- Python 3.11+
+- Node.js 20+
+- ffmpeg
+
+项目当前默认使用：
+
+```text
+C:\softWare\environment\ffmpeg
+```
 
 ## 启动后端
 
@@ -25,8 +75,6 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 
 ## 启动前端
 
-PowerShell 如果拦截 `npm.ps1`，请使用 `npm.cmd`：
-
 ```powershell
 cd C:\softWare\project\vD\frontend
 npm.cmd install
@@ -39,67 +87,22 @@ npm.cmd run dev -- --host 127.0.0.1
 http://127.0.0.1:5174
 ```
 
-## 文件保存
-
-后端会先把 yt-dlp 产物临时保存到项目根目录的 `downloads/`。该目录已加入 `.gitignore`，不会作为业务数据提交。
-
-前端点击“选择位置并下载”时，会优先调用浏览器的系统保存文件对话框，让你选择最终保存位置。部分内置浏览器不支持该能力时，会自动降级为普通浏览器下载。
-
-## Cookies 文件
-
-部分平台会要求登录态、年龄确认或反机器人校验。VideoDream 不会自动读取浏览器 cookies；如果你确认自己有权访问并下载，可以在前端错误提示出现后点击“填写 cookies 后重试”，粘贴 Netscape 格式 cookies 内容。
-
-后端会把 cookies 保存到：
-
-```text
-C:\softWare\project\vD\config\bilibili-cookies.txt
-C:\softWare\project\vD\config\youtube-cookies.txt
-C:\softWare\project\vD\config\pornhub-cookies.txt
-C:\softWare\project\vD\config\douyin-cookies.txt
-```
-
-放好后重启后端。
-
-通过前端弹窗保存 cookies 后，一般不需要手动刷新页面，系统会自动重新解析当前链接。
-
 ## 本机授权模式
 
-如果不想手动导出和粘贴 cookies，可以在下载面板开启“本机授权模式”，并选择 Chrome、Edge、Firefox、Brave 或 Vivaldi。
+部分平台会要求登录态、年龄确认或机器人校验。前端可开启“本机授权模式”，选择 Chrome、Edge、Firefox、Brave 或 Vivaldi。
 
-开启后，后端会调用 yt-dlp 的 `cookiesfrombrowser`，在你的电脑本机读取所选浏览器的已登录状态用于当前解析/下载任务。系统不会把 Cookie 展示在页面里，也不会写入 `config` 文件。
+该模式会在本机调用 `yt-dlp` 的 `cookiesfrombrowser` 能力，读取你当前电脑上的浏览器登录态。Cookie 不会展示在页面中，也不会写入项目配置文件。
 
-注意：
-
-- 该模式只适合本地运行，不适合部署成公网多人下载服务。
-- Chrome 正在运行时，Windows 上可能出现 `Could not copy Chrome cookie database`，可关闭 Chrome 后重试，或选择 Edge/Firefox。
-- 浏览器里必须已经登录目标平台，否则仍可能出现登录/机器人校验提示。
-
-## 常见平台问题
-
-### 抖音公开解析
-
-后端已为抖音增加专用公开视频解析模块：会先提取视频 ID，调用 `iesdouyin.com` 公开视频信息接口，并尝试从分享页数据中兜底提取播放地址；失败后再回退 yt-dlp。
-
-如果某条抖音链接返回 `encrypt_data_miss` 或 `Fresh cookies are needed`，表示平台当前要求签名参数、登录态或触发风控。VideoDream 不会绕过这些限制，也不会自动读取你的浏览器 cookies。
-
-### B站 412
-
-如果 B站链接返回 `HTTP Error 412: Precondition Failed`，通常是平台接口校验请求头或登录态导致。后端已经默认补充浏览器 `User-Agent`、`Origin` 和 `Referer`。如果仍失败，请提供 `config/bilibili-cookies.txt`。
-
-### YouTube bot/sign in
-
-如果 YouTube 返回 `Sign in to confirm you’re not a bot`，需要你本人浏览器中的 YouTube cookies。请导出到：
+## 项目结构
 
 ```text
-C:\softWare\project\vD\config\youtube-cookies.txt
+backend/      FastAPI 后端、解析与下载任务
+frontend/     Vue 3 前端工作台
+downloads/    本地临时下载目录，已加入 .gitignore
+docs/         需求与方案文档
+scripts/      本地启动脚本
 ```
 
-然后重启后端再试。
+## 发布记录
 
-### PornHub 410
-
-如果 PornHub 链接返回 `HTTP Error 410: Gone`，通常表示页面已删除、下架、地区不可访问，或需要站点侧登录/年龄校验后才可访问。后端会自动规范短 viewkey 地址并补充常规浏览器请求头；如果浏览器中可正常打开，请提供 `config/pornhub-cookies.txt`。
-
-## 使用边界
-
-请仅下载你拥有权利、获得授权或平台允许保存的公开视频内容。VideoDream 不提供登录代办、年龄验证、会员内容下载或规避访问限制能力。
+详见 [CHANGELOG.md](CHANGELOG.md)。
