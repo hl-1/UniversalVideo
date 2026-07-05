@@ -183,7 +183,7 @@ MEDIA_SRC_PATTERN = re.compile(
 )
 MEDIA_EXTENSIONS = (".m3u8", ".mp4", ".webm", ".mov")
 VIDEO_CDN_PATTERN = re.compile(
-    r"(douyinvod\.com|googlevideo\.com/videoplayback|mime_type=video_|/aweme/v1/play/|\.mp4(?:\?|$)|\.m3u8(?:\?|$)|\.webm(?:\?|$)|\.mov(?:\?|$))",
+    r"(douyinvod\.com|googlevideo\.com/videoplayback|phncdn\.com|pornhub.*(?:mp4|m3u8)|mime_type=video_|/aweme/v1/play/|\.mp4(?:\?|$)|\.m3u8(?:\?|$)|\.webm(?:\?|$)|\.mov(?:\?|$))",
     re.IGNORECASE,
 )
 
@@ -289,6 +289,11 @@ def _clean_error(error: Exception, url: str | None = None) -> str:
             "或需要站点侧登录/年龄校验后才可访问。系统已补充常规浏览器请求头；"
             "如果你确认浏览器中能正常打开，请导出你本人账号的 cookies 到 "
             "config/pornhub-cookies.txt 后重试。"
+        )
+    if "No Token" in text or ("470" in text and "phncdn" in text):
+        return (
+            "视频 CDN 返回 470 No Token，说明当前拿到的是缺少签名 token 的临时直链。"
+            "请粘贴原始视频页面链接重新解析，不要直接使用 pix/phncdn 的 mp4 地址。"
         )
     if url and _is_youtube_url(url) and (
         "not a bot" in text.lower()
@@ -617,6 +622,8 @@ def _browser_executable() -> Path | None:
 
 def _is_probable_video_resource(url: str) -> bool:
     lower = html.unescape(url).lower()
+    if "phncdn.com" in lower and ".mp4" in lower and not _is_signed_pornhub_media_url(lower):
+        return False
     blocked_tokens = (
         ".png",
         ".jpg",
@@ -640,9 +647,22 @@ def _is_probable_video_resource(url: str) -> bool:
     return bool(VIDEO_CDN_PATTERN.search(lower))
 
 
+def _is_signed_pornhub_media_url(url: str) -> bool:
+    lower = html.unescape(url).lower()
+    if "phncdn.com" not in lower:
+        return False
+    if ".m3u8" in lower:
+        return True
+    return any(token in lower for token in ("token=", "ttl=", "validfrom=", "validto=", "hash=", "ipa=", "burst="))
+
+
 def _score_video_resource(url: str) -> int:
     lower = html.unescape(url).lower()
     score = 0
+    if _is_signed_pornhub_media_url(lower):
+        score += 130
+    if ".m3u8" in lower and ("phncdn.com" in lower or "pornhub" in lower):
+        score += 125
     if "googlevideo.com/videoplayback" in lower:
         score += 120
     if "douyinvod.com" in lower:
@@ -661,7 +681,8 @@ def _score_video_resource(url: str) -> int:
 def _is_high_confidence_video(url: str) -> bool:
     lower = html.unescape(url).lower()
     return (
-        "douyinvod.com" in lower
+        _is_signed_pornhub_media_url(lower)
+        or "douyinvod.com" in lower
         or "googlevideo.com/videoplayback" in lower
         or ("mime_type=video" in lower and ("video_mp4" in lower or "video/" in lower))
         or "/aweme/v1/play/" in lower
@@ -893,6 +914,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
         return cached
     is_youtube_page = _is_youtube_url(normalized_url)
     is_douyin_page = _is_douyin_url(normalized_url)
+    is_pornhub_page = _is_pornhub_url(normalized_url)
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
@@ -921,7 +943,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
             request = route.request
             remember(request.url)
             if request.resource_type in {"image", "font", "stylesheet"} or (
-                request.resource_type == "media" and not (is_youtube_page or is_douyin_page)
+                request.resource_type == "media" and not (is_youtube_page or is_douyin_page or is_pornhub_page)
             ):
                 route.abort()
                 return
@@ -932,7 +954,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
         page.on("response", lambda response: remember(response.url))
         try:
             page.goto(normalized_url, wait_until="commit", timeout=8000 if is_douyin_page else 12000)
-            deadline = time.time() + (8 if is_douyin_page else 12 if is_youtube_page else 4)
+            deadline = time.time() + (8 if is_douyin_page else 12 if (is_youtube_page or is_pornhub_page) else 4)
             while time.time() < deadline:
                 if is_youtube_page:
                     if any(_is_youtube_progressive_stream(item) for item in captured) or (
@@ -942,6 +964,9 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                         break
                 elif is_douyin_page:
                     if any("douyinvod.com" in item.lower() or "mime_type=video" in item.lower() for item in captured):
+                        break
+                elif is_pornhub_page:
+                    if any(_is_signed_pornhub_media_url(item) for item in captured):
                         break
                 elif captured and (
                     any(_is_high_confidence_video(item) for item in captured)
@@ -960,6 +985,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
     for match in re.finditer(r"https?://[^\"'<>\\\s]+", page_html):
         remember(match.group(0))
+    for match in re.finditer(r'(?:videoUrl|qualityUrl|defaultQuality)[^"\']*["\'](https?://[^"\']+)["\']', page_html):
+        remember(match.group(1).encode("utf-8").decode("unicode_escape"))
 
     ranked = sorted(captured, key=_score_video_resource, reverse=True)
     if not ranked:
@@ -992,6 +1019,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 label = "媒体资源"
         elif _is_douyin_url(normalized_url):
             label = "HLS · 高清线路" if ext == "m3u8" else "MP4 · 高清线路"
+        elif _is_pornhub_url(normalized_url):
+            label = "HLS · 播放器线路" if ext == "m3u8" else "MP4 · 播放器线路"
         elif "mime_type=video" in media_url.lower() and ext == "mp4":
             label = "MP4 · 视频"
         elif ext == "m3u8":
@@ -1173,6 +1202,11 @@ def parse_video(
         "skip_download": True,
     }
     try:
+        if _is_pornhub_url(url) and not use_browser_cookies:
+            try:
+                return parse_browser_sniffed_page(url)
+            except HTTPException:
+                pass
         if _is_youtube_url(url) and not use_browser_cookies:
             try:
                 return parse_browser_sniffed_page(url)
@@ -1285,6 +1319,16 @@ def _run_douyin_public_download(task: DownloadTask) -> bool:
 
 
 def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
+    if "phncdn.com" in media_url.lower() and not _is_signed_pornhub_media_url(media_url):
+        _set_task(
+            task,
+            status="failed",
+            progress=max(task.progress, 1.0),
+            message="下载失败",
+            error="视频 CDN 返回 470 No Token，当前直链缺少签名 token。请粘贴原始视频页面链接重新解析后下载。",
+        )
+        return
+
     ext = _media_ext(media_url)
     output_ext = "mp4" if ext == "m3u8" else ext
     url_hash = hashlib.sha1(media_url.encode("utf-8")).hexdigest()[:8]
