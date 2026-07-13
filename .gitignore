@@ -5,7 +5,8 @@ venv/
 downloads/*
 !downloads/.gitkeep
 downloads/_thumbnails/
-config/
+config/*
+!config/ai.example.json
 
 frontend/node_modules/
 frontend/dist/

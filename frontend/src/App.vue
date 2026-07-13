@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { getRecentLinks, saveRecentLink } from './recentLinks'
+import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
 
 type VideoFormat = {
   format_id: string
@@ -19,6 +21,7 @@ type ParseResult = {
 }
 
 type TaskStatus = 'pending' | 'running' | 'finished' | 'failed'
+type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
 
 type TaskResult = {
   task_id: string
@@ -30,8 +33,32 @@ type TaskResult = {
   error?: string | null
 }
 
-type CookiePlatform = 'bilibili' | 'youtube' | 'pornhub' | 'douyin'
-type BrowserSource = 'chrome' | 'edge' | 'firefox' | 'brave' | 'vivaldi'
+type SubtitleSegment = {
+  start: number
+  end?: number | null
+  timestamp: string
+  text: string
+}
+
+type SummaryResult = {
+  title: string
+  webpage_url: string
+  language: string
+  source: string
+  summary_markdown: string
+  transcript: SubtitleSegment[]
+  markdown_url?: string | null
+  json_url?: string | null
+}
+
+type SummaryTaskResult = {
+  task_id: string
+  status: TaskStatus
+  progress: number
+  message: string
+  error?: string | null
+  result?: SummaryResult | null
+}
 
 type FilePickerWritable = {
   write(data: Blob): Promise<void>
@@ -58,20 +85,22 @@ const url = ref('')
 const selectedFormat = ref('')
 const parseResult = ref<ParseResult | null>(null)
 const task = ref<TaskResult | null>(null)
+const summaryTask = ref<SummaryTaskResult | null>(null)
 const loadingParse = ref(false)
 const loadingDownload = ref(false)
+const loadingSummary = ref(false)
 const savingFile = ref(false)
 const errorMessage = ref('')
 const saveMessage = ref('')
-const cookieMessage = ref('')
+const recentLinks = ref<string[]>([])
+const showRecentLinks = ref(false)
 const pollingTimer = ref<number | undefined>()
+const summaryPollingTimer = ref<number | undefined>()
 const coverFailed = ref(false)
 const saveHandle = ref<FilePickerHandle | null>(null)
-const cookieModalOpen = ref(false)
-const cookieContent = ref('')
-const savingCookies = ref(false)
-const useBrowserCookies = ref(false)
-const browserSource = ref<BrowserSource>('chrome')
+const previewState = ref<PreviewState>('idle')
+const previewUrl = ref('')
+const previewError = ref('')
 
 const supported = [
   { label: 'B站', href: 'https://www.bilibili.com/' },
@@ -83,21 +112,16 @@ const supported = [
 ]
 const perks = [
   { title: '先解析再下载', text: '标题、封面、格式信息先确认，避免盲目保存错误内容。' },
+  { title: '字幕驱动总结', text: '优先提取平台字幕与自动字幕，再生成结构化摘要和时间线。' },
   { title: '选择位置保存', text: '支持浏览器系统保存对话框，把文件保存到你指定的位置。' },
-  { title: '自动合并音频', text: '遇到视频和音频分离的平台格式，默认合并最佳音频流。' },
 ]
-const samples = ['公开课留档', '素材归档', '运营备份', '学习资料整理']
-const browserOptions: Array<{ label: string; value: BrowserSource }> = [
-  { label: 'Chrome', value: 'chrome' },
-  { label: 'Edge', value: 'edge' },
-  { label: 'Firefox', value: 'firefox' },
-  { label: 'Brave', value: 'brave' },
-  { label: 'Vivaldi', value: 'vivaldi' },
-]
+const samples = ['公开课留档', '素材归档', 'AI 视频总结', '字幕笔记整理']
 
 const taskTone = computed(() => task.value?.status || 'idle')
+const summaryTone = computed(() => summaryTask.value?.status || 'idle')
 const canDownload = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingDownload.value))
-const currentPlatform = computed<CookiePlatform | null>(() => detectPlatform(url.value))
+const canSummarize = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingSummary.value))
+const hasRecentLinks = computed(() => recentLinks.value.length > 0)
 const sourceHost = computed(() => {
   const target = parseResult.value?.webpage_url
   if (!target) return ''
@@ -107,46 +131,12 @@ const sourceHost = computed(() => {
     return ''
   }
 })
-const canShowCookieHelp = computed(() => {
-  const text = errorMessage.value.toLowerCase()
-  return Boolean(
-    currentPlatform.value &&
-      (text.includes('cookies') ||
-        text.includes('登录态') ||
-        text.includes('机器人') ||
-        text.includes('412') ||
-        text.includes('410')),
-  )
+const previewFormat = computed(() => {
+  const host = sourceHost.value
+  if (!parseResult.value || (host !== 'douyin.com' && !host.endsWith('.douyin.com'))) return null
+  return selectPreviewFormat(parseResult.value.formats, selectedFormat.value)
 })
-
-function detectPlatform(rawUrl: string): CookiePlatform | null {
-  try {
-    const host = new URL(rawUrl.trim()).hostname.toLowerCase()
-    if (host.includes('bilibili.com') || host.includes('b23.tv')) return 'bilibili'
-    if (host.includes('youtube.com') || host.includes('youtu.be')) return 'youtube'
-    if (host.includes('pornhub.com')) return 'pornhub'
-    if (host.includes('douyin.com') || host.includes('iesdouyin.com')) return 'douyin'
-  } catch {
-    return null
-  }
-  return null
-}
-
-function platformName(platform: CookiePlatform | null) {
-  if (platform === 'bilibili') return 'B站'
-  if (platform === 'youtube') return 'YouTube'
-  if (platform === 'pornhub') return 'PornHub'
-  if (platform === 'douyin') return '抖音'
-  return '当前平台'
-}
-
-function platformLoginUrl(platform: CookiePlatform | null) {
-  if (platform === 'bilibili') return 'https://passport.bilibili.com/login'
-  if (platform === 'youtube') return 'https://accounts.google.com/'
-  if (platform === 'pornhub') return 'https://www.pornhub.com/login'
-  if (platform === 'douyin') return 'https://www.douyin.com/'
-  return '#'
-}
+const canPreview = computed(() => Boolean(previewFormat.value && previewState.value !== 'loading'))
 
 function formatDuration(seconds?: number | null) {
   if (!seconds) return ''
@@ -167,11 +157,86 @@ function safeFilename(name: string, ext: string) {
   return `${clean || 'VideoDream'}-${Date.now()}.${ext}`
 }
 
+function plainMarkdown(markdown?: string | null) {
+  if (!markdown) return ''
+  return markdown
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .trim()
+}
+
 function suggestedExtension() {
   const selected = parseResult.value?.formats.find((item) => item.format_id === selectedFormat.value)
   const ext = selected?.ext?.toLowerCase()
   if (ext === 'm4a' || ext === 'mp3' || selected?.label.includes('音频')) return 'm4a'
   return 'mp4'
+}
+
+function stopSummaryPolling() {
+  if (summaryPollingTimer.value) {
+    window.clearInterval(summaryPollingTimer.value)
+    summaryPollingTimer.value = undefined
+  }
+}
+
+function loadRecentLinks() {
+  recentLinks.value = getRecentLinks(window.localStorage)
+}
+
+function rememberRecentLink(target: string) {
+  recentLinks.value = saveRecentLink(window.localStorage, target)
+}
+
+function selectRecentLink(target: string) {
+  url.value = target
+  showRecentLinks.value = false
+}
+
+function hideRecentLinksSoon() {
+  window.setTimeout(() => {
+    showRecentLinks.value = false
+  }, 120)
+}
+
+async function startSummary() {
+  const target = url.value.trim()
+  if (!target) return
+  errorMessage.value = ''
+  saveMessage.value = ''
+  loadingSummary.value = true
+  summaryTask.value = null
+  stopSummaryPolling()
+
+  try {
+    const response = await fetch('/api/summaries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: target }),
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    const data: { task_id: string } = await response.json()
+    await pollSummary(data.task_id)
+    summaryPollingTimer.value = window.setInterval(() => pollSummary(data.task_id), 1400)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '总结任务创建失败。'
+  } finally {
+    loadingSummary.value = false
+  }
+}
+
+async function pollSummary(taskId: string) {
+  try {
+    const response = await fetch(`/api/summaries/${taskId}`)
+    if (!response.ok) throw new Error(await readApiError(response))
+    summaryTask.value = await response.json()
+    if (summaryTask.value?.status === 'finished' || summaryTask.value?.status === 'failed') {
+      stopSummaryPolling()
+    }
+  } catch (error) {
+    stopSummaryPolling()
+    errorMessage.value = error instanceof Error ? error.message : '总结任务状态查询失败。'
+  }
 }
 
 async function chooseSaveHandle() {
@@ -201,31 +266,72 @@ async function readApiError(response: Response) {
   }
 }
 
+function resetPreview() {
+  previewState.value = 'idle'
+  previewUrl.value = ''
+  previewError.value = ''
+}
+
+function handlePreviewError() {
+  previewUrl.value = ''
+  previewState.value = 'error'
+  previewError.value = '视频连接失败，请重新解析或稍后重试。'
+}
+
+function handlePreviewReady() {
+  previewState.value = 'ready'
+}
+
+async function startPreview() {
+  const result = parseResult.value
+  const format = previewFormat.value
+  const target = result?.webpage_url || url.value.trim()
+  if (!result || !format || !target || previewState.value === 'loading') return
+
+  previewState.value = 'loading'
+  previewUrl.value = ''
+  previewError.value = ''
+
+  try {
+    const response = await fetch('/api/previews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: target, format_id: format.format_id }),
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    const localPreviewUrl = readPreviewUrl(await response.json())
+    if (!localPreviewUrl) throw new Error('预览接口返回了无效地址。')
+    previewUrl.value = localPreviewUrl
+  } catch (error) {
+    previewState.value = 'error'
+    previewError.value = error instanceof Error ? error.message : '视频连接失败，请稍后重试。'
+  }
+}
+
 async function parseVideo() {
   const target = url.value.trim()
   if (!target) {
     errorMessage.value = '请先粘贴一个公开视频链接。'
     return
   }
+  rememberRecentLink(target)
   errorMessage.value = ''
   saveMessage.value = ''
-  cookieMessage.value = ''
+  resetPreview()
   parseResult.value = null
   task.value = null
+  summaryTask.value = null
   selectedFormat.value = ''
   coverFailed.value = false
   saveHandle.value = null
+  stopSummaryPolling()
   loadingParse.value = true
 
   try {
     const response = await fetch('/api/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: target,
-        use_browser_cookies: useBrowserCookies.value,
-        browser: browserSource.value,
-      }),
+      body: JSON.stringify({ url: target }),
     })
     if (!response.ok) throw new Error(await readApiError(response))
     parseResult.value = await response.json()
@@ -234,56 +340,6 @@ async function parseVideo() {
     errorMessage.value = error instanceof Error ? error.message : '解析失败，请确认链接是否公开可访问。'
   } finally {
     loadingParse.value = false
-  }
-}
-
-function openCookieModal() {
-  cookieContent.value = ''
-  cookieMessage.value = ''
-  cookieModalOpen.value = true
-}
-
-function openPlatformLogin() {
-  const target = platformLoginUrl(currentPlatform.value)
-  if (target !== '#') window.open(target, '_blank', 'noreferrer')
-}
-
-async function importCookieFile(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  cookieContent.value = await file.text()
-  cookieMessage.value = `已读取 ${file.name}，请确认后保存并重试。`
-  input.value = ''
-}
-
-async function saveCookiesAndRetry() {
-  const platform = currentPlatform.value
-  if (!platform) {
-    cookieMessage.value = '无法识别当前链接平台。'
-    return
-  }
-  savingCookies.value = true
-  cookieMessage.value = ''
-
-  try {
-    const response = await fetch('/api/cookies', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        platform,
-        content: cookieContent.value,
-      }),
-    })
-    if (!response.ok) throw new Error(await readApiError(response))
-    cookieModalOpen.value = false
-    cookieContent.value = ''
-    cookieMessage.value = `${platformName(platform)} cookies 已保存，正在重新解析。`
-    await parseVideo()
-  } catch (error) {
-    cookieMessage.value = error instanceof Error ? error.message : '保存 cookies 失败。'
-  } finally {
-    savingCookies.value = false
   }
 }
 
@@ -311,8 +367,6 @@ async function startDownload() {
       body: JSON.stringify({
         url: target,
         format_id: selectedFormat.value || undefined,
-        use_browser_cookies: useBrowserCookies.value,
-        browser: browserSource.value,
       }),
     })
     if (!response.ok) throw new Error(await readApiError(response))
@@ -388,7 +442,14 @@ function stopPolling() {
   }
 }
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  stopSummaryPolling()
+})
+
+onMounted(() => {
+  loadRecentLinks()
+})
 </script>
 
 <template>
@@ -425,54 +486,76 @@ onBeforeUnmount(stopPolling)
             <span>解析工作台</span>
             <strong>yt-dlp powered</strong>
           </div>
-          <div class="search-bar">
-            <span class="search-icon">⌕</span>
-            <input
-              v-model="url"
-              type="url"
-              placeholder="粘贴公开视频链接，例如 https://..."
-              @keyup.enter="parseVideo"
-            />
-            <button :disabled="loadingParse" @click="parseVideo">
-              {{ loadingParse ? '解析中' : '解析' }}
-            </button>
+          <div class="search-area">
+            <div class="search-bar">
+              <span class="search-icon">⌕</span>
+              <input
+                v-model="url"
+                type="url"
+                placeholder="粘贴公开视频链接，例如 https://..."
+                autocomplete="off"
+                @focus="showRecentLinks = true"
+                @blur="hideRecentLinksSoon"
+                @keyup.enter="parseVideo"
+              />
+              <button :disabled="loadingParse" @click="parseVideo">
+                {{ loadingParse ? '解析中' : '解析' }}
+              </button>
+            </div>
+            <div v-if="showRecentLinks && hasRecentLinks" class="recent-links" aria-label="最近输入链接">
+              <button
+                v-for="item in recentLinks"
+                :key="item"
+                type="button"
+                @mousedown.prevent="selectRecentLink(item)"
+              >
+                <span>最近</span>
+                <strong>{{ item }}</strong>
+              </button>
+            </div>
           </div>
-
-          <div class="auth-strip">
-            <label class="switch-line">
-              <input v-model="useBrowserCookies" type="checkbox" />
-              <span>本机授权模式</span>
-            </label>
-            <label class="browser-picker">
-              <span>读取</span>
-              <select v-model="browserSource" :disabled="!useBrowserCookies">
-                <option v-for="item in browserOptions" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-              <span>已登录状态</span>
-            </label>
-          </div>
-          <p v-if="useBrowserCookies" class="auth-hint">
-            仅在你的电脑本机调用 yt-dlp 读取所选浏览器登录态，不在页面展示 Cookie，也不写入项目配置文件。
-          </p>
 
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
           <p v-if="saveMessage" class="success-text">{{ saveMessage }}</p>
-          <p v-if="cookieMessage" class="success-text">{{ cookieMessage }}</p>
-          <button v-if="canShowCookieHelp" class="secondary-action" @click="openCookieModal">
-            使用 {{ platformName(currentPlatform) }} 授权 cookies 兜底
-          </button>
 
           <div v-if="parseResult" class="result-card">
             <div class="cover-wrap">
-              <img
-                v-if="parseResult.thumbnail && !coverFailed"
-                :src="parseResult.thumbnail"
-                :alt="parseResult.title"
-                @error="coverFailed = true"
+              <video
+                v-if="previewUrl"
+                :src="previewUrl"
+                :poster="parseResult.thumbnail || undefined"
+                controls
+                playsinline
+                preload="metadata"
+                @loadedmetadata="handlePreviewReady"
+                @error="handlePreviewError"
               />
-              <div v-else class="cover-empty">VD</div>
+              <template v-else>
+                <img
+                  v-if="parseResult.thumbnail && !coverFailed"
+                  :src="parseResult.thumbnail"
+                  :alt="parseResult.title"
+                  @error="coverFailed = true"
+                />
+                <div v-else class="cover-empty">VD</div>
+                <button
+                  v-if="canPreview"
+                  type="button"
+                  class="preview-play-button"
+                  :aria-label="previewState === 'error' ? '重新连接视频' : '播放视频'"
+                  :title="previewState === 'error' ? '重新连接视频' : '播放视频'"
+                  @click="startPreview"
+                >
+                  {{ previewState === 'error' ? '↻' : '▶' }}
+                </button>
+              </template>
+              <div v-if="previewState === 'loading'" class="preview-loading" role="status">
+                <span class="preview-spinner" aria-hidden="true"></span>
+                <span>正在连接视频</span>
+              </div>
+              <p v-if="previewState === 'error' && previewError" class="preview-error">
+                {{ previewError }}
+              </p>
             </div>
             <div class="video-meta">
               <span class="status-chip">解析成功</span>
@@ -491,7 +574,7 @@ onBeforeUnmount(stopPolling)
               </div>
               <label class="format-select">
                 <span>下载格式</span>
-                <select v-model="selectedFormat">
+                <select v-model="selectedFormat" @change="resetPreview">
                   <option value="">自动选择最佳格式</option>
                   <option v-for="item in parseResult.formats" :key="item.format_id" :value="item.format_id">
                     {{ item.label }}
@@ -501,6 +584,41 @@ onBeforeUnmount(stopPolling)
               <button class="primary-action" :disabled="!canDownload" @click="startDownload">
                 {{ loadingDownload ? '准备文件中' : '选择位置并下载' }}
               </button>
+              <button class="secondary-action full-width" :disabled="!canSummarize" @click="startSummary">
+                {{ loadingSummary ? '启动总结中' : '生成 AI 总结' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="summaryTask" class="summary-card" :class="`tone-${summaryTone}`">
+            <div class="task-head">
+              <span>{{ summaryTask.status === 'finished' ? '总结完成' : summaryTask.status === 'failed' ? '总结失败' : '正在总结' }}</span>
+              <strong>{{ Math.round(summaryTask.progress) }}%</strong>
+            </div>
+            <div class="progress-track">
+              <span :style="{ width: `${Math.max(4, summaryTask.progress)}%` }"></span>
+            </div>
+            <p class="summary-message">{{ summaryTask.error || summaryTask.message }}</p>
+
+            <div v-if="summaryTask.result" class="summary-result">
+              <div class="summary-meta">
+                <span>{{ summaryTask.result.source }}</span>
+                <span>{{ summaryTask.result.language }}</span>
+                <span>{{ summaryTask.result.transcript.length }} 条字幕</span>
+              </div>
+              <div class="summary-actions">
+                <a v-if="summaryTask.result.markdown_url" :href="summaryTask.result.markdown_url" download>下载 Markdown</a>
+                <a v-if="summaryTask.result.json_url" :href="summaryTask.result.json_url" download>下载 JSON</a>
+              </div>
+              <section class="summary-text" aria-label="AI 总结">
+                <pre>{{ plainMarkdown(summaryTask.result.summary_markdown) }}</pre>
+              </section>
+              <section class="transcript-list" aria-label="字幕文本">
+                <div v-for="item in summaryTask.result.transcript.slice(0, 80)" :key="`${item.timestamp}-${item.text}`">
+                  <time>{{ item.timestamp }}</time>
+                  <span>{{ item.text }}</span>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -544,42 +662,5 @@ onBeforeUnmount(stopPolling)
         <span>请仅下载你拥有权利、获得授权或平台允许保存的公开视频内容。VideoDream 不提供登录代办、会员内容下载或规避访问限制能力。</span>
       </section>
     </main>
-
-    <div v-if="cookieModalOpen" class="modal-mask" role="dialog" aria-modal="true" aria-label="填写 cookies">
-      <section class="cookie-modal">
-        <div class="modal-head">
-          <div>
-            <span class="eyebrow">{{ platformName(currentPlatform) }} cookies</span>
-            <h2>粘贴 Netscape 格式 cookies</h2>
-          </div>
-          <button class="icon-button" aria-label="关闭" @click="cookieModalOpen = false">×</button>
-        </div>
-        <p>
-          cookies 只会保存到本机项目目录的 <code>config</code> 文件夹，用于 yt-dlp
-          解析当前平台。请只粘贴你本人账号导出的 Netscape 格式内容。
-        </p>
-        <div class="cookie-tools">
-          <button class="secondary-action compact" @click="openPlatformLogin">
-            打开 {{ platformName(currentPlatform) }} 登录页
-          </button>
-          <label class="secondary-action compact file-trigger">
-            上传 cookies.txt
-            <input type="file" accept=".txt,text/plain" @change="importCookieFile" />
-          </label>
-        </div>
-        <textarea
-          v-model="cookieContent"
-          spellcheck="false"
-          placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;FALSE&#9;..."
-        ></textarea>
-        <p v-if="cookieMessage" class="error-text">{{ cookieMessage }}</p>
-        <div class="modal-actions">
-          <button class="secondary-action compact" @click="cookieModalOpen = false">取消</button>
-          <button class="primary-action compact" :disabled="savingCookies" @click="saveCookiesAndRetry">
-            {{ savingCookies ? '保存中' : '保存并重试' }}
-          </button>
-        </div>
-      </section>
-    </div>
   </div>
 </template>
