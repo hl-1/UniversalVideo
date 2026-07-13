@@ -19,6 +19,7 @@
 - B 站 API 网络错误、非零业务码和异常响应均回退 yt-dlp。
 - 匿名接口返回 `need_login_subtitle` 时，按 Firefox、Chrome、Edge 顺序尝试读取本机浏览器登录态；只使用 `.bilibili.com` Cookie，且必须存在 `SESSDATA`，Cookie 不写盘、不记录。
 - 字幕地址以 `//` 开头时规范化为 `https://`。
+- `ai-*` 语言代码按对应基础语言参与优先级排序；`type=1`、`ai-*` 或非零 `ai_type` 的字幕统一标记为自动字幕。
 - 两种方式均未命中时返回“平台字幕 API 和 yt-dlp 均未找到可用字幕”。
 
 ## 测试

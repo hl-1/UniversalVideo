@@ -50,6 +50,11 @@ class FakeResponse:
 
 
 class SummarySourceTests(unittest.TestCase):
+    def test_bilibili_ai_subtitle_is_classified_as_automatic(self):
+        self.assertEqual(main._bilibili_subtitle_source({"lan": "ai-zh", "type": 1, "ai_type": 0}), "automatic")
+        self.assertEqual(main._bilibili_subtitle_source({"lan": "zh-CN", "type": 0, "ai_type": 0}), "manual")
+        self.assertEqual(main._language_rank("ai-zh")[0], main._language_rank("zh")[0])
+
     def test_bilibili_cookie_header_only_uses_bilibili_login_cookies(self):
         jar = CookieJar()
         for name, value, domain in [

@@ -549,6 +549,8 @@ def _parse_subtitle_content(content: str, ext: str) -> list[SubtitleSegment]:
 
 def _language_rank(language: str) -> tuple[int, str]:
     lowered = language.lower()
+    if lowered.startswith("ai-"):
+        lowered = lowered.removeprefix("ai-")
     for index, preferred in enumerate(SUBTITLE_LANGUAGE_PRIORITY):
         preferred_lower = preferred.lower()
         if lowered == preferred_lower or lowered.startswith(f"{preferred_lower}-"):
@@ -650,6 +652,11 @@ def _bilibili_cookie_header(cookie_jar: Any) -> str:
     return "; ".join(f"{name}={value}" for name, value in sorted(cookies.items()))
 
 
+def _bilibili_subtitle_source(subtitle: dict[str, Any]) -> str:
+    language = str(subtitle.get("lan") or "").lower()
+    return "automatic" if language.startswith("ai-") or subtitle.get("type") == 1 or subtitle.get("ai_type") else "manual"
+
+
 def _extract_bilibili_browser_cookie_header() -> str:
     for browser_name in ("firefox", "chrome", "edge"):
         try:
@@ -734,7 +741,7 @@ def _extract_bilibili_api_summary_source(
             "uploader": str(owner.get("name") or ""),
             "webpage_url": url,
         }
-        source = "automatic" if subtitle.get("ai_type") else "manual"
+        source = _bilibili_subtitle_source(subtitle)
         return info, str(subtitle.get("lan") or "zh"), source, segments
     except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError) as exc:
         logger.warning("Bilibili subtitle API failed: %s", type(exc).__name__)
