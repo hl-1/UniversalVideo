@@ -4,63 +4,72 @@ import re
 import json
 import hashlib
 import html
+import logging
+import os
+import secrets
 import subprocess
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from openai import OpenAI
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field, HttpUrl
 from yt_dlp import YoutubeDL
+from yt_dlp.cookies import extract_cookies_from_browser
 from yt_dlp.utils import DownloadError
 
+
+logger = logging.getLogger("videodream.summary")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DOWNLOAD_DIR = ROOT_DIR / "downloads"
 THUMBNAIL_DIR = DOWNLOAD_DIR / "_thumbnails"
+SUMMARY_DIR = DOWNLOAD_DIR / "_summaries"
 CONFIG_DIR = ROOT_DIR / "config"
+AI_CONFIG_PATH = CONFIG_DIR / "ai.json"
 FFMPEG_DIR = Path(r"C:\softWare\environment\ffmpeg")
 NODE_EXE = Path(r"C:\softWare\environment\nodejs\node.exe")
 CHROME_EXE = Path(r"C:\Users\11871\AppData\Local\Google\Chrome\Application\chrome.exe")
 EDGE_EXE = Path(r"C:\Program Files (x86)\Microsoft\EdgeCore\126.0.2592.113\msedge.exe")
-BILIBILI_COOKIES_FILE = CONFIG_DIR / "bilibili-cookies.txt"
-PORNHUB_COOKIES_FILE = CONFIG_DIR / "pornhub-cookies.txt"
-YOUTUBE_COOKIES_FILE = CONFIG_DIR / "youtube-cookies.txt"
-DOUYIN_COOKIES_FILE = CONFIG_DIR / "douyin-cookies.txt"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 THUMBNAIL_DIR.mkdir(exist_ok=True)
-CONFIG_DIR.mkdir(exist_ok=True)
+SUMMARY_DIR.mkdir(exist_ok=True)
 
 TaskStatus = Literal["pending", "running", "finished", "failed"]
-BrowserCookieSource = Literal["auto", "chrome", "edge", "firefox", "brave", "vivaldi"]
-BrowserCookieProvider = Literal["chrome", "edge", "firefox", "brave", "vivaldi"]
 
 
 class ParseRequest(BaseModel):
     url: HttpUrl
-    use_browser_cookies: bool = False
-    browser: BrowserCookieSource = "auto"
 
 
 class DownloadRequest(BaseModel):
     url: HttpUrl
     format_id: str | None = Field(default=None, max_length=4096)
-    use_browser_cookies: bool = False
-    browser: BrowserCookieSource = "auto"
 
 
-class CookiesRequest(BaseModel):
-    platform: Literal["bilibili", "youtube", "pornhub", "douyin"]
-    content: str = Field(min_length=20)
+class SummaryRequest(BaseModel):
+    url: HttpUrl
+
+
+class PreviewRequest(BaseModel):
+    url: HttpUrl
+    format_id: str = Field(min_length=1, max_length=4096)
+
+
+class PreviewResponse(BaseModel):
+    preview_url: str
+    expires_in: int
 
 
 class FormatInfo(BaseModel):
@@ -84,6 +93,37 @@ class DownloadResponse(BaseModel):
     task_id: str
 
 
+class SubtitleSegment(BaseModel):
+    start: float
+    end: float | None = None
+    timestamp: str
+    text: str
+
+
+class SummaryResult(BaseModel):
+    title: str
+    webpage_url: str
+    language: str
+    source: str
+    summary_markdown: str
+    transcript: list[SubtitleSegment]
+    markdown_url: str | None = None
+    json_url: str | None = None
+
+
+class SummaryResponse(BaseModel):
+    task_id: str
+
+
+class SummaryTaskResponse(BaseModel):
+    task_id: str
+    status: TaskStatus
+    progress: float = 0
+    message: str = ""
+    error: str | None = None
+    result: SummaryResult | None = None
+
+
 class TaskResponse(BaseModel):
     task_id: str
     status: TaskStatus
@@ -100,14 +140,10 @@ class DownloadTask:
         task_id: str,
         url: str,
         format_id: str | None,
-        use_browser_cookies: bool = False,
-        browser: BrowserCookieSource = "auto",
     ) -> None:
         self.task_id = task_id
         self.url = normalize_url(url)
         self.format_id = format_id
-        self.use_browser_cookies = use_browser_cookies
-        self.browser = browser
         self.status: TaskStatus = "pending"
         self.progress = 0.0
         self.message = "等待下载任务开始"
@@ -129,6 +165,29 @@ class DownloadTask:
         )
 
 
+class SummaryTask:
+    def __init__(self, task_id: str, url: str) -> None:
+        self.task_id = task_id
+        self.url = normalize_url(url)
+        self.status: TaskStatus = "pending"
+        self.progress = 0.0
+        self.message = "等待总结任务开始"
+        self.error: str | None = None
+        self.result: SummaryResult | None = None
+        self.created_at = time.time()
+        self.updated_at = time.time()
+
+    def to_response(self) -> SummaryTaskResponse:
+        return SummaryTaskResponse(
+            task_id=self.task_id,
+            status=self.status,
+            progress=round(self.progress, 2),
+            message=self.message,
+            error=self.error,
+            result=self.result,
+        )
+
+
 app = FastAPI(title="VideoDream API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -145,17 +204,18 @@ app.add_middleware(
 
 tasks: dict[str, DownloadTask] = {}
 tasks_lock = threading.Lock()
+summary_tasks: dict[str, SummaryTask] = {}
+summary_tasks_lock = threading.Lock()
 executor = ThreadPoolExecutor(max_workers=2)
 sniff_cache: dict[str, tuple[float, ParseResponse]] = {}
 sniff_cache_lock = threading.Lock()
 SNIFF_CACHE_TTL_SECONDS = 600
-
-COOKIE_FILES = {
-    "bilibili": BILIBILI_COOKIES_FILE,
-    "youtube": YOUTUBE_COOKIES_FILE,
-    "pornhub": PORNHUB_COOKIES_FILE,
-    "douyin": DOUYIN_COOKIES_FILE,
-}
+PREVIEW_TTL_SECONDS = 600
+PREVIEW_RANGE_PATTERN = re.compile(r"^bytes=(?:\d+-\d*|-\d+)$")
+SUBTITLE_LANGUAGE_PRIORITY = ("zh-CN", "zh-Hans", "zh", "zh-TW", "zh-Hant", "en")
+SUBTITLE_FORMAT_PRIORITY = ("vtt", "srt", "json3", "json", "srv3", "ttml", "xml")
+MAX_SUMMARY_TRANSCRIPT_CHARS = 28000
+MAX_TRANSCRIPT_SEGMENTS_IN_RESPONSE = 500
 
 DOUYIN_API_URL = "https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/"
 DEFAULT_HEADERS = {
@@ -186,6 +246,17 @@ VIDEO_CDN_PATTERN = re.compile(
     r"(douyinvod\.com|googlevideo\.com/videoplayback|phncdn\.com|pornhub.*(?:mp4|m3u8)|mime_type=video_|/aweme/v1/play/|\.mp4(?:\?|$)|\.m3u8(?:\?|$)|\.webm(?:\?|$)|\.mov(?:\?|$))",
     re.IGNORECASE,
 )
+
+
+@dataclass(frozen=True)
+class PreviewSession:
+    media_url: str
+    referer: str
+    expires_at: float
+
+
+preview_sessions: dict[str, PreviewSession] = {}
+preview_sessions_lock = threading.Lock()
 
 
 def _host(url: str) -> str:
@@ -281,14 +352,12 @@ def _clean_error(error: Exception, url: str | None = None) -> str:
     if url and _is_bilibili_url(url) and "412" in text:
         return (
             "B站接口返回 412，通常是请求头或登录态校验导致。"
-            "可以开启前端“本机授权模式”，让系统在你的电脑上读取已登录浏览器状态后重试。"
+            "当前版本仅支持无需 Cookie 的公开资源，请确认链接可公开访问后重试。"
         )
     if url and _is_pornhub_url(url) and "410" in text:
         return (
             "目标站点返回 410 Gone，表示该视频页面已删除、下架、地区不可访问，"
-            "或需要站点侧登录/年龄校验后才可访问。系统已补充常规浏览器请求头；"
-            "如果你确认浏览器中能正常打开，请导出你本人账号的 cookies 到 "
-            "config/pornhub-cookies.txt 后重试。"
+            "或需要站点侧登录/年龄校验后才可访问。当前版本仅支持无需 Cookie 的公开资源。"
         )
     if "No Token" in text or ("470" in text and "phncdn" in text):
         return (
@@ -301,32 +370,547 @@ def _clean_error(error: Exception, url: str | None = None) -> str:
         or "cookies" in text.lower()
     ):
         return (
-            "YouTube 要求确认不是机器人或需要登录态。请导出你本人浏览器中的 YouTube cookies "
-            "到 config/youtube-cookies.txt，或开启前端“本机授权模式”后重试。"
+            "YouTube 要求确认不是机器人或需要登录态。当前版本仅支持无需 Cookie 的公开资源。"
         )
     if url and _is_douyin_url(url) and "cookies" in text.lower():
         return (
             "抖音公开视频解析失败。系统已先尝试专用公开解析模块，再回退 yt-dlp；"
             "如果仍提示 fresh cookies，通常是平台签名参数、风控或访问权限变化导致。"
-            "可以开启前端“本机授权模式”后重试。"
+            "当前版本不再依赖 Cookie，请稍后重试或更换公开链接。"
         )
     if url and _is_douyin_url(url) and ("encrypt_data" in text.lower() or "11110" in text):
         return "抖音公开接口要求加密参数，当前链接无法通过旧公开 API 直接解析，系统会继续尝试 yt-dlp 兜底。"
     return text or "处理失败，请确认链接是否公开可访问。"
 
 
-def _validate_cookie_content(content: str) -> str:
-    normalized = content.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="cookies 内容不能为空。")
-    if "\t" not in normalized and "# Netscape HTTP Cookie File" not in normalized:
-        raise HTTPException(
-            status_code=400,
-            detail="请粘贴 Netscape 格式 cookies 文件内容，而不是浏览器 Cookie 请求头。",
+def _set_summary_task(task: SummaryTask, **changes: Any) -> None:
+    with summary_tasks_lock:
+        for key, value in changes.items():
+            setattr(task, key, value)
+        task.updated_at = time.time()
+
+
+def _safe_filename_stem(value: str) -> str:
+    clean = re.sub(r'[\\/:*?"<>|\s]+', " ", value).strip()[:80]
+    return clean or "VideoDream"
+
+
+def _format_timestamp(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _parse_timestamp(value: str) -> float:
+    text = value.strip().replace(",", ".")
+    parts = text.split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _clean_subtitle_text(value: str) -> str:
+    text = html.unescape(value)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\{\\.*?\}", " ", text)
+    text = re.sub(r"\\[Nn]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _dedupe_segments(segments: list[SubtitleSegment]) -> list[SubtitleSegment]:
+    deduped: list[SubtitleSegment] = []
+    previous_key = ""
+    for segment in sorted(segments, key=lambda item: item.start):
+        clean_text = _clean_subtitle_text(segment.text)
+        if not clean_text:
+            continue
+        key = f"{round(segment.start, 1)}:{clean_text}"
+        repeated_text = deduped and deduped[-1].text == clean_text
+        if key == previous_key or repeated_text:
+            continue
+        previous_key = key
+        deduped.append(
+            SubtitleSegment(
+                start=segment.start,
+                end=segment.end,
+                timestamp=_format_timestamp(segment.start),
+                text=clean_text,
+            )
         )
-    if "# Netscape HTTP Cookie File" not in normalized:
-        normalized = "# Netscape HTTP Cookie File\n" + normalized
-    return normalized + "\n"
+    return deduped
+
+
+def _parse_vtt_or_srt(content: str) -> list[SubtitleSegment]:
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = re.split(r"\n{2,}", normalized)
+    segments: list[SubtitleSegment] = []
+    time_pattern = re.compile(
+        r"(?P<start>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{1,3}|\d{1,2}:\d{2}:\d{2})\s*-->\s*"
+        r"(?P<end>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{1,3}|\d{1,2}:\d{2}:\d{2})"
+    )
+    for block in blocks:
+        lines = [line.strip() for line in block.split("\n") if line.strip()]
+        if not lines:
+            continue
+        timing_index = next((index for index, line in enumerate(lines) if "-->" in line), -1)
+        if timing_index < 0:
+            continue
+        match = time_pattern.search(lines[timing_index])
+        if not match:
+            continue
+        text = " ".join(lines[timing_index + 1 :])
+        start = _parse_timestamp(match.group("start"))
+        end = _parse_timestamp(match.group("end"))
+        segments.append(
+            SubtitleSegment(
+                start=start,
+                end=end,
+                timestamp=_format_timestamp(start),
+                text=text,
+            )
+        )
+    return _dedupe_segments(segments)
+
+
+def _json3_events_to_segments(events: list[dict[str, Any]]) -> list[SubtitleSegment]:
+    segments: list[SubtitleSegment] = []
+    for event in events:
+        start_ms = event.get("tStartMs")
+        if start_ms is None:
+            continue
+        duration_ms = event.get("dDurationMs")
+        pieces = event.get("segs") or []
+        text = "".join(str(piece.get("utf8") or "") for piece in pieces if isinstance(piece, dict))
+        start = float(start_ms) / 1000
+        end = start + float(duration_ms or 0) / 1000 if duration_ms else None
+        segments.append(
+            SubtitleSegment(
+                start=start,
+                end=end,
+                timestamp=_format_timestamp(start),
+                text=text,
+            )
+        )
+    return _dedupe_segments(segments)
+
+
+def _bilibili_json_body_to_segments(body: list[dict[str, Any]]) -> list[SubtitleSegment]:
+    segments: list[SubtitleSegment] = []
+    for item in body:
+        start_value = item.get("from")
+        if start_value is None:
+            continue
+        try:
+            start = float(start_value)
+            end_value = item.get("to")
+            end = float(end_value) if end_value is not None else None
+        except (TypeError, ValueError):
+            continue
+        segments.append(
+            SubtitleSegment(
+                start=start,
+                end=end,
+                timestamp=_format_timestamp(start),
+                text=str(item.get("content") or ""),
+            )
+        )
+    return _dedupe_segments(segments)
+
+
+def _parse_subtitle_content(content: str, ext: str) -> list[SubtitleSegment]:
+    normalized_ext = ext.lower()
+    if normalized_ext in {"json", "json3"}:
+        try:
+            payload = json.loads(content)
+            if isinstance(payload, dict):
+                events = payload.get("events")
+                if isinstance(events, list):
+                    return _json3_events_to_segments(events)
+                body = payload.get("body")
+                if isinstance(body, list):
+                    return _bilibili_json_body_to_segments(body)
+        except json.JSONDecodeError:
+            return []
+        return []
+    return _parse_vtt_or_srt(content)
+
+
+def _language_rank(language: str) -> tuple[int, str]:
+    lowered = language.lower()
+    for index, preferred in enumerate(SUBTITLE_LANGUAGE_PRIORITY):
+        preferred_lower = preferred.lower()
+        if lowered == preferred_lower or lowered.startswith(f"{preferred_lower}-"):
+            return index, language
+    return len(SUBTITLE_LANGUAGE_PRIORITY), language
+
+
+def _format_rank(ext: str) -> int:
+    normalized = ext.lower()
+    try:
+        return SUBTITLE_FORMAT_PRIORITY.index(normalized)
+    except ValueError:
+        return len(SUBTITLE_FORMAT_PRIORITY)
+
+
+def _select_subtitle(info: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
+    candidates: list[tuple[tuple[int, str, int], str, str, dict[str, Any]]] = []
+    for source_key, source_label in (("subtitles", "manual"), ("automatic_captions", "automatic")):
+        subtitle_map = info.get(source_key)
+        if not isinstance(subtitle_map, dict):
+            continue
+        for language, formats in subtitle_map.items():
+            if str(language).lower() == "danmaku":
+                continue
+            if not isinstance(formats, list):
+                continue
+            language_rank = _language_rank(str(language))
+            for item in formats:
+                if not isinstance(item, dict) or not item.get("url"):
+                    continue
+                ext = str(item.get("ext") or "").lower()
+                candidates.append(((*language_rank, _format_rank(ext)), str(language), source_label, item))
+    if not candidates:
+        return None
+    _, language, source, subtitle = sorted(candidates, key=lambda item: item[0])[0]
+    return language, source, subtitle
+
+
+def _download_subtitle(subtitle: dict[str, Any], referer: str) -> tuple[str, str]:
+    subtitle_url = str(subtitle.get("url") or "")
+    ext = str(subtitle.get("ext") or Path(urlparse(subtitle_url).path).suffix.lstrip(".") or "vtt").lower()
+    if not subtitle_url:
+        raise RuntimeError("字幕地址为空。")
+    response = requests.get(
+        subtitle_url,
+        headers={**DEFAULT_HEADERS, "Referer": referer},
+        timeout=(10, 45),
+    )
+    response.raise_for_status()
+    response.encoding = response.encoding or "utf-8"
+    return response.text, ext
+
+
+def _is_cookie_error(error: Exception) -> bool:
+    return "cookies" in str(error).lower()
+
+
+def _extract_douyin_page_text_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[SubtitleSegment]]:
+    parsed = parse_video(url)
+    lines = []
+    title = parsed.title.strip() if parsed.title else "抖音视频"
+    if title:
+        lines.append(f"视频标题：{title}")
+    if parsed.uploader:
+        lines.append(f"作者：{parsed.uploader}")
+    if parsed.duration:
+        lines.append(f"时长：{_format_timestamp(parsed.duration)}")
+
+    text = "\n".join(lines).strip()
+    if not text:
+        raise RuntimeError("抖音没有可用字幕或页面文案，暂时无法生成总结。")
+
+    return (
+        {
+            "title": title,
+            "webpage_url": parsed.webpage_url or url,
+        },
+        "zh-CN",
+        "page_text",
+        [
+            SubtitleSegment(
+                start=0.0,
+                end=None,
+                timestamp="0:00",
+                text=text,
+            )
+        ],
+    )
+
+
+def _bilibili_cookie_header(cookie_jar: Any) -> str:
+    cookies = {
+        cookie.name: cookie.value
+        for cookie in cookie_jar
+        if str(cookie.domain).lower().lstrip(".").endswith("bilibili.com")
+    }
+    if not cookies.get("SESSDATA"):
+        return ""
+    return "; ".join(f"{name}={value}" for name, value in sorted(cookies.items()))
+
+
+def _extract_bilibili_browser_cookie_header() -> str:
+    for browser_name in ("firefox", "chrome", "edge"):
+        try:
+            header = _bilibili_cookie_header(extract_cookies_from_browser(browser_name))
+            if header:
+                return header
+        except Exception as exc:
+            logger.warning("Bilibili cookie extraction failed for %s: %s", browser_name, type(exc).__name__)
+            continue
+    return ""
+
+
+def _extract_bilibili_api_summary_source(
+    url: str,
+) -> tuple[dict[str, Any], str, str, list[SubtitleSegment]] | None:
+    match = re.search(r"/video/(BV[0-9A-Za-z]+)", url, flags=re.IGNORECASE)
+    if not match:
+        return None
+    bvid = match.group(1)
+    headers = {**DEFAULT_HEADERS, "Referer": url}
+    try:
+        view_response = requests.get(
+            "https://api.bilibili.com/x/web-interface/view",
+            params={"bvid": bvid},
+            headers=headers,
+            timeout=(10, 30),
+        )
+        view_response.raise_for_status()
+        view_payload = view_response.json()
+        view_data = view_payload.get("data") if isinstance(view_payload, dict) else None
+        if view_payload.get("code") != 0 or not isinstance(view_data, dict):
+            return None
+        pages = view_data.get("pages")
+        if not isinstance(pages, list) or not pages:
+            return None
+        page_number = max(1, _safe_int(parse_qs(urlparse(url).query).get("p", [1])[0]) or 1)
+        page = next((item for item in pages if isinstance(item, dict) and item.get("page") == page_number), pages[0])
+        cid = page.get("cid") if isinstance(page, dict) else None
+        if not cid:
+            return None
+
+        def load_player_payload(request_headers: dict[str, str]) -> dict[str, Any]:
+            response = requests.get(
+                "https://api.bilibili.com/x/player/v2",
+                params={"bvid": bvid, "cid": cid},
+                headers=request_headers,
+                timeout=(10, 30),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {}
+
+        player_payload = load_player_payload(headers)
+        player_data = player_payload.get("data") if isinstance(player_payload.get("data"), dict) else {}
+        subtitle_data = player_data.get("subtitle") if isinstance(player_data.get("subtitle"), dict) else {}
+        subtitles = subtitle_data.get("subtitles")
+        if (not isinstance(subtitles, list) or not subtitles) and player_data.get("need_login_subtitle"):
+            cookie_header = _extract_bilibili_browser_cookie_header()
+            if cookie_header:
+                headers = {**headers, "Cookie": cookie_header}
+                player_payload = load_player_payload(headers)
+                player_data = player_payload.get("data") if isinstance(player_payload.get("data"), dict) else {}
+                subtitle_data = player_data.get("subtitle") if isinstance(player_data.get("subtitle"), dict) else {}
+                subtitles = subtitle_data.get("subtitles")
+        if not isinstance(subtitles, list) or not subtitles:
+            return None
+        candidates = [item for item in subtitles if isinstance(item, dict) and item.get("subtitle_url")]
+        if not candidates:
+            return None
+        subtitle = sorted(candidates, key=lambda item: _language_rank(str(item.get("lan") or "")))[0]
+        subtitle_url = str(subtitle["subtitle_url"])
+        if subtitle_url.startswith("//"):
+            subtitle_url = "https:" + subtitle_url
+        subtitle_response = requests.get(subtitle_url, headers=headers, timeout=(10, 45))
+        subtitle_response.raise_for_status()
+        segments = _parse_subtitle_content(subtitle_response.text, "json")
+        if not segments:
+            return None
+        owner = view_data.get("owner") if isinstance(view_data.get("owner"), dict) else {}
+        info = {
+            "title": str(view_data.get("title") or "B站视频"),
+            "uploader": str(owner.get("name") or ""),
+            "webpage_url": url,
+        }
+        source = "automatic" if subtitle.get("ai_type") else "manual"
+        return info, str(subtitle.get("lan") or "zh"), source, segments
+    except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Bilibili subtitle API failed: %s", type(exc).__name__)
+        return None
+
+
+def _extract_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[SubtitleSegment]]:
+    if _is_bilibili_url(url):
+        platform_source = _extract_bilibili_api_summary_source(url)
+        if platform_source:
+            return platform_source
+    options = {
+        **_ydl_base_options(url),
+        "skip_download": True,
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitlesformat": "vtt/srt/json3/best",
+    }
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except DownloadError as exc:
+        if _is_douyin_url(url) and _is_cookie_error(exc):
+            return _extract_douyin_page_text_summary_source(url)
+        raise
+    if not isinstance(info, dict):
+        raise RuntimeError("无法解析视频信息。")
+
+    selected = _select_subtitle(info)
+    if not selected:
+        if _is_bilibili_url(url):
+            raise RuntimeError("平台字幕 API 和 yt-dlp 均未找到可用字幕。")
+        raise RuntimeError("没有找到可用字幕。")
+    language, source, subtitle = selected
+    content, ext = _download_subtitle(subtitle, info.get("webpage_url") or url)
+    segments = _parse_subtitle_content(content, ext)
+    if not segments:
+        raise RuntimeError("字幕下载成功，但无法解析为带时间戳的文本。")
+    return info, language, source, segments
+
+
+def _summary_source_label(source: str) -> str:
+    if source == "manual":
+        return "人工字幕"
+    if source == "page_text":
+        return "页面文案"
+    return "自动字幕"
+
+
+def _load_ai_config() -> dict[str, str]:
+    if not AI_CONFIG_PATH.exists():
+        raise RuntimeError("缺少 AI 配置文件：请根据 config/ai.example.json 创建 config/ai.json。")
+    try:
+        payload = json.loads(AI_CONFIG_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AI 配置文件不是合法 JSON。") from exc
+    api_key = str(payload.get("api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    base_url = str(payload.get("base_url") or "").strip()
+    if not api_key:
+        raise RuntimeError("AI 配置缺少 api_key。")
+    if not model:
+        raise RuntimeError("AI 配置缺少 model。")
+    config = {"api_key": api_key, "model": model}
+    if base_url:
+        config["base_url"] = base_url
+    return config
+
+
+def _transcript_for_prompt(segments: list[SubtitleSegment]) -> str:
+    lines: list[str] = []
+    current_length = 0
+    for segment in segments:
+        line = f"[{segment.timestamp}] {segment.text}"
+        next_length = current_length + len(line) + 1
+        if next_length > MAX_SUMMARY_TRANSCRIPT_CHARS:
+            lines.append("[内容过长，后续字幕已截断用于首版摘要。]")
+            break
+        lines.append(line)
+        current_length = next_length
+    return "\n".join(lines)
+
+
+def _generate_ai_summary(title: str, webpage_url: str, segments: list[SubtitleSegment]) -> str:
+    config = _load_ai_config()
+    client_kwargs: dict[str, str] = {"api_key": config["api_key"]}
+    if config.get("base_url"):
+        client_kwargs["base_url"] = config["base_url"]
+    client = OpenAI(**client_kwargs)
+    transcript = _transcript_for_prompt(segments)
+    completion = client.chat.completions.create(
+        model=config["model"],
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是专业的视频内容整理助手。请基于带时间戳的字幕生成中文 Markdown 摘要。"
+                    "必须包含四个二级标题：概览、关键要点、时间线章节、适合保存的笔记。"
+                    "时间线章节中的每条要尽量保留字幕时间戳。不要编造字幕中没有的信息。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"视频标题：{title}\n"
+                    f"视频链接：{webpage_url}\n\n"
+                    f"字幕：\n{transcript}"
+                ),
+            },
+        ],
+        temperature=0.2,
+    )
+    content = completion.choices[0].message.content if completion.choices else None
+    summary = str(content or "").strip()
+    if not summary:
+        raise RuntimeError("AI 接口返回了空摘要。")
+    return summary
+
+
+def _save_summary_files(task: SummaryTask, result: SummaryResult) -> SummaryResult:
+    stem = f"{task.task_id}.{_safe_filename_stem(result.title)}"
+    markdown_name = f"{stem}.summary.md"
+    json_name = f"{stem}.summary.json"
+    markdown_path = SUMMARY_DIR / markdown_name
+    json_path = SUMMARY_DIR / json_name
+
+    transcript_markdown = "\n".join(f"- [{item.timestamp}] {item.text}" for item in result.transcript)
+    markdown_content = (
+        f"{result.summary_markdown.strip()}\n\n"
+        "---\n\n"
+        "## 字幕/转写文本\n\n"
+        f"{transcript_markdown}\n"
+    )
+    markdown_path.write_text(markdown_content, encoding="utf-8")
+    json_path.write_text(
+        json.dumps(result.model_dump(exclude={"markdown_url", "json_url"}), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    result.markdown_url = f"/api/summary-files/{quote(markdown_name, safe='')}"
+    result.json_url = f"/api/summary-files/{quote(json_name, safe='')}"
+    return result
+
+
+def _run_summary(task: SummaryTask) -> None:
+    try:
+        _set_summary_task(task, status="running", progress=8.0, message="正在解析视频字幕")
+        info, language, source, segments = _extract_summary_source(task.url)
+        title = str(info.get("title") or "未命名视频")
+        webpage_url = str(info.get("webpage_url") or task.url)
+        _set_summary_task(task, progress=42.0, message=f"已提取 {language} 字幕，正在生成 AI 摘要")
+        summary_markdown = _generate_ai_summary(title, webpage_url, segments)
+        _set_summary_task(task, progress=82.0, message="正在保存总结文件")
+        result = SummaryResult(
+            title=title,
+            webpage_url=webpage_url,
+            language=language,
+            source=_summary_source_label(source),
+            summary_markdown=summary_markdown,
+            transcript=segments[:MAX_TRANSCRIPT_SEGMENTS_IN_RESPONSE],
+        )
+        result = _save_summary_files(task, result)
+        _set_summary_task(
+            task,
+            status="finished",
+            progress=100.0,
+            message="AI 总结已生成",
+            result=result,
+        )
+    except Exception as exc:
+        _set_summary_task(
+            task,
+            status="failed",
+            progress=max(task.progress, 1.0),
+            message="总结失败",
+            error=_clean_error(exc, task.url),
+        )
 
 
 def _safe_int(value: Any) -> int | None:
@@ -614,7 +1198,15 @@ def parse_sniffed_page(url: str) -> ParseResponse:
 
 
 def _browser_executable() -> Path | None:
-    for candidate in (CHROME_EXE, EDGE_EXE):
+    playwright_root = Path.home() / "AppData" / "Local" / "ms-playwright"
+    playwright_candidates = []
+    if playwright_root.exists():
+        playwright_candidates = sorted(
+            playwright_root.glob("chromium-*/chrome-win*/chrome.exe"),
+            reverse=True,
+        )
+
+    for candidate in (CHROME_EXE, EDGE_EXE, *playwright_candidates):
         if candidate.exists():
             return candidate
     return None
@@ -725,7 +1317,7 @@ def _is_youtube_progressive_stream(url: str) -> bool:
     parsed = urlparse(html.unescape(url))
     query = parse_qs(parsed.query)
     itag = query.get("itag", [""])[0]
-    return itag in {"18", "22"} or query.get("ratebypass", [""])[0].lower() == "yes"
+    return itag in {"18", "22"}
 
 
 def _get_sniff_cache(url: str) -> ParseResponse | None:
@@ -743,6 +1335,124 @@ def _get_sniff_cache(url: str) -> ParseResponse | None:
 def _set_sniff_cache(url: str, response: ParseResponse) -> None:
     with sniff_cache_lock:
         sniff_cache[url] = (time.time(), response)
+
+
+def _resolve_douyin_preview_source(url: str, format_id: str) -> tuple[str, str]:
+    normalized_url = normalize_url(url)
+    if not _is_douyin_url(normalized_url):
+        raise HTTPException(status_code=422, detail="首版仅支持抖音视频在线播放。")
+
+    if format_id == "douyin-public":
+        _, item = _fetch_douyin_item(normalized_url)
+        return _douyin_media_url(item), normalized_url
+
+    if not format_id.startswith("sniff:"):
+        raise HTTPException(status_code=422, detail="该格式暂不支持在线播放。")
+
+    cached = _get_sniff_cache(normalized_url)
+    if not cached:
+        raise HTTPException(status_code=404, detail="解析结果已过期，请重新解析后播放。")
+    matched = next((item for item in cached.formats if item.format_id == format_id), None)
+    if not matched:
+        raise HTTPException(status_code=404, detail="播放格式与最近解析结果不匹配。")
+    if (matched.ext or "").lower() != "mp4":
+        raise HTTPException(status_code=422, detail="该线路暂不支持在线播放，请选择 MP4 格式。")
+
+    media_url = unquote(format_id.removeprefix("sniff:"))
+    parsed_media = urlparse(media_url)
+    if parsed_media.scheme not in {"http", "https"} or not parsed_media.netloc:
+        raise HTTPException(status_code=422, detail="解析到的视频地址不合法。")
+    return media_url, normalized_url
+
+
+def _cleanup_preview_sessions(now: float) -> None:
+    expired = [token for token, session in preview_sessions.items() if session.expires_at <= now]
+    for token in expired:
+        preview_sessions.pop(token, None)
+
+
+@app.post("/api/previews", response_model=PreviewResponse)
+def create_preview(payload: PreviewRequest) -> PreviewResponse:
+    media_url, referer = _resolve_douyin_preview_source(str(payload.url), payload.format_id)
+    now = time.time()
+    token = secrets.token_urlsafe(24)
+    with preview_sessions_lock:
+        _cleanup_preview_sessions(now)
+        preview_sessions[token] = PreviewSession(
+            media_url=media_url,
+            referer=referer,
+            expires_at=now + PREVIEW_TTL_SECONDS,
+        )
+    return PreviewResponse(
+        preview_url=f"/api/previews/{token}/content",
+        expires_in=PREVIEW_TTL_SECONDS,
+    )
+
+
+def _get_preview_session(token: str) -> PreviewSession:
+    now = time.time()
+    with preview_sessions_lock:
+        session = preview_sessions.get(token)
+        if not session:
+            raise HTTPException(status_code=404, detail="预览会话不存在，请重新解析后播放。")
+        if session.expires_at <= now:
+            preview_sessions.pop(token, None)
+            raise HTTPException(status_code=410, detail="预览地址已过期，请重新解析后播放。")
+        return session
+
+
+@app.get("/api/previews/{token}/content")
+def preview_content(
+    token: str,
+    range_header: Annotated[str | None, Header(alias="Range")] = None,
+) -> StreamingResponse:
+    session = _get_preview_session(token)
+    if range_header and not PREVIEW_RANGE_PATTERN.fullmatch(range_header.strip()):
+        raise HTTPException(status_code=416, detail="仅支持单段 bytes Range 请求。")
+
+    headers = {
+        **DOUYIN_HEADERS,
+        "Referer": session.referer,
+    }
+    if range_header:
+        headers["Range"] = range_header.strip()
+
+    try:
+        upstream = requests.get(
+            session.media_url,
+            headers=headers,
+            stream=True,
+            allow_redirects=True,
+            timeout=(10, 60),
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail="连接抖音视频源失败，请重新解析后重试。") from exc
+
+    content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    if upstream.status_code not in {200, 206} or not (
+        content_type.startswith("video/") or content_type == "application/octet-stream"
+    ):
+        upstream.close()
+        raise HTTPException(status_code=502, detail="抖音视频源返回了无效内容，请重新解析后重试。")
+
+    allowed_headers = {"content-type", "content-length", "content-range", "accept-ranges"}
+    response_headers = {
+        name: value for name, value in upstream.headers.items() if name.lower() in allowed_headers
+    }
+
+    def body():
+        try:
+            for chunk in upstream.iter_content(chunk_size=1024 * 256):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(
+        body(),
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 def _clean_meta_text(value: str | None) -> str | None:
@@ -977,6 +1687,8 @@ def _pornhub_player_response(url: str, page_meta: dict[str, Any], player_data: d
             continue
         if "/video/get_media" in media_url:
             continue
+        if not _is_signed_pornhub_media_url(media_url):
+            continue
         seen.add(media_url)
         ext = "mp4" if item.get("format") == "mp4" else _media_ext(media_url)
         quality = item.get("quality") or item.get("height") or "自动"
@@ -1005,8 +1717,6 @@ def _pornhub_player_response(url: str, page_meta: dict[str, Any], player_data: d
 
 def parse_browser_sniffed_page(url: str) -> ParseResponse:
     executable = _browser_executable()
-    if not executable:
-        raise HTTPException(status_code=422, detail="没有找到可用于嗅探的本机浏览器。")
 
     captured: list[str] = []
     page_meta: dict[str, Any] = {}
@@ -1021,17 +1731,19 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
     is_pornhub_page = _is_pornhub_url(normalized_url)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            headless=True,
-            executable_path=str(executable),
-            args=[
+        launch_options = {
+            "headless": True,
+            "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--autoplay-policy=no-user-gesture-required",
                 "--disable-extensions",
                 "--disable-notifications",
                 "--mute-audio",
             ],
-        )
+        }
+        if executable:
+            launch_options["executable_path"] = str(executable)
+        browser = playwright.chromium.launch(**launch_options)
         page = browser.new_page(
             user_agent=DEFAULT_HEADERS["User-Agent"],
             locale="zh-CN",
@@ -1123,12 +1835,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
         if _is_youtube_url(normalized_url):
             if _is_youtube_progressive_stream(media_url):
                 label = "MP4 · 含音频"
-            elif _is_youtube_audio_stream(media_url):
-                label = "M4A · 音频"
-            elif _is_youtube_video_stream(media_url):
-                label = "MP4 · 视频"
             else:
-                label = "媒体资源"
+                continue
         elif _is_douyin_url(normalized_url):
             label = "HLS · 高清线路" if ext == "m3u8" else "MP4 · 高清线路"
         elif _is_pornhub_url(normalized_url):
@@ -1147,6 +1855,9 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 resolution="自动",
             )
         )
+
+    if _is_youtube_url(normalized_url) and not formats:
+        raise HTTPException(status_code=422, detail="浏览器嗅探没有捕获可直接下载的 YouTube 音视频组合。")
 
     default_title = "YouTube 视频" if _is_youtube_url(normalized_url) else "抖音视频" if _is_douyin_url(normalized_url) else "网页视频"
     default_uploader = "YouTube" if _is_youtube_url(normalized_url) else "抖音" if _is_douyin_url(normalized_url) else urlparse(url).netloc
@@ -1223,11 +1934,7 @@ def _extract_formats(info: dict[str, Any]) -> list[FormatInfo]:
     return preferred[:12]
 
 
-def _ydl_base_options(
-    url: str | None = None,
-    use_browser_cookies: bool = False,
-    browser: BrowserCookieSource = "auto",
-) -> dict[str, Any]:
+def _ydl_base_options(url: str | None = None) -> dict[str, Any]:
     url = normalize_url(url) if url else url
     options: dict[str, Any] = {
         "quiet": True,
@@ -1249,8 +1956,6 @@ def _ydl_base_options(
         options["ffmpeg_location"] = str(FFMPEG_DIR)
     if NODE_EXE.exists():
         options["js_runtimes"] = {"node": {"path": str(NODE_EXE)}}
-    if use_browser_cookies and browser != "auto":
-        options["cookiesfrombrowser"] = (browser,)
     if url and _is_bilibili_url(url):
         options["http_headers"].update(
             {
@@ -1258,8 +1963,6 @@ def _ydl_base_options(
                 "Referer": "https://www.bilibili.com/",
             }
         )
-        if BILIBILI_COOKIES_FILE.exists() and not use_browser_cookies:
-            options["cookiefile"] = str(BILIBILI_COOKIES_FILE)
     if url and _is_pornhub_url(url):
         options["http_headers"].update(
             {
@@ -1268,8 +1971,6 @@ def _ydl_base_options(
                 "Accept-Language": "en-US,en;q=0.9",
             }
         )
-        if PORNHUB_COOKIES_FILE.exists() and not use_browser_cookies:
-            options["cookiefile"] = str(PORNHUB_COOKIES_FILE)
     if url and _is_youtube_url(url):
         options["http_headers"].update(
             {
@@ -1279,8 +1980,6 @@ def _ydl_base_options(
             }
         )
         options["extractor_args"] = {"youtube": {"player_client": ["web", "android"]}}
-        if YOUTUBE_COOKIES_FILE.exists() and not use_browser_cookies:
-            options["cookiefile"] = str(YOUTUBE_COOKIES_FILE)
     if url and _is_douyin_url(url):
         options["http_headers"].update(
             {
@@ -1289,18 +1988,12 @@ def _ydl_base_options(
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             }
         )
-        if DOUYIN_COOKIES_FILE.exists() and not use_browser_cookies:
-            options["cookiefile"] = str(DOUYIN_COOKIES_FILE)
     return options
 
 
-def parse_video(
-    url: str,
-    use_browser_cookies: bool = False,
-    browser: BrowserCookieSource = "auto",
-) -> ParseResponse:
+def parse_video(url: str) -> ParseResponse:
     url = normalize_url(url)
-    if _is_douyin_url(url) and not use_browser_cookies:
+    if _is_douyin_url(url):
         try:
             return parse_browser_sniffed_page(url)
         except HTTPException:
@@ -1310,16 +2003,16 @@ def parse_video(
                 pass
 
     options = {
-        **_ydl_base_options(url, use_browser_cookies, browser),
+        **_ydl_base_options(url),
         "skip_download": True,
     }
     try:
-        if _is_pornhub_url(url) and not use_browser_cookies:
+        if _is_pornhub_url(url):
             try:
                 return parse_browser_sniffed_page(url)
             except HTTPException:
                 pass
-        if _is_youtube_url(url) and not use_browser_cookies:
+        if _is_youtube_url(url):
             try:
                 return parse_browser_sniffed_page(url)
             except HTTPException:
@@ -1626,14 +2319,14 @@ def _run_download(task: DownloadTask) -> None:
         _run_sniffed_download(task, unquote(task.format_id.removeprefix("sniff:")))
         return
 
-    if _is_douyin_url(task.url) and not task.use_browser_cookies and _run_douyin_public_download(task):
+    if _is_douyin_url(task.url) and _run_douyin_public_download(task):
         return
 
     _set_task(task, status="running", progress=1.0, message="正在连接视频源")
     output_template = str(DOWNLOAD_DIR / f"{task.task_id}.%(title).80s.%(ext)s")
     format_value = task.format_id or "bestvideo+bestaudio/best"
     options = {
-        **_ydl_base_options(task.url, task.use_browser_cookies, task.browser),
+        **_ydl_base_options(task.url),
         "format": format_value,
         "outtmpl": output_template,
         "merge_output_format": "mp4",
@@ -1672,7 +2365,7 @@ def health() -> dict[str, str]:
 
 @app.post("/api/parse", response_model=ParseResponse)
 def parse_endpoint(payload: ParseRequest) -> ParseResponse:
-    return parse_video(str(payload.url), payload.use_browser_cookies, payload.browser)
+    return parse_video(str(payload.url))
 
 
 @app.post("/api/download", response_model=DownloadResponse)
@@ -1682,8 +2375,6 @@ def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
         task_id=task_id,
         url=str(payload.url),
         format_id=payload.format_id,
-        use_browser_cookies=payload.use_browser_cookies,
-        browser=payload.browser,
     )
     with tasks_lock:
         tasks[task_id] = task
@@ -1691,17 +2382,14 @@ def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
     return DownloadResponse(task_id=task_id)
 
 
-@app.post("/api/cookies")
-def save_cookies_endpoint(payload: CookiesRequest) -> dict[str, str]:
-    cookie_file = COOKIE_FILES[payload.platform]
-    content = _validate_cookie_content(payload.content)
-    cookie_file.write_text(content, encoding="utf-8")
-    return {"status": "ok", "platform": payload.platform}
-
-
-@app.get("/api/cookies/status")
-def cookies_status_endpoint() -> dict[str, bool]:
-    return {platform: path.exists() and path.stat().st_size > 0 for platform, path in COOKIE_FILES.items()}
+@app.post("/api/summaries", response_model=SummaryResponse)
+def summary_endpoint(payload: SummaryRequest) -> SummaryResponse:
+    task_id = uuid.uuid4().hex[:12]
+    task = SummaryTask(task_id=task_id, url=str(payload.url))
+    with summary_tasks_lock:
+        summary_tasks[task_id] = task
+    executor.submit(_run_summary, task)
+    return SummaryResponse(task_id=task_id)
 
 
 @app.get("/api/tasks/{task_id}", response_model=TaskResponse)
@@ -1713,12 +2401,30 @@ def task_endpoint(task_id: str) -> TaskResponse:
     return task.to_response()
 
 
+@app.get("/api/summaries/{task_id}", response_model=SummaryTaskResponse)
+def summary_task_endpoint(task_id: str) -> SummaryTaskResponse:
+    with summary_tasks_lock:
+        task = summary_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
+    return task.to_response()
+
+
 @app.get("/api/files/{filename}")
 def file_endpoint(filename: str) -> FileResponse:
     safe_name = Path(unquote(filename)).name
     file_path = DOWNLOAD_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在。")
+    return FileResponse(file_path, filename=safe_name)
+
+
+@app.get("/api/summary-files/{filename}")
+def summary_file_endpoint(filename: str) -> FileResponse:
+    safe_name = Path(unquote(filename)).name
+    file_path = SUMMARY_DIR / safe_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="总结文件不存在。")
     return FileResponse(file_path, filename=safe_name)
 
 
