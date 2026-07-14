@@ -124,6 +124,35 @@ class SummaryTaskResponse(BaseModel):
     result: SummaryResult | None = None
 
 
+class MindMapNode(BaseModel):
+    id: str
+    title: str
+    summary: str = ""
+    timestamp: float
+    segment_ids: list[int]
+    children: list[MindMapNode] = Field(default_factory=list)
+
+
+class MindMapResult(BaseModel):
+    title: str
+    nodes: list[MindMapNode]
+    generated_at: str
+
+
+class MindMapResponse(BaseModel):
+    task_id: str
+
+
+class MindMapTaskResponse(BaseModel):
+    task_id: str
+    summary_task_id: str
+    status: TaskStatus
+    progress: float = 0
+    message: str = ""
+    error: str | None = None
+    result: MindMapResult | None = None
+
+
 class TaskResponse(BaseModel):
     task_id: str
     status: TaskStatus
@@ -174,12 +203,37 @@ class SummaryTask:
         self.message = "等待总结任务开始"
         self.error: str | None = None
         self.result: SummaryResult | None = None
+        self.transcript: list[SubtitleSegment] = []
         self.created_at = time.time()
         self.updated_at = time.time()
 
     def to_response(self) -> SummaryTaskResponse:
         return SummaryTaskResponse(
             task_id=self.task_id,
+            status=self.status,
+            progress=round(self.progress, 2),
+            message=self.message,
+            error=self.error,
+            result=self.result,
+        )
+
+
+class MindMapTask:
+    def __init__(self, task_id: str, summary_task_id: str) -> None:
+        self.task_id = task_id
+        self.summary_task_id = summary_task_id
+        self.status: TaskStatus = "pending"
+        self.progress = 0.0
+        self.message = "等待思维导图任务开始"
+        self.error: str | None = None
+        self.result: MindMapResult | None = None
+        self.created_at = time.time()
+        self.updated_at = time.time()
+
+    def to_response(self) -> MindMapTaskResponse:
+        return MindMapTaskResponse(
+            task_id=self.task_id,
+            summary_task_id=self.summary_task_id,
             status=self.status,
             progress=round(self.progress, 2),
             message=self.message,
@@ -206,6 +260,8 @@ tasks: dict[str, DownloadTask] = {}
 tasks_lock = threading.Lock()
 summary_tasks: dict[str, SummaryTask] = {}
 summary_tasks_lock = threading.Lock()
+mind_map_tasks: dict[str, MindMapTask] = {}
+mind_map_tasks_lock = threading.Lock()
 executor = ThreadPoolExecutor(max_workers=2)
 sniff_cache: dict[str, tuple[float, ParseResponse]] = {}
 sniff_cache_lock = threading.Lock()
@@ -216,6 +272,8 @@ SUBTITLE_LANGUAGE_PRIORITY = ("zh-CN", "zh-Hans", "zh", "zh-TW", "zh-Hant", "en"
 SUBTITLE_FORMAT_PRIORITY = ("vtt", "srt", "json3", "json", "srv3", "ttml", "xml")
 MAX_SUMMARY_TRANSCRIPT_CHARS = 28000
 MAX_TRANSCRIPT_SEGMENTS_IN_RESPONSE = 500
+MAX_MIND_MAP_DEPTH = 4
+MAX_MIND_MAP_CHILDREN = 10
 
 DOUYIN_API_URL = "https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/"
 DEFAULT_HEADERS = {
@@ -861,6 +919,177 @@ def _generate_ai_summary(title: str, webpage_url: str, segments: list[SubtitleSe
     return summary
 
 
+def _sanitize_mind_map_payload(
+    payload: Any,
+    segments: list[SubtitleSegment],
+    default_title: str,
+    allowed_segment_ids: set[int] | None = None,
+) -> MindMapResult:
+    if not isinstance(payload, dict):
+        raise RuntimeError("AI 思维导图不是合法 JSON 对象。")
+    counter = 0
+
+    def clean_text(value: Any, maximum: int) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()[:maximum]
+
+    def clean_nodes(value: Any, depth: int) -> list[MindMapNode]:
+        nonlocal counter
+        if not isinstance(value, list) or depth > MAX_MIND_MAP_DEPTH:
+            return []
+        cleaned: list[MindMapNode] = []
+        for candidate in value:
+            if len(cleaned) >= MAX_MIND_MAP_CHILDREN:
+                break
+            if not isinstance(candidate, dict):
+                continue
+            title = clean_text(candidate.get("title"), 80)
+            raw_ids = candidate.get("segment_ids")
+            if not title or not isinstance(raw_ids, list):
+                continue
+            segment_ids = sorted(
+                {
+                    item
+                    for item in raw_ids
+                    if isinstance(item, int)
+                    and not isinstance(item, bool)
+                    and 0 <= item < len(segments)
+                    and (allowed_segment_ids is None or item in allowed_segment_ids)
+                }
+            )
+            if not segment_ids:
+                continue
+            counter += 1
+            cleaned.append(
+                MindMapNode(
+                    id=f"node-{counter}",
+                    title=title,
+                    summary=clean_text(candidate.get("summary"), 300),
+                    timestamp=min(segments[index].start for index in segment_ids),
+                    segment_ids=segment_ids,
+                    children=clean_nodes(candidate.get("children"), depth + 1),
+                )
+            )
+        return cleaned
+
+    nodes = clean_nodes(payload.get("nodes"), 1)
+    if not nodes:
+        raise RuntimeError("AI 思维导图没有有效节点。")
+    title = clean_text(payload.get("title"), 80) or clean_text(default_title, 80) or "视频思维导图"
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return MindMapResult(title=title, nodes=nodes, generated_at=generated_at)
+
+
+def _mind_map_prompt_chunks(segments: list[SubtitleSegment]) -> list[tuple[str, set[int]]]:
+    chunks: list[tuple[str, set[int]]] = []
+    lines: list[str] = []
+    segment_ids: set[int] = set()
+    current_length = 0
+    for index, segment in enumerate(segments):
+        prefix = f"[{index}] [{segment.timestamp}] "
+        text_limit = max(1, MAX_SUMMARY_TRANSCRIPT_CHARS - len(prefix) - 1)
+        line = prefix + segment.text[:text_limit]
+        if current_length + len(line) + 1 > MAX_SUMMARY_TRANSCRIPT_CHARS:
+            if lines:
+                chunks.append(("\n".join(lines), segment_ids))
+            lines = []
+            segment_ids = set()
+            current_length = 0
+        lines.append(line)
+        segment_ids.add(index)
+        current_length += len(line) + 1
+    if lines:
+        chunks.append(("\n".join(lines), segment_ids))
+    return chunks
+
+
+def _generate_ai_mind_map(title: str, segments: list[SubtitleSegment]) -> MindMapResult:
+    config = _load_ai_config()
+    client_kwargs: dict[str, str] = {"api_key": config["api_key"]}
+    if config.get("base_url"):
+        client_kwargs["base_url"] = config["base_url"]
+    client = OpenAI(**client_kwargs)
+    chunk_results: list[MindMapResult] = []
+    for indexed_transcript, allowed_ids in _mind_map_prompt_chunks(segments):
+        completion = client.chat.completions.create(
+            model=config["model"],
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你是视频学习内容整理助手。只依据提供的字幕生成思维导图 JSON，禁止补充字幕外事实。"
+                        "顶层格式为 {title, nodes}。每个节点只包含 title、summary、segment_ids、children。"
+                        "segment_ids 必须使用字幕行开头的整数索引。最多四层，每个节点最多十个子节点。"
+                    ),
+                },
+                {"role": "user", "content": f"视频标题：{title}\n\n字幕：\n{indexed_transcript}"},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        content = completion.choices[0].message.content if completion.choices else None
+        if not str(content or "").strip():
+            raise RuntimeError("AI 接口返回了空思维导图。")
+        try:
+            payload = json.loads(str(content))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("AI 思维导图不是合法 JSON。") from exc
+        chunk_results.append(_sanitize_mind_map_payload(payload, segments, title, allowed_ids))
+    if not chunk_results:
+        raise RuntimeError("没有可用于思维导图的字幕。")
+
+    queues = [list(result.nodes) for result in chunk_results]
+    selected: list[MindMapNode] = []
+    while len(selected) < MAX_MIND_MAP_CHILDREN and any(queues):
+        for queue in queues:
+            if queue and len(selected) < MAX_MIND_MAP_CHILDREN:
+                selected.append(queue.pop(0))
+
+    counter = 0
+
+    def reindex(node: MindMapNode) -> MindMapNode:
+        nonlocal counter
+        counter += 1
+        node_id = f"node-{counter}"
+        children = [reindex(child) for child in node.children]
+        return node.model_copy(update={"id": node_id, "children": children})
+
+    return MindMapResult(
+        title=chunk_results[0].title,
+        nodes=[reindex(node) for node in selected],
+        generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    )
+
+
+def _set_mind_map_task(task: MindMapTask, **changes: Any) -> None:
+    with mind_map_tasks_lock:
+        for key, value in changes.items():
+            setattr(task, key, value)
+        task.updated_at = time.time()
+
+
+def _run_mind_map(task: MindMapTask, summary: SummaryTask) -> None:
+    try:
+        if not summary.result:
+            raise RuntimeError("总结结果不可用。")
+        _set_mind_map_task(task, status="running", progress=20.0, message="正在整理字幕结构")
+        result = _generate_ai_mind_map(summary.result.title, summary.transcript or summary.result.transcript)
+        _set_mind_map_task(
+            task,
+            status="finished",
+            progress=100.0,
+            message="思维导图已生成",
+            result=result,
+        )
+    except Exception as exc:
+        _set_mind_map_task(
+            task,
+            status="failed",
+            progress=max(task.progress, 1.0),
+            message="思维导图生成失败",
+            error=_clean_error(exc, summary.url),
+        )
+
+
 def _save_summary_files(task: SummaryTask, result: SummaryResult) -> SummaryResult:
     stem = f"{task.task_id}.{_safe_filename_stem(result.title)}"
     markdown_name = f"{stem}.summary.md"
@@ -891,7 +1120,12 @@ def _run_summary(task: SummaryTask) -> None:
         info, language, source, segments = _extract_summary_source(task.url)
         title = str(info.get("title") or "未命名视频")
         webpage_url = str(info.get("webpage_url") or task.url)
-        _set_summary_task(task, progress=42.0, message=f"已提取 {language} 字幕，正在生成 AI 摘要")
+        _set_summary_task(
+            task,
+            progress=42.0,
+            message=f"已提取 {language} 字幕，正在生成 AI 摘要",
+            transcript=segments,
+        )
         summary_markdown = _generate_ai_summary(title, webpage_url, segments)
         _set_summary_task(task, progress=82.0, message="正在保存总结文件")
         result = SummaryResult(
@@ -2415,6 +2649,36 @@ def summary_task_endpoint(task_id: str) -> SummaryTaskResponse:
     if not task:
         raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
     return task.to_response()
+
+
+@app.post("/api/summaries/{task_id}/mind-map", response_model=MindMapResponse)
+def create_mind_map_endpoint(task_id: str, regenerate: bool = False) -> MindMapResponse:
+    with summary_tasks_lock:
+        summary = summary_tasks.get(task_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
+    if summary.status != "finished" or not summary.result:
+        raise HTTPException(status_code=409, detail="总结完成后才能生成思维导图。")
+    with mind_map_tasks_lock:
+        existing = mind_map_tasks.get(task_id)
+        if existing and not regenerate and existing.status in {"pending", "running", "finished"}:
+            return MindMapResponse(task_id=existing.task_id)
+        task = MindMapTask(uuid.uuid4().hex[:12], task_id)
+        mind_map_tasks[task_id] = task
+    executor.submit(_run_mind_map, task, summary)
+    return MindMapResponse(task_id=task.task_id)
+
+
+@app.get("/api/summaries/{task_id}/mind-map", response_model=MindMapTaskResponse)
+def mind_map_task_endpoint(task_id: str) -> MindMapTaskResponse:
+    with summary_tasks_lock:
+        if task_id not in summary_tasks:
+            raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
+    with mind_map_tasks_lock:
+        task = mind_map_tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="思维导图任务不存在。")
+        return task.to_response()
 
 
 @app.get("/api/files/{filename}")

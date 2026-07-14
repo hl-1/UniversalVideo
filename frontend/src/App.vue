@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import MindMapCanvas from './MindMapCanvas.vue'
+import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from './mindMap'
 import { getRecentLinks, saveRecentLink } from './recentLinks'
 import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
 
@@ -22,6 +24,7 @@ type ParseResult = {
 
 type TaskStatus = 'pending' | 'running' | 'finished' | 'failed'
 type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
+type SummaryTab = 'summary' | 'transcript' | 'mind-map'
 
 type TaskResult = {
   task_id: string
@@ -86,9 +89,11 @@ const selectedFormat = ref('')
 const parseResult = ref<ParseResult | null>(null)
 const task = ref<TaskResult | null>(null)
 const summaryTask = ref<SummaryTaskResult | null>(null)
+const mindMapTask = ref<MindMapTask | null>(null)
 const loadingParse = ref(false)
 const loadingDownload = ref(false)
 const loadingSummary = ref(false)
+const loadingMindMap = ref(false)
 const savingFile = ref(false)
 const errorMessage = ref('')
 const saveMessage = ref('')
@@ -96,11 +101,15 @@ const recentLinks = ref<string[]>([])
 const showRecentLinks = ref(false)
 const pollingTimer = ref<number | undefined>()
 const summaryPollingTimer = ref<number | undefined>()
+const mindMapPollingTimer = ref<number | undefined>()
 const coverFailed = ref(false)
 const saveHandle = ref<FilePickerHandle | null>(null)
 const previewState = ref<PreviewState>('idle')
 const previewUrl = ref('')
 const previewError = ref('')
+const previewVideoRef = ref<HTMLVideoElement | null>(null)
+const pendingSeekTime = ref<number | null>(null)
+const summaryTab = ref<SummaryTab>('summary')
 
 const supported = [
   { label: 'B站', href: 'https://www.bilibili.com/' },
@@ -119,6 +128,7 @@ const samples = ['公开课留档', '素材归档', 'AI 视频总结', '字幕�
 
 const taskTone = computed(() => task.value?.status || 'idle')
 const summaryTone = computed(() => summaryTask.value?.status || 'idle')
+const mindMapTone = computed(() => mindMapTask.value?.status || 'idle')
 const canDownload = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingDownload.value))
 const canSummarize = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingSummary.value))
 const hasRecentLinks = computed(() => recentLinks.value.length > 0)
@@ -180,6 +190,13 @@ function stopSummaryPolling() {
   }
 }
 
+function stopMindMapPolling() {
+  if (mindMapPollingTimer.value) {
+    window.clearInterval(mindMapPollingTimer.value)
+    mindMapPollingTimer.value = undefined
+  }
+}
+
 function loadRecentLinks() {
   recentLinks.value = getRecentLinks(window.localStorage)
 }
@@ -206,7 +223,10 @@ async function startSummary() {
   saveMessage.value = ''
   loadingSummary.value = true
   summaryTask.value = null
+  mindMapTask.value = null
+  summaryTab.value = 'summary'
   stopSummaryPolling()
+  stopMindMapPolling()
 
   try {
     const response = await fetch('/api/summaries', {
@@ -236,6 +256,41 @@ async function pollSummary(taskId: string) {
   } catch (error) {
     stopSummaryPolling()
     errorMessage.value = error instanceof Error ? error.message : '总结任务状态查询失败。'
+  }
+}
+
+async function startMindMap(regenerate = false) {
+  const summaryId = summaryTask.value?.task_id
+  if (!summaryId || summaryTask.value?.status !== 'finished') return
+  loadingMindMap.value = true
+  errorMessage.value = ''
+  stopMindMapPolling()
+  try {
+    const suffix = regenerate ? '?regenerate=true' : ''
+    const response = await fetch(`/api/summaries/${summaryId}/mind-map${suffix}`, { method: 'POST' })
+    if (!response.ok) throw new Error(await readApiError(response))
+    await pollMindMap(summaryId)
+    if (mindMapTask.value?.status !== 'finished' && mindMapTask.value?.status !== 'failed') {
+      mindMapPollingTimer.value = window.setInterval(() => pollMindMap(summaryId), 1400)
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '思维导图任务创建失败。'
+  } finally {
+    loadingMindMap.value = false
+  }
+}
+
+async function pollMindMap(summaryId: string) {
+  try {
+    const response = await fetch(`/api/summaries/${summaryId}/mind-map`)
+    if (!response.ok) throw new Error(await readApiError(response))
+    const filtered = filterMindMapTask(await response.json())
+    if (!filtered) throw new Error('思维导图接口返回了无效数据。')
+    mindMapTask.value = filtered
+    if (filtered.status === 'finished' || filtered.status === 'failed') stopMindMapPolling()
+  } catch (error) {
+    stopMindMapPolling()
+    errorMessage.value = error instanceof Error ? error.message : '思维导图状态查询失败。'
   }
 }
 
@@ -270,6 +325,8 @@ function resetPreview() {
   previewState.value = 'idle'
   previewUrl.value = ''
   previewError.value = ''
+  previewVideoRef.value = null
+  pendingSeekTime.value = null
 }
 
 function handlePreviewError() {
@@ -280,6 +337,29 @@ function handlePreviewError() {
 
 function handlePreviewReady() {
   previewState.value = 'ready'
+  if (pendingSeekTime.value !== null && previewVideoRef.value) {
+    previewVideoRef.value.currentTime = clampSeekTime(pendingSeekTime.value, previewVideoRef.value.duration)
+    pendingSeekTime.value = null
+    void previewVideoRef.value.play().catch(() => undefined)
+  }
+}
+
+async function seekToTimestamp(timestamp: number) {
+  if (previewVideoRef.value && canSeekMedia(previewVideoRef.value)) {
+    previewVideoRef.value.currentTime = clampSeekTime(timestamp, previewVideoRef.value.duration)
+    await previewVideoRef.value.play().catch(() => undefined)
+    return
+  }
+  if (previewVideoRef.value) {
+    pendingSeekTime.value = timestamp
+    return
+  }
+  if (canPreview.value) {
+    pendingSeekTime.value = timestamp
+    await startPreview()
+    return
+  }
+  errorMessage.value = '当前视频没有可跳转的在线预览。'
 }
 
 async function startPreview() {
@@ -321,10 +401,13 @@ async function parseVideo() {
   parseResult.value = null
   task.value = null
   summaryTask.value = null
+  mindMapTask.value = null
+  summaryTab.value = 'summary'
   selectedFormat.value = ''
   coverFailed.value = false
   saveHandle.value = null
   stopSummaryPolling()
+  stopMindMapPolling()
   loadingParse.value = true
 
   try {
@@ -445,6 +528,7 @@ function stopPolling() {
 onBeforeUnmount(() => {
   stopPolling()
   stopSummaryPolling()
+  stopMindMapPolling()
 })
 
 onMounted(() => {
@@ -522,6 +606,7 @@ onMounted(() => {
             <div class="cover-wrap">
               <video
                 v-if="previewUrl"
+                ref="previewVideoRef"
                 :src="previewUrl"
                 :poster="parseResult.thumbnail || undefined"
                 controls
@@ -610,14 +695,48 @@ onMounted(() => {
                 <a v-if="summaryTask.result.markdown_url" :href="summaryTask.result.markdown_url" download>下载 Markdown</a>
                 <a v-if="summaryTask.result.json_url" :href="summaryTask.result.json_url" download>下载 JSON</a>
               </div>
-              <section class="summary-text" aria-label="AI 总结">
+              <div class="summary-tabs" role="tablist" aria-label="总结视图">
+                <button type="button" role="tab" :aria-selected="summaryTab === 'summary'" @click="summaryTab = 'summary'">总结</button>
+                <button type="button" role="tab" :aria-selected="summaryTab === 'transcript'" @click="summaryTab = 'transcript'">字幕</button>
+                <button type="button" role="tab" :aria-selected="summaryTab === 'mind-map'" @click="summaryTab = 'mind-map'">思维导图</button>
+              </div>
+              <section v-if="summaryTab === 'summary'" class="summary-text" aria-label="AI 总结">
                 <pre>{{ plainMarkdown(summaryTask.result.summary_markdown) }}</pre>
               </section>
-              <section class="transcript-list" aria-label="字幕文本">
+              <section v-else-if="summaryTab === 'transcript'" class="transcript-list" aria-label="字幕文本">
                 <div v-for="item in summaryTask.result.transcript.slice(0, 80)" :key="`${item.timestamp}-${item.text}`">
                   <time>{{ item.timestamp }}</time>
                   <span>{{ item.text }}</span>
                 </div>
+              </section>
+              <section v-else class="mind-map-panel" aria-label="思维导图">
+                <div v-if="!mindMapTask" class="mind-map-empty">
+                  <button type="button" class="secondary-action" :disabled="loadingMindMap" @click="startMindMap(false)">
+                    {{ loadingMindMap ? '正在启动' : '生成思维导图' }}
+                  </button>
+                </div>
+                <template v-else>
+                  <div class="task-head mind-map-task-head">
+                    <span>{{ mindMapTask.status === 'finished' ? '思维导图完成' : mindMapTask.status === 'failed' ? '生成失败' : '正在生成思维导图' }}</span>
+                    <strong>{{ Math.round(mindMapTask.progress) }}%</strong>
+                  </div>
+                  <div class="progress-track" :class="`tone-${mindMapTone}`">
+                    <span :style="{ width: `${Math.max(4, mindMapTask.progress)}%` }"></span>
+                  </div>
+                  <p v-if="mindMapTask.error || mindMapTask.status !== 'finished'" class="summary-message">
+                    {{ mindMapTask.error || mindMapTask.message }}
+                  </p>
+                  <div v-if="mindMapTask.status === 'failed'" class="mind-map-retry">
+                    <button type="button" class="secondary-action" :disabled="loadingMindMap" @click="startMindMap(true)">重新生成</button>
+                  </div>
+                  <div v-if="mindMapTask.result" class="mind-map-tree-wrap">
+                    <MindMapCanvas
+                      :result="mindMapTask.result"
+                      :seek-enabled="Boolean(previewVideoRef || canPreview)"
+                      @seek="seekToTimestamp"
+                    />
+                  </div>
+                </template>
               </section>
             </div>
           </div>
