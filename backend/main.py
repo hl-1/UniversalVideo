@@ -22,12 +22,17 @@ import requests
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field, HttpUrl
 from yt_dlp import YoutubeDL
 from yt_dlp.cookies import extract_cookies_from_browser
 from yt_dlp.utils import DownloadError
+
+from backend.watermark import router as watermark_router
+from backend.audio import IncompleteAudioError, download_audio
+from backend import music
 
 
 logger = logging.getLogger("videodream.summary")
@@ -56,6 +61,8 @@ class ParseRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: HttpUrl
     format_id: str | None = Field(default=None, max_length=4096)
+    media_type: Literal["video", "audio"] = "video"
+    audio_format: Literal["m4a", "mp3"] = "m4a"
 
 
 class SummaryRequest(BaseModel):
@@ -161,6 +168,7 @@ class TaskResponse(BaseModel):
     filename: str | None = None
     download_url: str | None = None
     error: str | None = None
+    media_type: Literal["video", "audio"] = "video"
 
 
 class DownloadTask:
@@ -169,10 +177,14 @@ class DownloadTask:
         task_id: str,
         url: str,
         format_id: str | None,
+        media_type: Literal["video", "audio"] = "video",
+        audio_format: Literal["m4a", "mp3"] = "m4a",
     ) -> None:
         self.task_id = task_id
         self.url = normalize_url(url)
         self.format_id = format_id
+        self.media_type = media_type
+        self.audio_format = audio_format
         self.status: TaskStatus = "pending"
         self.progress = 0.0
         self.message = "等待下载任务开始"
@@ -191,6 +203,7 @@ class DownloadTask:
             filename=self.filename,
             download_url=download_url,
             error=self.error,
+            media_type=self.media_type,
         )
 
 
@@ -243,6 +256,11 @@ class MindMapTask:
 
 
 app = FastAPI(title="VideoDream API", version="1.0.0")
+app.include_router(watermark_router)
+app.include_router(music.router)
+FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
+if (FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -1554,6 +1572,15 @@ def _is_youtube_audio_stream(url: str) -> bool:
     return "audio/" in mime
 
 
+def _is_douyin_audio_stream(url: str) -> bool:
+    parsed = urlparse(html.unescape(url))
+    host = (parsed.hostname or "").lower()
+    mime = parse_qs(parsed.query).get("mime_type", [""])[0].lower()
+    return (host == "douyinvod.com" or host.endswith(".douyinvod.com")) and (
+        "/media-audio-" in parsed.path.lower() or mime.startswith("audio")
+    )
+
+
 def _is_youtube_progressive_stream(url: str) -> bool:
     parsed = urlparse(html.unescape(url))
     query = parse_qs(parsed.query)
@@ -1761,7 +1788,9 @@ def _capture_page_thumbnail(page: Any, normalized_url: str) -> str | None:
     try:
         filename = f"{hashlib.sha1(normalized_url.encode('utf-8')).hexdigest()[:16]}.png"
         target_path = THUMBNAIL_DIR / filename
-        locator = page.locator("video").first if page.locator("video").count() else page.locator("body").first
+        videos = page.locator("video")
+        index = videos.evaluate_all("""(videos) => videos.findIndex(video => video.currentSrc.startsWith('blob:') || video.currentSrc.includes('.douyinvod.com/'))""")
+        locator = videos.nth(index) if index >= 0 else page.locator("body").first
         locator.screenshot(path=str(target_path), timeout=2000)
         if target_path.exists() and target_path.stat().st_size > 0:
             return _local_thumbnail(filename)
@@ -1826,6 +1855,10 @@ def _extract_browser_page_meta(page: Any, normalized_url: str) -> dict[str, Any]
                     .filter((item) => item.src && !/avatar|emoji|qrcode|qr|logo|icon|sprite|loading/i.test(`${item.src} ${item.alt} ${item.className}`))
                     .filter((item) => /douyin|aweme|byteimg|ytimg|googleusercontent|douyinpic|snssdk/i.test(item.src));
                 const ldAuthor = firstValue(ld.author?.name || ld.author);
+                const videos = Array.from(document.querySelectorAll('video'));
+                const video = location.hostname.endsWith('douyin.com')
+                    ? videos.find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/'))
+                    : videos[0];
                 const author =
                     ldAuthor ||
                     meta('author') ||
@@ -1840,7 +1873,8 @@ def _extract_browser_page_meta(page: Any, normalized_url: str) -> dict[str, Any]
                     title: firstValue(ld.name) || meta('og:title') || meta('twitter:title') || document.querySelector('h1')?.textContent || document.title || '',
                     thumbnail: firstValue(ld.thumbnailUrl) || firstValue(ld.image) || meta('og:image') || meta('twitter:image') || poster || images[0]?.src || '',
                     author,
-                    duration: firstValue(ld.duration) || meta('video:duration') || meta('duration') || '',
+                    duration: firstValue(ld.duration) || meta('video:duration') || meta('duration') ||
+                        (Number.isFinite(video?.duration) ? video.duration : ''),
                     bodyText: document.body?.innerText?.slice(0, 3000) || ''
                 };
             }"""
@@ -1956,6 +1990,26 @@ def _pornhub_player_response(url: str, page_meta: dict[str, Any], player_data: d
     )
 
 
+def _extract_douyin_response_meta(response: Any, video_id: str | None) -> dict[str, Any]:
+    if not video_id or not _is_douyin_url(response.url) or "aweme/detail" not in urlparse(response.url).path or response.status != 200:
+        return {}
+    try:
+        item = response.json().get("aweme_detail")
+        if not isinstance(item, dict) or str(item.get("aweme_id")) != video_id:
+            return {}
+        video = item.get("video") or {}
+        milliseconds = _safe_int(video.get("duration"))
+        metadata = {
+            "title": _clean_meta_text(item.get("desc")),
+            "author": _clean_author_text((item.get("author") or {}).get("nickname")),
+            "duration": int(milliseconds / 1000) if milliseconds and milliseconds > 0 else None,
+            "thumbnail": _pick_url_from_nested(video, "cover") or _pick_url_from_nested(video, "origin_cover"),
+        }
+        return {key: value for key, value in metadata.items() if value}
+    except Exception:
+        return {}
+
+
 def parse_browser_sniffed_page(url: str) -> ParseResponse:
     executable = _browser_executable()
 
@@ -1970,6 +2024,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
     is_youtube_page = _is_youtube_url(normalized_url)
     is_douyin_page = _is_douyin_url(normalized_url)
     is_pornhub_page = _is_pornhub_url(normalized_url)
+    douyin_meta: dict[str, Any] = {}
 
     with sync_playwright() as playwright:
         launch_options = {
@@ -2008,7 +2063,11 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
         page.route("**/*", route_request)
         page.on("request", lambda request: remember(request.url))
-        page.on("response", lambda response: remember(response.url))
+        def record_response(response: Any) -> None:
+            remember(response.url)
+            if is_douyin_page:
+                douyin_meta.update(_extract_douyin_response_meta(response, _extract_douyin_video_id(normalized_url)))
+        page.on("response", record_response)
         try:
             page.goto(normalized_url, wait_until="commit", timeout=8000 if is_douyin_page else 12000)
             deadline = time.time() + (8 if is_douyin_page else 12 if (is_youtube_page or is_pornhub_page) else 4)
@@ -2020,7 +2079,11 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                     ):
                         break
                 elif is_douyin_page:
-                    if any("douyinvod.com" in item.lower() or "mime_type=video" in item.lower() for item in captured):
+                    has_video = any(("douyinvod.com" in item.lower() or "mime_type=video" in item.lower()) and not _is_douyin_audio_stream(item) for item in captured)
+                    has_audio = any(_is_douyin_audio_stream(item) for item in captured)
+                    if has_video and has_audio:
+                        break
+                    if has_video and time.time() > deadline - 3:
                         break
                 elif is_pornhub_page:
                     if any(_is_signed_pornhub_media_url(item) for item in captured):
@@ -2031,11 +2094,19 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 ):
                     break
                 page.wait_for_timeout(500)
+            if is_douyin_page:
+                try:
+                    page.evaluate("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); if (video) { video.muted = true; video.play().catch(() => {}); } }""")
+                    page.wait_for_function("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); return video?.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0.05; }""", timeout=3000)
+                except Exception:
+                    pass
             page_meta = _extract_browser_page_meta(page, normalized_url)
             if _is_douyin_url(normalized_url):
-                local_thumbnail = _capture_page_thumbnail(page, normalized_url)
-                if local_thumbnail:
-                    page_meta["thumbnail"] = local_thumbnail
+                page_meta.update(douyin_meta)
+                if not douyin_meta.get("thumbnail"):
+                    local_thumbnail = _capture_page_thumbnail(page, normalized_url)
+                    if local_thumbnail:
+                        page_meta["thumbnail"] = local_thumbnail
             if is_pornhub_page:
                 pornhub_player_data = _extract_pornhub_player_data(page)
             page_html = page.content()
@@ -2072,6 +2143,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
             )
 
     for index, media_url in enumerate(ranked[:8], start=1):
+        if is_douyin_page and _is_douyin_audio_stream(media_url):
+            continue
         ext = _media_ext(media_url)
         if _is_youtube_url(normalized_url):
             if _is_youtube_progressive_stream(media_url):
@@ -2096,6 +2169,15 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 resolution="自动",
             )
         )
+
+    if is_douyin_page:
+        audio_stream = next((item for item in ranked if _is_douyin_audio_stream(item)), None)
+        video_stream = next((item for item in ranked if not _is_douyin_audio_stream(item)), None)
+        if audio_stream and video_stream:
+            formats.append(FormatInfo(
+                format_id=f"sniffpair:{quote(video_stream, safe='')}|{quote(audio_stream, safe='')}",
+                label="MP4 · 完整音视频", ext="mp4", resolution="自动",
+            ))
 
     if _is_youtube_url(normalized_url) and not formats:
         raise HTTPException(status_code=422, detail="浏览器嗅探没有捕获可直接下载的 YouTube 音视频组合。")
@@ -2549,7 +2631,59 @@ def _run_sniffed_pair_download(task: DownloadTask, video_url: str, audio_url: st
         )
 
 
+def _run_audio_download(task: DownloadTask) -> None:
+    _set_task(task, status="running", progress=1, message="正在解析音轨")
+    try:
+        if task.format_id and task.format_id.startswith("music:"):
+            track = music.get_track(task.format_id.removeprefix("music:"), task.url)
+            source_url, options, source_name = music.resolve(track, _ydl_base_options(task.url))
+            def download_track():
+                return download_audio(
+                    url=source_url, title=track.title, task_id=task.task_id, output_format=task.audio_format,
+                    download_dir=DOWNLOAD_DIR, ffmpeg_dir=FFMPEG_DIR, options=options, direct=True,
+                    expected_duration=track.duration, progress=lambda value, message: _set_task(task, progress=value, message=message),
+                )
+            try:
+                target = download_track()
+            except IncompleteAudioError:
+                if source_name not in ("原平台", "酷狗音乐"):
+                    raise
+                _set_task(task, message="原平台仅返回试听，正在尝试解析服务")
+                source_url, options, source_name = music.resolve(track, _ydl_base_options(task.url), public_only=True)
+                target = download_track()
+            _set_task(task, status="finished", progress=100, message=f"音频已准备好 · {source_name}", filename=target.name)
+            return
+        result = _get_sniff_cache(task.url) or parse_video(task.url)
+        if not result.formats:
+            raise RuntimeError("没有可用音轨，请使用单个视频或歌曲链接。")
+        selected = next((item for item in result.formats if item.format_id.startswith("sniffpair:")), None)
+        if not selected:
+            selected = next((item for item in result.formats if item.format_id == task.format_id), None)
+        if not selected:
+            selected = next((item for item in result.formats if item.format_id.startswith("sniff:")), None)
+        source_url, direct = task.url, False
+        if selected and selected.format_id.startswith("sniffpair:"):
+            source_url = unquote(selected.format_id.removeprefix("sniffpair:").partition("|")[2])
+            direct = True
+        elif selected and selected.format_id.startswith("sniff:"):
+            source_url = unquote(selected.format_id.removeprefix("sniff:"))
+            direct = True
+        options = _ydl_base_options(task.url)
+        options["http_headers"]["Referer"] = task.url
+        target = download_audio(
+            url=source_url, title=result.title, task_id=task.task_id, output_format=task.audio_format,
+            download_dir=DOWNLOAD_DIR, ffmpeg_dir=FFMPEG_DIR, options=options, direct=direct,
+            expected_duration=result.duration, progress=lambda value, message: _set_task(task, progress=value, message=message),
+        )
+        _set_task(task, status="finished", progress=100, message="音轨已准备好", filename=target.name)
+    except Exception as exc:
+        _set_task(task, status="failed", message="音轨下载失败", error=_clean_error(exc, task.url))
+
+
 def _run_download(task: DownloadTask) -> None:
+    if task.media_type == "audio":
+        _run_audio_download(task)
+        return
     if task.format_id and task.format_id.startswith("sniffpair:"):
         payload = task.format_id.removeprefix("sniffpair:")
         video_part, _, audio_part = payload.partition("|")
@@ -2604,9 +2738,29 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/", include_in_schema=False)
+def frontend_endpoint() -> FileResponse:
+    index = FRONTEND_DIST / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "前端尚未构建，请在 frontend 目录执行 npm run build。")
+    return FileResponse(index)
+
+
 @app.post("/api/parse", response_model=ParseResponse)
 def parse_endpoint(payload: ParseRequest) -> ParseResponse:
     return parse_video(str(payload.url))
+
+
+@app.post("/api/music/parse")
+def parse_music_endpoint(payload: ParseRequest):
+    url = str(payload.url)
+    host = _host(url)
+    if music.identify(url) or any(host == domain or host.endswith(f".{domain}") for domain in ("music.163.com", "y.qq.com", "kugou.com")):
+        return music.parse_url(url)
+    result = parse_video(url)
+    if not result.formats:
+        raise HTTPException(422, "请使用单个视频或歌曲链接，当前链接没有可用音轨。")
+    return result.model_dump()
 
 
 @app.post("/api/download", response_model=DownloadResponse)
@@ -2616,6 +2770,8 @@ def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
         task_id=task_id,
         url=str(payload.url),
         format_id=payload.format_id,
+        media_type=payload.media_type,
+        audio_format=payload.audio_format,
     )
     with tasks_lock:
         tasks[task_id] = task

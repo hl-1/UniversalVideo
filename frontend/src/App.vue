@@ -4,6 +4,10 @@ import MindMapCanvas from './MindMapCanvas.vue'
 import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from './mindMap'
 import { getRecentLinks, saveRecentLink } from './recentLinks'
 import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
+import WatermarkEditor from './WatermarkEditor.vue'
+import MusicWorkspace from './MusicWorkspace.vue'
+import { extractHttpUrl } from './downloadInput'
+import { ArrowRight, Download, Eraser, LoaderCircle, Music2, Video } from 'lucide-vue-next'
 
 type VideoFormat = {
   format_id: string
@@ -85,6 +89,7 @@ declare global {
 }
 
 const url = ref('')
+const mode = ref<'video' | 'music'>('video')
 const selectedFormat = ref('')
 const parseResult = ref<ParseResult | null>(null)
 const task = ref<TaskResult | null>(null)
@@ -111,6 +116,11 @@ const previewVideoRef = ref<HTMLVideoElement | null>(null)
 const pendingSeekTime = ref<number | null>(null)
 const summaryTab = ref<SummaryTab>('summary')
 
+function changeMode(next: 'video' | 'music', focus = false) {
+  mode.value = next
+  if (focus) document.getElementById(`${next}-tab`)?.focus()
+}
+
 const supported = [
   { label: 'B站', href: 'https://www.bilibili.com/' },
   { label: 'YouTube', href: 'https://www.youtube.com/' },
@@ -119,13 +129,6 @@ const supported = [
   { label: '微博', href: 'https://weibo.com/' },
   { label: '更多 yt-dlp 支持站点', href: 'https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md' },
 ]
-const perks = [
-  { title: '先解析再下载', text: '标题、封面、格式信息先确认，避免盲目保存错误内容。' },
-  { title: '字幕驱动总结', text: '优先提取平台字幕与自动字幕，再生成结构化摘要和时间线。' },
-  { title: '选择位置保存', text: '支持浏览器系统保存对话框，把文件保存到你指定的位置。' },
-]
-const samples = ['公开课留档', '素材归档', 'AI 视频总结', '字幕笔记整理']
-
 const taskTone = computed(() => task.value?.status || 'idle')
 const summaryTone = computed(() => summaryTask.value?.status || 'idle')
 const mindMapTone = computed(() => mindMapTask.value?.status || 'idle')
@@ -389,15 +392,16 @@ async function startPreview() {
 }
 
 async function parseVideo() {
-  const target = url.value.trim()
+  const target = extractHttpUrl(url.value)
   if (!target) {
-    errorMessage.value = '请先粘贴一个公开视频链接。'
+    errorMessage.value = '请先粘贴视频链接或完整的分享文字。'
     return
   }
   rememberRecentLink(target)
   errorMessage.value = ''
   saveMessage.value = ''
   resetPreview()
+  stopPolling()
   parseResult.value = null
   task.value = null
   summaryTask.value = null
@@ -418,7 +422,7 @@ async function parseVideo() {
     })
     if (!response.ok) throw new Error(await readApiError(response))
     parseResult.value = await response.json()
-    selectedFormat.value = parseResult.value?.formats[0]?.format_id || ''
+    selectedFormat.value = parseResult.value?.formats.find((item) => item.format_id.startsWith('sniffpair:'))?.format_id || parseResult.value?.formats[0]?.format_id || ''
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '解析失败，请确认链接是否公开可访问。'
   } finally {
@@ -427,7 +431,7 @@ async function parseVideo() {
 }
 
 async function startDownload() {
-  const target = url.value.trim()
+  const target = parseResult.value?.webpage_url || extractHttpUrl(url.value)
   if (!target) return
   errorMessage.value = ''
   saveMessage.value = ''
@@ -545,47 +549,39 @@ onMounted(() => {
       </a>
       <nav class="nav-links" aria-label="主导航">
         <a href="#workspace">下载工作台</a>
+        <a href="#watermark">视频去水印</a>
         <a href="#platforms">支持平台</a>
         <a href="#notice">授权提醒</a>
       </nav>
-      <a class="login-pill" href="#workspace">立即体验</a>
+      <a class="login-pill" href="#workspace"><Download :size="16" />下载工作台</a>
     </header>
 
     <main>
       <section id="workspace" class="hero">
         <div class="hero-copy">
-          <span class="eyebrow">公开视频下载助手</span>
-          <h1>VideoDream，让公开视频保存更像一套专业工作流</h1>
-          <p>
-            粘贴链接，先解析标题、封面与格式，再选择保存位置并创建下载任务。轻量封装 yt-dlp，
-            为内容整理、学习留档和素材归档提供清爽入口。
-          </p>
-          <div class="scenario-list" aria-label="使用场景">
-            <span v-for="item in samples" :key="item">{{ item }}</span>
-          </div>
+          <span class="eyebrow">视频与音乐</span>
+          <h1>VideoDream</h1>
         </div>
-
-        <section class="download-panel" aria-label="视频下载工作台">
-          <div class="panel-kicker">
-            <span>解析工作台</span>
-            <strong>yt-dlp powered</strong>
+        <section class="download-panel" aria-label="下载工作台">
+          <div class="download-modes" role="tablist" aria-label="下载类型">
+            <button id="video-tab" role="tab" :aria-selected="mode === 'video'" :tabindex="mode === 'video' ? 0 : -1" aria-controls="video-panel" :class="{ active: mode === 'video' }" @click="changeMode('video')" @keydown.right.prevent="changeMode('music', true)" @keydown.left.prevent="changeMode('music', true)"><Video :size="21" /><span>视频下载</span></button>
+            <button id="music-tab" role="tab" :aria-selected="mode === 'music'" :tabindex="mode === 'music' ? 0 : -1" aria-controls="music-panel" :class="{ active: mode === 'music' }" @click="changeMode('music')" @keydown.left.prevent="changeMode('video', true)" @keydown.right.prevent="changeMode('video', true)"><Music2 :size="21" /><span>音乐下载</span></button>
           </div>
+          <MusicWorkspace v-show="mode === 'music'" :active="mode === 'music'" />
+          <div v-show="mode === 'video'" id="video-panel" role="tabpanel" aria-labelledby="video-tab">
           <div class="search-area">
-            <div class="search-bar">
-              <span class="search-icon">⌕</span>
-              <input
+            <form class="link-composer" @submit.prevent="parseVideo">
+              <textarea
                 v-model="url"
-                type="url"
-                placeholder="粘贴公开视频链接，例如 https://..."
+                aria-label="视频链接或分享文字"
+                placeholder="粘贴视频链接或分享文字…"
                 autocomplete="off"
                 @focus="showRecentLinks = true"
                 @blur="hideRecentLinksSoon"
-                @keyup.enter="parseVideo"
+                @keydown.ctrl.enter.prevent="parseVideo"
               />
-              <button :disabled="loadingParse" @click="parseVideo">
-                {{ loadingParse ? '解析中' : '解析' }}
-              </button>
-            </div>
+              <div class="composer-footer"><span class="composer-source">抖音 · B站 · YouTube</span><button class="composer-submit" type="submit" :disabled="loadingParse || !url.trim()"><LoaderCircle v-if="loadingParse" :size="18" class="spin" /><ArrowRight v-else :size="18" />{{ loadingParse ? '解析中' : '解析视频' }}</button></div>
+            </form>
             <div v-if="showRecentLinks && hasRecentLinks" class="recent-links" aria-label="最近输入链接">
               <button
                 v-for="item in recentLinks"
@@ -753,14 +749,18 @@ onMounted(() => {
             <button v-if="task.download_url" class="download-link" :disabled="savingFile" @click="saveFinishedFile()">
               {{ savingFile ? '保存中' : '另存为' }}
             </button>
+            <a v-if="task.status === 'finished' && task.filename" class="secondary-action compact watermark-entry" href="#watermark"><Eraser :size="16" aria-hidden="true" />去水印</a>
+          </div>
           </div>
         </section>
       </section>
 
+      <WatermarkEditor :preferred-filename="task?.status === 'finished' ? task.filename : null" />
+
       <section id="platforms" class="platform-band">
         <div class="section-title">
           <span>通用支持</span>
-          <h2>把复杂下载能力收进一个干净入口</h2>
+          <h2>来源平台</h2>
         </div>
         <div class="tag-grid">
           <a v-for="item in supported" :key="item.href" :href="item.href" target="_blank" rel="noreferrer">
@@ -769,16 +769,9 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="perk-grid" aria-label="核心优势">
-        <article v-for="item in perks" :key="item.title">
-          <h3>{{ item.title }}</h3>
-          <p>{{ item.text }}</p>
-        </article>
-      </section>
-
       <section id="notice" class="notice">
         <strong>授权提醒</strong>
-        <span>请仅下载你拥有权利、获得授权或平台允许保存的公开视频内容。VideoDream 不提供登录代办、会员内容下载或规避访问限制能力。</span>
+        <span>请仅下载你拥有权利、获得授权或平台允许保存的内容。</span>
       </section>
     </main>
   </div>
