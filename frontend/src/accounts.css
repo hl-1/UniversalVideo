@@ -1,0 +1,42 @@
+.account-entry { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; background: #f4f7f5; color: #24332c; }
+.mc-account-actions { display: flex; align-items: center; flex-shrink: 0; gap: 2px; margin-left: auto; }
+.personal-filters select, .personal-filters input { min-width: 0; border: 1px solid var(--music-line, #d3dfd7); padding: 9px 10px; border-radius: 6px; background: var(--music-bg, #fff); color: inherit; font: inherit; }
+@media (max-width: 760px) { .mc-topbar { flex-wrap: wrap; }.mc-topbar .mc-search { flex: 1 1 calc(100% - 4px); max-width: none; }.mc-topbar .mc-source { margin-right: auto; }.mc-account-actions .mc-icon { display: inline-flex; } }
+.account-brand { display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 700; margin-bottom: 34px; color: #137c57; }
+.account-form { width: 100%; max-width: 360px; }
+.account-form h1 { font-size: 24px; margin: 0 0 24px; }
+.account-form label, .account-password label, .admin-settings > label:not(.admin-toggle), .account-dialog form label { display: grid; gap: 8px; font-size: 14px; margin-bottom: 18px; }
+.account-form input, .account-password input, .admin-workspace input:not([type=checkbox]), .admin-workspace select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #ccd7d0; border-radius: 6px; background: #fff; color: #25342c; font: inherit; }
+.account-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 10px 16px; border: 0; border-radius: 6px; background: #147b57; color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.account-form .account-primary { width: 100%; }
+.account-text { display: block; margin: 18px auto 0; padding: 5px; border: 0; background: none; color: #147b57; cursor: pointer; }
+.account-error, .account-note, .account-notice { padding: 12px 14px; border-radius: 6px; font-size: 14px; overflow-wrap: anywhere; line-height: 1.6; }
+.account-error { color: #a3293e; background: #fff0f2; }
+.account-note { color: #705b12; background: #fff9df; }
+.account-notice { color: #176443; background: #e9f6ee; }
+.account-loading { display: flex; justify-content: center; padding: 45px; color: #147b57; }
+.account-icon { width: 36px; height: 36px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: inherit; border-radius: 6px; cursor: pointer; }
+.account-icon:hover { background: #edf2ef; }
+.account-icon.danger { color: #b13143; }
+.account-primary:disabled, .account-icon:disabled { opacity: .45; cursor: default; }
+.account-security { max-width: 720px; margin: 32px 0; border-top: 1px solid var(--music-line, #dce3df); padding-top: 24px; }
+.account-security h2, .admin-content h2 { font-size: 18px; margin: 20px 0 16px; }
+.account-password { max-width: 380px; margin-bottom: 34px; }
+.account-required { max-width: 760px; margin: auto; padding: 28px 24px; }
+.account-required > header { display: flex; justify-content: space-between; align-items: center; font-size: 23px; }
+.admin-workspace { background: #fafcfb; min-height: 100dvh; color: #28372f; }
+.admin-header { display: flex; align-items: center; gap: 12px; min-height: 68px; border-bottom: 1px solid #dce4df; padding: 12px 24px; background: #fff; }
+.admin-header strong { font-size: 20px; }.admin-header > span { border-left: 1px solid #dce4df; padding-left: 12px; font-size: 14px; }.admin-header small { margin-left: auto; }
+.admin-header > svg { flex-shrink: 0; }.admin-header strong, .admin-header > span { white-space: nowrap; }.admin-header small { min-width: 0; overflow-wrap: anywhere; }
+.admin-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: calc(100dvh - 68px); }
+.admin-nav { padding: 24px 12px; border-right: 1px solid #dce4df; background: #f4f7f5; }
+.admin-nav button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px; margin-bottom: 4px; border: 0; border-radius: 6px; background: none; color: #52645a; font-size: 14px; cursor: pointer; }.admin-nav button.active { background: #deefe6; color: #146545; font-weight: 600; }
+.admin-content { padding: 30px 32px; max-width: 1280px; width: 100%; min-width: 0; }
+.admin-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }.admin-title h1 { font-size: 24px; margin: 0; }
+.admin-filters { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }.admin-filters select { max-width: 200px; }.admin-filters input { max-width: 320px; }
+.admin-table-wrap { overflow-x: auto; width: 100%; }.admin-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }.admin-table th { color: #65776b; font-size: 12px; background: #f0f5f2; font-weight: 500; }.admin-table th, .admin-table td { padding: 13px 12px; border-bottom: 1px solid #e0e7e2; vertical-align: middle; }.admin-table select { min-width: 96px; padding: 7px 8px; }.admin-table td { overflow-wrap: anywhere; }.admin-table td:first-child { max-width: 430px; }.admin-table input[type=checkbox] { width: 16px; height: 16px; accent-color: #147b57; }.admin-secondary { display: block; margin-top: 5px; color: #7a897f; font-size: 12px; overflow-wrap: anywhere; }.admin-name { min-width: 180px; max-width: 420px; }.admin-actions { display: flex; gap: 4px; }.admin-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px; font-size: 13px; }.admin-pagination > button:not(.account-icon), .admin-bulk button { border: 1px solid #d3dfd7; border-radius: 5px; padding: 6px 10px; background: #fff; color: inherit; cursor: pointer; }.admin-bulk { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 13px; }
+.admin-settings { max-width: 560px; }.admin-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #e0e7e2; font-size: 14px; }.admin-toggle input { accent-color: #147b57; width: 18px; height: 18px; flex-shrink: 0; }.admin-toggle small { color: #708277; }.admin-settings .account-primary { margin-top: 22px; }
+.admin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin: 8px 0 30px; }.admin-metrics > div { padding: 18px 0; border-bottom: 2px solid #d3e7db; }.admin-metrics span { display: block; color: #6a7d70; font-size: 13px; }.admin-metrics strong { display: block; font-size: 22px; margin-top: 12px; overflow-wrap: anywhere; }
+.account-dialog-backdrop { position: fixed; inset: 0; z-index: 150; background: #182a2366; display: flex; align-items: center; justify-content: center; padding: 20px; }.account-dialog { background: #fff; color: #28372f; border-radius: 8px; width: 100%; max-width: 540px; max-height: 85dvh; overflow: auto; padding: 24px; }.account-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }.account-dialog h2 { font-size: 19px; margin: 0; }.account-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }.account-dialog form input, .account-dialog form select { width: 100%; padding: 10px; border: 1px solid #ccd7d0; border-radius: 6px; }
+@media (max-width: 760px) { .admin-layout { grid-template-columns: minmax(0, 1fr); }.admin-nav { display: flex; gap: 6px; border-right: 0; border-bottom: 1px solid #dce4df; padding: 10px 12px; overflow-x: auto; }.admin-nav button { width: auto; flex-shrink: 0; gap: 7px; padding: 10px; margin: 0; }.admin-content { padding: 24px 16px; }.admin-header { padding: 12px; gap: 8px; }.admin-header strong { font-size: 18px; }.admin-header > span { font-size: 12px; padding-left: 8px; }.admin-filters { flex-wrap: wrap; gap: 8px; }.admin-filters select { max-width: calc(50% - 4px); flex: 1 1 40%; }.admin-filters input { flex: 1 1 60%; width: auto; }.admin-title h1 { font-size: 21px; }.admin-title .account-primary { font-size: 13px; padding: 9px 12px; }.admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.admin-table { font-size: 13px; }.account-dialog { padding: 18px; }.account-security { margin: 24px 0; }.account-password { max-width: 100%; } }
+@media (max-width: 760px) { .admin-header { flex-wrap: wrap; }.admin-header small { flex: 1 1 calc(100% - 44px); margin-left: 44px; } }

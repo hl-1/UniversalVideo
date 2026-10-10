@@ -17,12 +17,16 @@ from pydantic import BaseModel, Field, HttpUrl
 from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 
+from backend import accounts
+
 
 Provider = Literal["qq", "netease", "kugou"]
 router = APIRouter(prefix="/api/music", tags=["music"])
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://y.qq.com/"}
 GD_API = "https://music-api.gdstudio.xyz/api.php"
+AT38_URL = "https://www.at38.cn/"
 TOKEN_TTL = 1800
+SEARCH_PAGE_SIZE = 20
 RANGE_PATTERN = re.compile(r"^bytes=(?:\d+-\d*|-\d+)$")
 lock = threading.Lock()
 search_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="music-search")
@@ -60,7 +64,7 @@ class PlaybackSession:
 
 sessions: dict[str, TrackSession] = {}
 playback_sessions: dict[str, PlaybackSession] = {}
-search_cache: dict[tuple[str, str], tuple[float, list[Track]]] = {}
+search_cache: dict[tuple[str, str, int], tuple[float, list[Track]]] = {}
 
 
 def _json(url: str, *, params: dict | None = None, data: dict | None = None, payload: dict | None = None, referer: str | None = None):
@@ -202,20 +206,20 @@ def parse_url(url: str) -> Track:
         raise HTTPException(422, "平台未返回单曲信息，可能要求登录或当前接口不可用。") from exc
 
 
-def _search(provider: Provider, query: str) -> list[Track]:
-    cache_key = (provider, query)
+def _search(provider: Provider, query: str, page: int = 1) -> list[Track]:
+    cache_key = (provider, query, page)
     with lock:
         cached = search_cache.get(cache_key)
     if cached and cached[0] > time.time():
         return [_register(track) for track in cached[1]]
     if provider == "netease":
-        data = _json("https://music.163.com/api/search/get/web", data={"s": query, "type": 1, "limit": 8, "offset": 0}, referer="https://music.163.com/")
+        data = _json("https://music.163.com/api/search/get/web", data={"s": query, "type": 1, "limit": SEARCH_PAGE_SIZE, "offset": (page - 1) * SEARCH_PAGE_SIZE}, referer="https://music.163.com/")
         tracks = [_netease_track(item) for item in data.get("result", {}).get("songs", [])]
     elif provider == "qq":
-        data = _json("https://c.y.qq.com/soso/fcgi-bin/client_search_cp", params={"w": query, "p": 1, "n": 8, "format": "json", "aggr": 1, "new_json": 1})
+        data = _json("https://c.y.qq.com/soso/fcgi-bin/client_search_cp", params={"w": query, "p": page, "n": SEARCH_PAGE_SIZE, "format": "json", "aggr": 1, "new_json": 1})
         tracks = [_qq_track(item) for item in data.get("data", {}).get("song", {}).get("list", [])]
     else:
-        data = _json("https://songsearch.kugou.com/song_search_v2", params={"keyword": query, "page": 1, "pagesize": 8, "platform": "WebFilter", "filter": 2}, referer="https://www.kugou.com/")
+        data = _json("https://songsearch.kugou.com/song_search_v2", params={"keyword": query, "page": page, "pagesize": SEARCH_PAGE_SIZE, "platform": "WebFilter", "filter": 2}, referer="https://www.kugou.com/")
         tracks = []
         for item in data.get("data", {}).get("lists", []):
             try:
@@ -232,20 +236,49 @@ def _search(provider: Provider, query: str) -> list[Track]:
 
 
 @router.get("/search")
-def search(q: str = Query(min_length=1, max_length=100), source: Literal["all", "qq", "netease", "kugou"] = "all") -> dict:
+def search(q: str = Query(min_length=1, max_length=100), source: Literal["all", "qq", "netease", "kugou"] = "all",
+           page: Annotated[int, Query(ge=1, le=20)] = 1) -> dict:
     if not q.strip():
         raise HTTPException(422, "请输入歌曲名称。")
     providers = ["qq", "netease", "kugou"] if source == "all" else [source]
-    futures = [(provider, search_pool.submit(_search, provider, q.strip())) for provider in providers]
-    tracks, statuses = [], []
+    futures = [(provider, search_pool.submit(_search, provider, q.strip(), page)) for provider in providers]
+    tracks, statuses, has_more = [], [], False
     for provider, future in futures:
         try:
             found = future.result()
             tracks.extend(found)
+            has_more = has_more or len(found) >= SEARCH_PAGE_SIZE
             statuses.append({"provider": provider, "message": f"找到 {len(found)} 首歌曲" if found else "未找到歌曲或平台未返回结果。"})
         except Exception:
             statuses.append({"provider": provider, "message": "搜索接口暂不可用，可能需要登录或触发了平台限制。"})
-    return {"tracks": tracks, "sources": statuses}
+    return {"tracks": tracks, "sources": statuses, "page": page, "has_more": has_more and page < 20}
+
+
+def _at38_url(track: Track) -> str:
+    source_type = {"qq": "qq", "netease": "wy"}.get(track.provider)
+    if not source_type:
+        raise RuntimeError("at38 暂不支持该音乐平台。")
+    params = {"action": "geturl", "id": track.identifier, "type": source_type,
+              "filename": f"{track.artist} - {track.title}"}
+    with requests.Session() as session:
+        for attempt in range(2):
+            response = session.get(AT38_URL, params=params, headers={**HEADERS, "Referer": AT38_URL}, timeout=(5, 15))
+            response.raise_for_status()
+            try:
+                data = response.json()
+            except ValueError as exc:
+                # The normal visitor page sets this cookie in JavaScript before reloading.
+                cookie = re.search(r"""document\.cookie\s*=\s*["']mk_visit=([^;"'\s]+)""", response.text)
+                if attempt or not cookie:
+                    raise RuntimeError("at38 未返回音源，请稍后重试。") from exc
+                session.cookies.set("mk_visit", cookie[1], domain="www.at38.cn", path="/")
+                continue
+            media_url = data.get("url") if isinstance(data, dict) and data.get("code") == 1 else None
+            parsed = urlparse(media_url) if isinstance(media_url, str) else None
+            if not parsed or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise RuntimeError("at38 未返回有效音源。")
+            return media_url
+    raise RuntimeError("at38 未返回音源，请稍后重试。")
 
 
 def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[str, dict, str]:
@@ -284,6 +317,12 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
             return media_url, options, source
     except Exception:
         pass
+    if track.provider in {"qq", "netease"}:
+        try:
+            media_url = _at38_url(track)
+            return media_url, {**options, "http_headers": {**options["http_headers"], "Referer": AT38_URL}}, "51ape音乐 · at38.cn"
+        except Exception:
+            pass
     if track.provider == "kugou":
         raise RuntimeError("酷狗音乐未返回完整音源，当前歌曲可能需要付费或平台接口要求登录。")
     raise RuntimeError("未取得完整音源：平台可能要求会员或单曲购买，或当前解析接口不可用。")
@@ -307,11 +346,14 @@ def create_playback(payload: PlaybackRequest) -> dict:
         if len(playback_sessions) >= 200:
             del playback_sessions[next(iter(playback_sessions))]
         playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL)
+    accounts.register_resource("playback", token)
     return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL, "source": source}
 
 
 @router.get("/playback/{token}/content")
 def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None) -> StreamingResponse:
+    if accounts.principal.get():
+        accounts.resource("playback", token)
     with lock:
         session = playback_sessions.get(token)
         if session and session.expires_at <= time.time():

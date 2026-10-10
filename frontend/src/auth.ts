@@ -1,0 +1,138 @@
+import { ref } from 'vue'
+
+export type Account = { id: number; username: string; role: 'user' | 'super_admin'; status: 'active' | 'disabled'; must_change_password: boolean; created_at: number }
+export const account = ref<Account | null>(null)
+export const authReady = ref(false)
+export const authError = ref('')
+export const registrationEnabled = ref(false)
+export const initialized = ref(true)
+const nativeFetch = window.fetch.bind(window)
+let accessToken = ''
+let expiresAt = 0
+let refreshPromise: Promise<boolean> | undefined
+let epoch = 0
+const events = new BroadcastChannel('videodream-account-events')
+
+function clearSession(broadcast = false) {
+  epoch++
+  accessToken = ''
+  expiresAt = 0
+  account.value = null
+  window.dispatchEvent(new Event('videodream-session-cleared'))
+  if (broadcast) events.postMessage('logout')
+}
+events.onmessage = event => { if (event.data === 'logout') clearSession() }
+
+async function authRequest(path: string, body?: unknown) {
+  const response = await nativeFetch(`/api/auth/${path}`, { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-VideoDream-CSRF': '1' }, body: body ? JSON.stringify(body) : undefined })
+  const data = await response.json()
+  if (!response.ok) throw Object.assign(new Error(data.detail || '认证服务暂不可用。'), { status: response.status })
+  return data
+}
+
+function accept(data: { access_token: string; expires_in: number; user: Account }) {
+  accessToken = data.access_token
+  expiresAt = Date.now() + data.expires_in * 1000
+  account.value = data.user
+  authError.value = ''
+}
+
+export async function refreshSession(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise
+  const revision = epoch
+  const pending = (async () => await navigator.locks.request('videodream-refresh', async () => {
+    try {
+      const data = await authRequest('refresh')
+      if (revision !== epoch) return false
+      accept(data)
+      return true
+    } catch (failure) {
+      if (revision !== epoch) return false
+      if ((failure as { status?: number }).status === 401) clearSession()
+      else authError.value = failure instanceof Error ? failure.message : '认证服务暂不可用。'
+      return false
+    }
+  }))().finally(() => { refreshPromise = undefined })
+  refreshPromise = pending
+  return pending
+}
+
+async function token(force = false) {
+  if (force || !accessToken || Date.now() > expiresAt - 30000) await refreshSession()
+  return accessToken
+}
+
+export async function authenticatedFetch(input: RequestInfo | URL, options?: RequestInit): Promise<Response> {
+  const url = new URL(input instanceof Request ? input.url : String(input), window.location.href)
+  if (url.origin !== location.origin || !url.pathname.startsWith('/api/') || ['/api/auth/status', '/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout'].includes(url.pathname)) return nativeFetch(input, options)
+  const revision = epoch
+  const request = new Request(input, options)
+  const saved = request.clone()
+  const headers = new Headers(request.headers)
+  const credential = await token()
+  if (credential) headers.set('Authorization', `Bearer ${credential}`)
+  let response = await nativeFetch(new Request(request, { headers, credentials: 'same-origin' }))
+  if (revision !== epoch) throw new DOMException('Session changed', 'AbortError')
+  if (response.status === 401 && await refreshSession()) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+    response = await nativeFetch(new Request(saved, { headers, credentials: 'same-origin' }))
+  }
+  if (revision !== epoch) throw new DOMException('Session changed', 'AbortError')
+  if (response.status === 401) clearSession()
+  if (response.status === 403 && account.value && (await response.clone().text()).includes('临时密码')) {
+    account.value = { ...account.value, must_change_password: true }
+  }
+  return response
+}
+
+export async function login(username: string, password: string) {
+  const data = await authRequest('login', { username, password })
+  clearSession(true)
+  accept(data)
+}
+
+export async function register(username: string, password: string) {
+  await authRequest('register', { username, password })
+  await login(username, password)
+}
+
+export async function logout() {
+  await authRequest('logout')
+  clearSession(true)
+}
+
+export async function changePassword(old_password: string, new_password: string) {
+  const response = await authenticatedFetch('/api/auth/password', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await token()}` }, body: JSON.stringify({ old_password, new_password }) })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.detail || '密码修改失败。')
+  clearSession(true)
+}
+
+export async function initializeAuth() {
+  window.fetch = authenticatedFetch
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data?.type === 'videodream-token') {
+      void token(Boolean(event.data.force)).then(value => event.ports[0]?.postMessage({ token: value }))
+    }
+  })
+  try {
+    await navigator.serviceWorker.register('/auth-worker.js', { scope: '/' })
+    await navigator.serviceWorker.ready
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error('媒体认证初始化失败，请刷新页面。')), 10000)
+        navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timer); resolve() }, { once: true })
+      })
+    }
+    const response = await nativeFetch('/api/auth/status')
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.detail || '认证服务暂不可用。')
+    initialized.value = data.initialized
+    registrationEnabled.value = data.registration_enabled
+    if (initialized.value) await refreshSession()
+  } catch (failure) {
+    authError.value = failure instanceof Error ? failure.message : '认证初始化失败。'
+  } finally { authReady.value = true }
+}

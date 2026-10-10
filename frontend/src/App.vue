@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import MindMapCanvas from './MindMapCanvas.vue'
 import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from './mindMap'
 import { getRecentLinks, saveRecentLink } from './recentLinks'
 import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
 import WatermarkEditor from './WatermarkEditor.vue'
-import MusicWorkspace from './MusicWorkspace.vue'
+import MusicCenter from './MusicCenter.vue'
+import MusicPlayer from './MusicPlayer.vue'
+import AdminWorkspace from './AdminWorkspace.vue'
+import { account } from './auth'
+import { pausePlayback } from './musicPlayer'
+import type { MusicTrack } from './musicLibrary'
 import { extractHttpUrl } from './downloadInput'
 import { ArrowRight, Download, Eraser, LoaderCircle, Music2, Video } from 'lucide-vue-next'
 
@@ -90,6 +95,23 @@ declare global {
 
 const url = ref('')
 const mode = ref<'video' | 'music'>('video')
+const appPage = ref<'music' | 'tools' | 'admin'>('music')
+const musicCenter = ref<{ download: (track: MusicTrack) => Promise<void> } | null>(null)
+function openMusicTools(view: 'video' | 'watermark') {
+  appPage.value = 'tools'
+  void nextTick(() => document.getElementById(view === 'watermark' ? 'watermark' : 'workspace')?.scrollIntoView())
+}
+function onToolsPlay(event: Event) {
+  if (event.target instanceof HTMLVideoElement) pausePlayback()
+}
+function returnMusicCenter() {
+  appPage.value = 'music'
+  void nextTick(() => window.scrollTo({ top: 0 }))
+}
+function downloadFromPlayer(track: MusicTrack) {
+  returnMusicCenter()
+  void musicCenter.value?.download(track)
+}
 const selectedFormat = ref('')
 const parseResult = ref<ParseResult | null>(null)
 const task = ref<TaskResult | null>(null)
@@ -117,6 +139,7 @@ const pendingSeekTime = ref<number | null>(null)
 const summaryTab = ref<SummaryTab>('summary')
 
 function changeMode(next: 'video' | 'music', focus = false) {
+  if (next === 'music') { returnMusicCenter(); return }
   mode.value = next
   if (focus) document.getElementById(`${next}-tab`)?.focus()
 }
@@ -201,11 +224,11 @@ function stopMindMapPolling() {
 }
 
 function loadRecentLinks() {
-  recentLinks.value = getRecentLinks(window.localStorage)
+  recentLinks.value = getRecentLinks(window.localStorage, `videodream.recentLinks.${account.value?.id}`)
 }
 
 function rememberRecentLink(target: string) {
-  recentLinks.value = saveRecentLink(window.localStorage, target)
+  recentLinks.value = saveRecentLink(window.localStorage, target, `videodream.recentLinks.${account.value?.id}`)
 }
 
 function selectRecentLink(target: string) {
@@ -542,12 +565,16 @@ onMounted(() => {
 
 <template>
   <div class="page-shell">
+    <div v-show="appPage === 'music'"><MusicCenter ref="musicCenter" @open-tools="openMusicTools" @open-admin="pausePlayback(); appPage = 'admin'" /></div>
+    <AdminWorkspace v-if="appPage === 'admin'" @back="appPage = 'music'" />
+    <div v-show="appPage === 'tools'" class="tools-page" @play.capture="onToolsPlay">
     <header class="topbar">
-      <a class="brand" href="#">
+      <a class="brand" href="#" @click.prevent="returnMusicCenter">
         <span class="brand-mark">VD</span>
         <span>VideoDream</span>
       </a>
       <nav class="nav-links" aria-label="主导航">
+        <a href="#" @click.prevent="returnMusicCenter">音乐中心</a>
         <a href="#workspace">下载工作台</a>
         <a href="#watermark">视频去水印</a>
         <a href="#platforms">支持平台</a>
@@ -565,9 +592,8 @@ onMounted(() => {
         <section class="download-panel" aria-label="下载工作台">
           <div class="download-modes" role="tablist" aria-label="下载类型">
             <button id="video-tab" role="tab" :aria-selected="mode === 'video'" :tabindex="mode === 'video' ? 0 : -1" aria-controls="video-panel" :class="{ active: mode === 'video' }" @click="changeMode('video')" @keydown.right.prevent="changeMode('music', true)" @keydown.left.prevent="changeMode('music', true)"><Video :size="21" /><span>视频下载</span></button>
-            <button id="music-tab" role="tab" :aria-selected="mode === 'music'" :tabindex="mode === 'music' ? 0 : -1" aria-controls="music-panel" :class="{ active: mode === 'music' }" @click="changeMode('music')" @keydown.left.prevent="changeMode('video', true)" @keydown.right.prevent="changeMode('video', true)"><Music2 :size="21" /><span>音乐下载</span></button>
+            <button type="button" @click="changeMode('music')"><Music2 :size="21" /><span>音乐中心</span></button>
           </div>
-          <MusicWorkspace v-show="mode === 'music'" :active="mode === 'music'" />
           <div v-show="mode === 'video'" id="video-panel" role="tabpanel" aria-labelledby="video-tab">
           <div class="search-area">
             <form class="link-composer" @submit.prevent="parseVideo">
@@ -774,5 +800,7 @@ onMounted(() => {
         <span>请仅下载你拥有权利、获得授权或平台允许保存的内容。</span>
       </section>
     </main>
+    </div>
+    <div v-show="appPage !== 'admin'"><MusicPlayer @download="downloadFromPlayer" /></div>
   </div>
 </template>

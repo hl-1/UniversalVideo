@@ -6,11 +6,12 @@ import requests
 from fastapi.testclient import TestClient
 
 from backend import main, music
+from backend.test_support import domain_app
 
 
 class MusicPlaybackTests(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(main.app)
+        self.client = TestClient(domain_app(main.app))
         self.track = music._register(music.Track(
             title="song", artist="artist", duration=269, provider="qq", identifier="0039MnYb0qxYhV",
             webpage_url="https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV",

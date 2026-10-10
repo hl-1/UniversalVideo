@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from backend import inpainting
+from backend import accounts, inpainting
 
 
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "downloads"
@@ -71,6 +71,7 @@ class WatermarkResponse(BaseModel):
     processing_device: str | None = None
 
 
+
 @dataclass
 class WatermarkJob:
     task_id: str
@@ -91,6 +92,7 @@ class WatermarkJob:
     stopped_at: float | None = None
     processing_started_at: float | None = None
     processing_device: str | None = None
+    user_id: int = 0
 
     def response(self) -> WatermarkResponse:
         now = self.stopped_at or time.perf_counter()
@@ -119,6 +121,8 @@ jobs: dict[str, WatermarkJob] = {}
 
 
 def _video_path(filename: str) -> Path:
+    if accounts.principal.get():
+        accounts.resource("file", filename)
     if any(char in filename for char in ("/", "\\", ":", "\x00")) or Path(filename).name != filename:
         raise HTTPException(status_code=422, detail="视频文件名不合法。")
     candidate = DOWNLOAD_DIR / filename
@@ -187,9 +191,22 @@ def _filter_chain(info: VideoInfo, regions: list[WatermarkRegion]) -> str:
 
 
 def _update(job: WatermarkJob, **changes) -> None:
+    if job.user_id and not job.cancel.is_set() and time.monotonic() - getattr(job, "_checked_at", 0) >= 1:
+        try:
+            accounts.active_worker(job.user_id)
+            job._checked_at = time.monotonic()
+        except HTTPException:
+            job.cancel.set()
+            _stop_processes(job)
     with jobs_lock:
         for key, value in changes.items():
             setattr(job, key, value)
+    if job.user_id and (time.monotonic() - getattr(job, "_saved_at", 0) >= 1 or job.status in {"finished", "failed", "cancelled"}):
+        accounts.register_resource("watermark", job.task_id, job.response().model_dump(), uid=job.user_id)
+        job._saved_at = time.monotonic()
+        if job.status == "finished" and job.filename:
+            path = DOWNLOAD_DIR / job.filename
+            accounts.register_resource("file", job.filename, {"filename": job.filename, "size": path.stat().st_size}, uid=job.user_id)
 
 
 def _stop_processes(job: WatermarkJob) -> None:
@@ -259,6 +276,8 @@ def _run_watermark(job: WatermarkJob) -> None:
     timer = None
     timed_out = threading.Event()
     try:
+        if job.user_id:
+            accounts.active_worker(job.user_id)
         with jobs_lock:
             if job.cancel.is_set():
                 return
@@ -344,9 +363,11 @@ def _run_watermark(job: WatermarkJob) -> None:
 
 @router.get("/videos")
 def list_videos() -> list[dict]:
+    allowed = accounts.permitted_files() if accounts.principal.get() else None
     files = [
         path for path in DOWNLOAD_DIR.iterdir()
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+        and (allowed is None or path.name in allowed)
         and not path.name.endswith(".part.mp4") and path.resolve().parent == DOWNLOAD_DIR.resolve()
     ]
     files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
@@ -421,12 +442,14 @@ def create_watermark(payload: WatermarkRequest) -> WatermarkResponse:
     if payload.method == "lama" and not inpainting.availability()["available"]:
         raise HTTPException(status_code=503, detail="AI 修复模型未安装。")
     job = WatermarkJob(uuid.uuid4().hex[:12], source, info, payload.regions, method=payload.method)
+    job.user_id = accounts.owner_id() if accounts.principal.get() else 0
     with jobs_lock:
         if sum(item.status in {"pending", "running"} for item in jobs.values()) >= 4:
             raise HTTPException(status_code=429, detail="去水印队列已满，请等待现有任务完成。")
         jobs[job.task_id] = job
         response = job.response()
-    executor.submit(_run_watermark, job)
+    accounts.register_resource("watermark", job.task_id, response.model_dump(), uid=job.user_id)
+    accounts.submit(executor, _run_watermark, job)
     return response
 
 
@@ -435,8 +458,25 @@ def get_watermark(task_id: str) -> WatermarkResponse:
     with jobs_lock:
         job = jobs.get(task_id)
         if not job:
+            if accounts.principal.get():
+                return WatermarkResponse.model_validate(json.loads(accounts.resource("watermark", task_id)["payload"]))
             raise HTTPException(status_code=404, detail="去水印任务不存在或服务已重启。")
         return job.response()
+
+
+def cancel_user_jobs(uid: int, key: str | None = None):
+    with jobs_lock:
+        active = [job for job in jobs.values() if job.user_id == uid and (key is None or job.task_id == key or job.source.name == key)
+                  and job.status in {"pending", "running"}]
+        for job in active:
+            job.cancel.set()
+            _stop_processes(job)
+            job.status, job.message = "cancelled", "账号已停用或任务已取消"
+    for job in active:
+        _update(job)
+
+
+accounts.cancel_callbacks.append(cancel_user_jobs)
 
 
 @router.delete("/tasks/{task_id}", response_model=WatermarkResponse)

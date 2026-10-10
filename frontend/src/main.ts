@@ -1,5 +1,8 @@
 import { createApp } from 'vue'
-import App from './App.vue'
+import Root from './Root.vue'
+import { initializeAuth } from './auth'
 import './styles.css'
+import './accounts.css'
 
-createApp(App).mount('#app')
+createApp(Root).mount('#app')
+void initializeAuth()

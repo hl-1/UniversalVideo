@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field, HttpUrl
+from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.cookies import extract_cookies_from_browser
 from yt_dlp.utils import DownloadError
@@ -33,6 +35,12 @@ from yt_dlp.utils import DownloadError
 from backend.watermark import router as watermark_router
 from backend.audio import IncompleteAudioError, download_audio
 from backend import music
+from backend.music_lyrics import router as music_lyrics_router
+from backend.music_library_media import router as music_library_media_router, start_cover_backfill
+from backend import accounts, library
+from backend.administration import router as administration_router
+from backend.workspace import router as workspace_router
+from backend.network import public_url, public_get
 
 
 logger = logging.getLogger("videodream.summary")
@@ -51,7 +59,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 THUMBNAIL_DIR.mkdir(exist_ok=True)
 SUMMARY_DIR.mkdir(exist_ok=True)
 
-TaskStatus = Literal["pending", "running", "finished", "failed"]
+TaskStatus = Literal["pending", "running", "finished", "failed", "cancelled"]
 
 
 class ParseRequest(BaseModel):
@@ -98,6 +106,16 @@ class ParseResponse(BaseModel):
 
 class DownloadResponse(BaseModel):
     task_id: str
+
+
+class BatchTrackRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    webpage_url: HttpUrl
+
+
+class MusicBatchRequest(BaseModel):
+    tracks: list[BatchTrackRequest] = Field(min_length=1, max_length=100)
+    audio_format: Literal["m4a", "mp3"] = "m4a"
 
 
 class SubtitleSegment(BaseModel):
@@ -192,6 +210,10 @@ class DownloadTask:
         self.error: str | None = None
         self.created_at = time.time()
         self.updated_at = time.time()
+        self.music_track: music.Track | None = None
+        self.user_id = accounts.owner_id() if accounts.principal.get() else 0
+        self.cancel = threading.Event()
+        self.process: subprocess.Popen | None = None
 
     def to_response(self) -> TaskResponse:
         download_url = f"/api/files/{quote(self.filename, safe='')}" if self.filename else None
@@ -219,6 +241,8 @@ class SummaryTask:
         self.transcript: list[SubtitleSegment] = []
         self.created_at = time.time()
         self.updated_at = time.time()
+        self.user_id = accounts.owner_id() if accounts.principal.get() else 0
+        self.cancel = threading.Event()
 
     def to_response(self) -> SummaryTaskResponse:
         return SummaryTaskResponse(
@@ -233,6 +257,8 @@ class SummaryTask:
 
 class MindMapTask:
     def __init__(self, task_id: str, summary_task_id: str) -> None:
+        self.user_id = accounts.owner_id() if accounts.principal.get() else 0
+        self.cancel = threading.Event()
         self.task_id = task_id
         self.summary_task_id = summary_task_id
         self.status: TaskStatus = "pending"
@@ -258,6 +284,13 @@ class MindMapTask:
 app = FastAPI(title="VideoDream API", version="1.0.0")
 app.include_router(watermark_router)
 app.include_router(music.router)
+app.include_router(music_lyrics_router)
+app.include_router(music_library_media_router)
+app.include_router(library.router)
+app.include_router(accounts.router)
+app.include_router(administration_router)
+app.include_router(workspace_router)
+app.add_middleware(accounts.AuthenticationMiddleware)
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 if (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
@@ -276,6 +309,10 @@ app.add_middleware(
 
 tasks: dict[str, DownloadTask] = {}
 tasks_lock = threading.Lock()
+music_batches: dict[str, dict[str, Any]] = {}
+music_batches_lock = threading.RLock()
+music_batch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="music-batch")
+MUSIC_BATCH_INTERVAL = 2.0
 summary_tasks: dict[str, SummaryTask] = {}
 summary_tasks_lock = threading.Lock()
 mind_map_tasks: dict[str, MindMapTask] = {}
@@ -460,10 +497,12 @@ def _clean_error(error: Exception, url: str | None = None) -> str:
 
 
 def _set_summary_task(task: SummaryTask, **changes: Any) -> None:
+    _checkpoint(task, changes)
     with summary_tasks_lock:
         for key, value in changes.items():
             setattr(task, key, value)
         task.updated_at = time.time()
+    _persist_task(task, "summary")
 
 
 def _safe_filename_stem(value: str) -> str:
@@ -868,6 +907,11 @@ def _summary_source_label(source: str) -> str:
 
 
 def _load_ai_config() -> dict[str, str]:
+    if accounts.principal.get():
+        config = accounts.settings()
+        if not config["ai_api_key"]:
+            raise RuntimeError("请在管理后台配置 AI 服务密钥。")
+        return {"api_key": config["ai_api_key"], "model": config["ai_model"], "base_url": config["ai_base_url"]}
     if not AI_CONFIG_PATH.exists():
         raise RuntimeError("缺少 AI 配置文件：请根据 config/ai.example.json 创建 config/ai.json。")
     try:
@@ -1079,10 +1123,12 @@ def _generate_ai_mind_map(title: str, segments: list[SubtitleSegment]) -> MindMa
 
 
 def _set_mind_map_task(task: MindMapTask, **changes: Any) -> None:
+    _checkpoint(task, changes)
     with mind_map_tasks_lock:
         for key, value in changes.items():
             setattr(task, key, value)
         task.updated_at = time.time()
+    _persist_task(task, "mind_map")
 
 
 def _run_mind_map(task: MindMapTask, summary: SummaryTask) -> None:
@@ -1129,6 +1175,8 @@ def _save_summary_files(task: SummaryTask, result: SummaryResult) -> SummaryResu
     )
     result.markdown_url = f"/api/summary-files/{quote(markdown_name, safe='')}"
     result.json_url = f"/api/summary-files/{quote(json_name, safe='')}"
+    accounts.register_resource("summary_file", markdown_name, {"filename": markdown_name, "size": markdown_path.stat().st_size}, uid=task.user_id)
+    accounts.register_resource("summary_file", json_name, {"filename": json_name, "size": json_path.stat().st_size}, uid=task.user_id)
     return result
 
 
@@ -1589,6 +1637,8 @@ def _is_youtube_progressive_stream(url: str) -> bool:
 
 
 def _get_sniff_cache(url: str) -> ParseResponse | None:
+    if accounts.principal.get():
+        url = f"{accounts.owner_id()}:{url}"
     with sniff_cache_lock:
         cached = sniff_cache.get(url)
         if not cached:
@@ -1601,6 +1651,8 @@ def _get_sniff_cache(url: str) -> ParseResponse | None:
 
 
 def _set_sniff_cache(url: str, response: ParseResponse) -> None:
+    if accounts.principal.get():
+        url = f"{accounts.owner_id()}:{url}"
     with sniff_cache_lock:
         sniff_cache[url] = (time.time(), response)
 
@@ -1651,6 +1703,7 @@ def create_preview(payload: PreviewRequest) -> PreviewResponse:
             referer=referer,
             expires_at=now + PREVIEW_TTL_SECONDS,
         )
+    accounts.register_resource("preview", token)
     return PreviewResponse(
         preview_url=f"/api/previews/{token}/content",
         expires_in=PREVIEW_TTL_SECONDS,
@@ -1785,21 +1838,24 @@ def _extract_douyin_author_from_text(text: str | None) -> str | None:
 
 
 def _capture_page_thumbnail(page: Any, normalized_url: str) -> str | None:
+    identity = f"{accounts.owner_id()}:{normalized_url}" if accounts.principal.get() else normalized_url
     try:
-        filename = f"{hashlib.sha1(normalized_url.encode('utf-8')).hexdigest()[:16]}.png"
+        filename = f"{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:16]}.png"
         target_path = THUMBNAIL_DIR / filename
         videos = page.locator("video")
         index = videos.evaluate_all("""(videos) => videos.findIndex(video => video.currentSrc.startsWith('blob:') || video.currentSrc.includes('.douyinvod.com/'))""")
         locator = videos.nth(index) if index >= 0 else page.locator("body").first
         locator.screenshot(path=str(target_path), timeout=2000)
         if target_path.exists() and target_path.stat().st_size > 0:
+            accounts.register_resource("thumbnail", filename, {"filename": filename, "size": target_path.stat().st_size})
             return _local_thumbnail(filename)
     except Exception:
         try:
-            filename = f"{hashlib.sha1(normalized_url.encode('utf-8')).hexdigest()[:16]}.png"
+            filename = f"{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:16]}.png"
             target_path = THUMBNAIL_DIR / filename
             page.screenshot(path=str(target_path), timeout=2000, full_page=False)
             if target_path.exists() and target_path.stat().st_size > 0:
+                accounts.register_resource("thumbnail", filename, {"filename": filename, "size": target_path.stat().st_size})
                 return _local_thumbnail(filename)
         except Exception:
             return None
@@ -2053,6 +2109,12 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
         def route_request(route: Any) -> None:
             request = route.request
+            if accounts.principal.get() and request.url.startswith(("http://", "https://")):
+                try:
+                    public_url(request.url)
+                except HTTPException:
+                    route.abort()
+                    return
             remember(request.url)
             if request.resource_type in {"image", "font", "stylesheet"} or (
                 request.resource_type == "media" and not (is_youtube_page or is_douyin_page or is_pornhub_page)
@@ -2366,11 +2428,47 @@ def parse_video(url: str) -> ParseResponse:
     )
 
 
+def _checkpoint(task, changes):
+    if not task.user_id:
+        return
+    if changes.get("status") in {"failed", "cancelled"}:
+        if task.cancel.is_set():
+            changes.update(status="cancelled", message="账号已停用或任务已取消", error=None)
+        return
+    try:
+        if task.cancel.is_set():
+            raise HTTPException(401, "任务已取消。")
+        if time.monotonic() - getattr(task, "_checked_at", 0) >= 1:
+            accounts.active_worker(task.user_id)
+            task._checked_at = time.monotonic()
+    except HTTPException:
+        task.cancel.set()
+        if isinstance(task, DownloadTask) and task.process and task.process.poll() is None:
+            task.process.kill()
+        task.status, task.message = "cancelled", "账号已停用或任务已取消"
+        _persist_task(task, "download" if isinstance(task, DownloadTask) else "summary" if isinstance(task, SummaryTask) else "mind_map", force=True)
+        raise RuntimeError("任务已停止。")
+
+
+def _persist_task(task, kind, force=False):
+    if task.user_id and (force or time.monotonic() - getattr(task, "_saved_at", 0) >= 1 or task.status in {"finished", "failed", "cancelled"}):
+        snapshot = task.to_response().model_dump()
+        if isinstance(task, SummaryTask):
+            snapshot["transcript"] = [segment.model_dump() for segment in task.transcript]
+        accounts.register_resource(kind, task.task_id, snapshot, uid=task.user_id)
+        if task.status == "finished" and getattr(task, "filename", None):
+            path = DOWNLOAD_DIR / task.filename
+            accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0}, uid=task.user_id)
+        task._saved_at = time.monotonic()
+
+
 def _set_task(task: DownloadTask, **changes: Any) -> None:
+    _checkpoint(task, changes)
     with tasks_lock:
         for key, value in changes.items():
             setattr(task, key, value)
         task.updated_at = time.time()
+    _persist_task(task, "download")
 
 
 def _progress_hook(task: DownloadTask):
@@ -2501,6 +2599,7 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
                 errors="ignore",
             )
             started_at = time.time()
+            task.process = process
             last_size = -1
             last_growth_at = started_at
             while process.poll() is None:
@@ -2607,6 +2706,7 @@ def _run_sniffed_pair_download(task: DownloadTask, video_url: str, audio_url: st
             errors="ignore",
         )
         while process.poll() is None:
+            task.process = process
             _set_task(task, progress=min(95.0, task.progress + 2), message="正在合并网页视频和音频")
             time.sleep(1)
         if process.returncode != 0:
@@ -2635,7 +2735,7 @@ def _run_audio_download(task: DownloadTask) -> None:
     _set_task(task, status="running", progress=1, message="正在解析音轨")
     try:
         if task.format_id and task.format_id.startswith("music:"):
-            track = music.get_track(task.format_id.removeprefix("music:"), task.url)
+            track = task.music_track or music.get_track(task.format_id.removeprefix("music:"), task.url)
             source_url, options, source_name = music.resolve(track, _ydl_base_options(task.url))
             def download_track():
                 return download_audio(
@@ -2651,6 +2751,8 @@ def _run_audio_download(task: DownloadTask) -> None:
                 _set_task(task, message="原平台仅返回试听，正在尝试解析服务")
                 source_url, options, source_name = music.resolve(track, _ydl_base_options(task.url), public_only=True)
                 target = download_track()
+            _set_task(task, progress=98, message="正在保存音频索引")
+            _remember_audio_download(target, track.model_dump())
             _set_task(task, status="finished", progress=100, message=f"音频已准备好 · {source_name}", filename=target.name)
             return
         result = _get_sniff_cache(task.url) or parse_video(task.url)
@@ -2675,9 +2777,20 @@ def _run_audio_download(task: DownloadTask) -> None:
             download_dir=DOWNLOAD_DIR, ffmpeg_dir=FFMPEG_DIR, options=options, direct=direct,
             expected_duration=result.duration, progress=lambda value, message: _set_task(task, progress=value, message=message),
         )
+        _set_task(task, progress=98, message="正在保存音频索引")
+        _remember_audio_download(target, {"title": result.title, "artist": result.uploader or "", "provider": "video",
+                                         "webpage_url": task.url, "thumbnail": result.thumbnail, "duration": result.duration})
         _set_task(task, status="finished", progress=100, message="音轨已准备好", filename=target.name)
     except Exception as exc:
         _set_task(task, status="failed", message="音轨下载失败", error=_clean_error(exc, task.url))
+
+
+def _remember_audio_download(target: Path, metadata: dict) -> None:
+    try:
+        library.record_download(target.name, metadata)
+        start_cover_backfill()
+    except Exception:
+        logger.warning("Audio file saved; library indexing will retry on the next library scan.")
 
 
 def _run_download(task: DownloadTask) -> None:
@@ -2748,12 +2861,14 @@ def frontend_endpoint() -> FileResponse:
 
 @app.post("/api/parse", response_model=ParseResponse)
 def parse_endpoint(payload: ParseRequest) -> ParseResponse:
+    public_url(str(payload.url))
     return parse_video(str(payload.url))
 
 
 @app.post("/api/music/parse")
 def parse_music_endpoint(payload: ParseRequest):
     url = str(payload.url)
+    public_url(url)
     host = _host(url)
     if music.identify(url) or any(host == domain or host.endswith(f".{domain}") for domain in ("music.163.com", "y.qq.com", "kugou.com")):
         return music.parse_url(url)
@@ -2765,6 +2880,11 @@ def parse_music_endpoint(payload: ParseRequest):
 
 @app.post("/api/download", response_model=DownloadResponse)
 def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
+    public_url(str(payload.url))
+    if payload.format_id and payload.format_id.startswith(("sniff:", "sniffpair:")):
+        cached = _get_sniff_cache(normalize_url(str(payload.url)))
+        if not cached or not any(item.format_id == payload.format_id for item in cached.formats):
+            raise HTTPException(422, "下载格式与当前账号的解析结果不匹配，请重新解析。")
     task_id = uuid.uuid4().hex[:12]
     task = DownloadTask(
         task_id=task_id,
@@ -2775,17 +2895,193 @@ def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
     )
     with tasks_lock:
         tasks[task_id] = task
-    executor.submit(_run_download, task)
+    _persist_task(task, "download", force=True)
+    accounts.submit(executor, _run_download, task)
     return DownloadResponse(task_id=task_id)
+
+
+def _music_batch_response(batch: dict[str, Any]) -> dict[str, Any]:
+    items = []
+    for entry in batch["items"]:
+        with tasks_lock:
+            result = entry["task"].to_response().model_dump()
+        if entry["cancelled"]:
+            result.update(status="cancelled", progress=0, message="已取消")
+        track = entry["track"]
+        result.update(title=track.title, artist=track.artist, provider=track.provider, identifier=track.identifier, webpage_url=track.webpage_url)
+        items.append(result)
+    counts = {status: sum(item["status"] == status for item in items)
+              for status in ("finished", "failed", "cancelled")}
+    progress = sum(100 if item["status"] in counts else item["progress"] for item in items) / len(items)
+    terminal = batch["status"] in {"finished", "failed", "cancelled"}
+    return {"batch_id": batch["batch_id"], "status": batch["status"], "audio_format": batch["audio_format"],
+            "progress": round(progress, 2), "total": len(items), **counts, "items": items,
+            "download_url": f"/api/music/batches/{batch['batch_id']}/archive" if terminal and counts["finished"] else None}
+
+
+def _get_music_batch(batch_id: str) -> dict[str, Any]:
+    batch = music_batches.get(batch_id)
+    if not batch and accounts.principal.get():
+        stored = accounts.resource("batch", batch_id)
+        data = json.loads(stored["payload"])
+        entries = []
+        for item in data.get("items", []):
+            track = music.Track(title=item["title"], artist=item.get("artist", ""), provider=item["provider"],
+                                identifier=item.get("identifier", ""), webpage_url=item.get("webpage_url", "https://example.com"))
+            task = DownloadTask(item["task_id"], track.webpage_url, "music:", media_type="audio", audio_format=data["audio_format"])
+            task.user_id, task.music_track = stored["user_id"], track
+            for field in ("status", "progress", "message", "filename", "error"):
+                setattr(task, field, item.get(field))
+            entries.append({"track": track, "task": task, "cancelled": item["status"] == "cancelled"})
+        batch = {"batch_id": batch_id, "user_id": stored["user_id"], "audio_format": data["audio_format"],
+                 "status": data["status"], "stop": threading.Event(), "items": entries}
+        music_batches[batch_id] = batch
+    if not batch:
+        raise HTTPException(404, "批量任务不存在或服务已重启。")
+    return batch
+
+
+def _new_batch_entry(track: music.Track, audio_format: str) -> dict[str, Any]:
+    task = DownloadTask(uuid.uuid4().hex[:12], track.webpage_url, f"music:{track.token}",
+                        media_type="audio", audio_format=audio_format)
+    # The validated snapshot survives token expiry while waiting in the queue.
+    task.music_track = track.model_copy(deep=True)
+    with tasks_lock:
+        tasks[task.task_id] = task
+    _persist_task(task, "download", force=True)
+    return {"track": task.music_track, "task": task, "cancelled": False}
+
+
+def _run_music_batch(batch: dict[str, Any]) -> None:
+    with music_batches_lock:
+        if not batch["stop"].is_set():
+            batch["status"] = "running"
+    attempted = False
+    for entry in batch["items"]:
+        if entry["task"].status != "pending" or entry["cancelled"]:
+            continue
+        if attempted:
+            batch["stop"].wait(MUSIC_BATCH_INTERVAL)
+        with music_batches_lock:
+            if batch["stop"].is_set():
+                entry["cancelled"] = True
+                continue
+            _set_task(entry["task"], status="running", message="正在解析音轨")
+        attempted = True
+        try:
+            _run_audio_download(entry["task"])
+        except Exception as exc:
+            _set_task(entry["task"], status="failed", message="音轨下载失败", error=str(exc))
+    with music_batches_lock:
+        statuses = [entry["task"].status for entry in batch["items"]]
+        batch["status"] = "cancelled" if batch["stop"].is_set() else "finished" if "finished" in statuses else "failed"
+    accounts.register_resource("batch", batch["batch_id"], _music_batch_response(batch), uid=batch.get("user_id"))
+
+
+@app.post("/api/music/batches")
+def create_music_batch(payload: MusicBatchRequest) -> dict[str, Any]:
+    tracks, identities = [], set()
+    for item in payload.tracks:
+        track = music.get_track(item.token, str(item.webpage_url))
+        identity = (track.provider, track.identifier)
+        if identity not in identities:
+            identities.add(identity)
+            tracks.append(track)
+    with music_batches_lock:
+        if any(batch["status"] in {"pending", "running", "cancelling"} and batch.get("user_id") == (accounts.owner_id() if accounts.principal.get() else 0) for batch in music_batches.values()):
+            raise HTTPException(409, "已有批量任务正在处理，请等待完成或停止后再添加。")
+        batch_id = uuid.uuid4().hex[:12]
+        batch = {"batch_id": batch_id, "status": "pending", "audio_format": payload.audio_format,
+                 "user_id": accounts.owner_id() if accounts.principal.get() else 0,
+                 "stop": threading.Event(), "items": [_new_batch_entry(track, payload.audio_format) for track in tracks]}
+        music_batches[batch_id] = batch
+        response = _music_batch_response(batch)
+        accounts.register_resource("batch", batch_id, response, uid=batch["user_id"])
+        accounts.submit(music_batch_executor, _run_music_batch, batch)
+    return response
+
+
+@app.get("/api/music/batches/{batch_id}")
+def music_batch_status(batch_id: str) -> dict[str, Any]:
+    with music_batches_lock:
+        return _music_batch_response(_get_music_batch(batch_id))
+
+
+@app.post("/api/music/batches/{batch_id}/cancel")
+def cancel_music_batch(batch_id: str) -> dict[str, Any]:
+    with music_batches_lock:
+        batch = _get_music_batch(batch_id)
+        if batch["status"] in {"pending", "running", "cancelling"}:
+            batch["stop"].set()
+            batch["status"] = "cancelling"
+            for entry in batch["items"]:
+                if entry["task"].status == "pending":
+                    entry["cancelled"] = True
+        return _music_batch_response(batch)
+
+
+@app.post("/api/music/batches/{batch_id}/retry")
+def retry_music_batch(batch_id: str) -> dict[str, Any]:
+    with music_batches_lock:
+        batch = _get_music_batch(batch_id)
+        if any(item["status"] in {"pending", "running", "cancelling"} and item.get("user_id") == batch.get("user_id") for item in music_batches.values()):
+            raise HTTPException(409, "请等待当前批量任务停止或完成。")
+        failed = [entry for entry in batch["items"] if entry["task"].status == "failed"]
+        if not failed:
+            raise HTTPException(409, "没有需要重试的失败歌曲。")
+        owner_marker = accounts.data_owner.set(batch.get("user_id") or None)
+        try:
+            for entry in failed:
+                entry.update(_new_batch_entry(entry["track"], batch["audio_format"]))
+            batch["stop"].clear()
+            batch["status"] = "pending"
+            response = _music_batch_response(batch)
+            accounts.register_resource("batch", batch_id, response, uid=batch.get("user_id"))
+            accounts.submit(music_batch_executor, _run_music_batch, batch)
+        finally:
+            accounts.data_owner.reset(owner_marker)
+        return response
+
+
+@app.get("/api/music/batches/{batch_id}/archive")
+def music_batch_archive(batch_id: str) -> FileResponse:
+    with music_batches_lock:
+        batch = _get_music_batch(batch_id)
+        if batch["status"] in {"pending", "running", "cancelling"}:
+            raise HTTPException(409, "批量任务仍在处理中。")
+        entries = [(index, entry["track"], entry["task"].filename) for index, entry in enumerate(batch["items"], 1)
+                   if entry["task"].status == "finished" and entry["task"].filename]
+    if not entries:
+        raise HTTPException(409, "没有成功下载的音频可供打包。")
+    archive_dir = DOWNLOAD_DIR / "_batches"
+    archive_dir.mkdir(exist_ok=True)
+    archive = archive_dir / f"{uuid.uuid4().hex}.zip"
+    try:
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as bundle:
+            for index, track, filename in entries:
+                if accounts.principal.get():
+                    accounts.resource("file", filename)
+                file_path = (DOWNLOAD_DIR / filename).resolve()
+                if file_path.parent != DOWNLOAD_DIR.resolve() or not file_path.is_file():
+                    raise HTTPException(404, f"音频文件不存在：{track.title}")
+                label = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', " ", f"{track.artist} - {track.title}").strip(" .")[:120] or "audio"
+                bundle.write(file_path, arcname=f"{index:03d}. {label}{file_path.suffix}")
+    except Exception:
+        archive.unlink(missing_ok=True)
+        raise
+    return FileResponse(archive, media_type="application/zip", filename=f"music-{batch_id}.zip",
+                        background=BackgroundTask(archive.unlink, missing_ok=True))
 
 
 @app.post("/api/summaries", response_model=SummaryResponse)
 def summary_endpoint(payload: SummaryRequest) -> SummaryResponse:
+    public_url(str(payload.url))
     task_id = uuid.uuid4().hex[:12]
     task = SummaryTask(task_id=task_id, url=str(payload.url))
     with summary_tasks_lock:
         summary_tasks[task_id] = task
-    executor.submit(_run_summary, task)
+    _persist_task(task, "summary", force=True)
+    accounts.submit(executor, _run_summary, task)
     return SummaryResponse(task_id=task_id)
 
 
@@ -2794,6 +3090,8 @@ def task_endpoint(task_id: str) -> TaskResponse:
     with tasks_lock:
         task = tasks.get(task_id)
     if not task:
+        if accounts.principal.get():
+            return TaskResponse.model_validate(json.loads(accounts.resource("download", task_id)["payload"]))
         raise HTTPException(status_code=404, detail="任务不存在或服务已重启。")
     return task.to_response()
 
@@ -2803,6 +3101,8 @@ def summary_task_endpoint(task_id: str) -> SummaryTaskResponse:
     with summary_tasks_lock:
         task = summary_tasks.get(task_id)
     if not task:
+        if accounts.principal.get():
+            return SummaryTaskResponse.model_validate(json.loads(accounts.resource("summary", task_id)["payload"]))
         raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
     return task.to_response()
 
@@ -2812,7 +3112,16 @@ def create_mind_map_endpoint(task_id: str, regenerate: bool = False) -> MindMapR
     with summary_tasks_lock:
         summary = summary_tasks.get(task_id)
     if not summary:
-        raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
+        if not accounts.principal.get():
+            raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
+        stored_row = accounts.resource("summary", task_id)
+        stored = json.loads(stored_row["payload"])
+        summary = SummaryTask(task_id, (stored.get("result") or {}).get("webpage_url", "https://example.com"))
+        summary.user_id = stored_row["user_id"]
+        summary.status = stored["status"]
+        summary.result = SummaryResult.model_validate(stored["result"]) if stored.get("result") else None
+        summary.transcript = [SubtitleSegment.model_validate(row) for row in stored.get("transcript", [])]
+        summary_tasks[task_id] = summary
     if summary.status != "finished" or not summary.result:
         raise HTTPException(status_code=409, detail="总结完成后才能生成思维导图。")
     with mind_map_tasks_lock:
@@ -2820,13 +3129,25 @@ def create_mind_map_endpoint(task_id: str, regenerate: bool = False) -> MindMapR
         if existing and not regenerate and existing.status in {"pending", "running", "finished"}:
             return MindMapResponse(task_id=existing.task_id)
         task = MindMapTask(uuid.uuid4().hex[:12], task_id)
+        task.user_id = summary.user_id
         mind_map_tasks[task_id] = task
-    executor.submit(_run_mind_map, task, summary)
+    _persist_task(task, "mind_map", force=True)
+    owner_marker = accounts.data_owner.set(summary.user_id)
+    try:
+        accounts.submit(executor, _run_mind_map, task, summary)
+    finally:
+        accounts.data_owner.reset(owner_marker)
     return MindMapResponse(task_id=task.task_id)
 
 
 @app.get("/api/summaries/{task_id}/mind-map", response_model=MindMapTaskResponse)
 def mind_map_task_endpoint(task_id: str) -> MindMapTaskResponse:
+    if accounts.principal.get() and task_id not in mind_map_tasks:
+        with library.database() as cursor:
+            cursor.execute("SELECT payload FROM resources WHERE kind='mind_map' AND deleted=FALSE AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.summary_task_id'))=%s ORDER BY updated_at DESC LIMIT 1", (task_id,))
+            stored = cursor.fetchone()
+        if stored:
+            return MindMapTaskResponse.model_validate(json.loads(stored["payload"]))
     with summary_tasks_lock:
         if task_id not in summary_tasks:
             raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
@@ -2839,6 +3160,8 @@ def mind_map_task_endpoint(task_id: str) -> MindMapTaskResponse:
 
 @app.get("/api/files/{filename}")
 def file_endpoint(filename: str) -> FileResponse:
+    if Path(filename).name != filename or any(char in filename for char in ("/", "\\", ":", "\x00")):
+        raise HTTPException(422, "文件名无效。")
     safe_name = Path(unquote(filename)).name
     file_path = DOWNLOAD_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
@@ -2866,24 +3189,59 @@ def thumbnail_endpoint(filename: str) -> FileResponse:
 
 @app.get("/api/image-proxy")
 def image_proxy(url: str) -> Response:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="图片地址不合法。")
-    request = Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            ),
-            "Referer": _thumbnail_referer(url),
-        },
-    )
     try:
-        with urlopen(request, timeout=12) as result:
-            content = result.read()
-            media_type = result.headers.get_content_type() or "image/jpeg"
+        with public_get(url, headers={"User-Agent": "VideoDream/1.0", "Referer": _thumbnail_referer(url)}, stream=True, timeout=12) as result:
+            result.raise_for_status()
+            media_type = result.headers.get("Content-Type", "").split(";", 1)[0]
+            if media_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+                raise HTTPException(422, "远程内容不是支持的图片。")
+            content = bytearray()
+            for chunk in result.iter_content(65536):
+                content.extend(chunk)
+                if len(content) > 10 * 1024 * 1024:
+                    raise HTTPException(413, "图片超过 10 MB。")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=_clean_error(exc, url)) from exc
-    return Response(content=content, media_type=media_type)
+    return Response(content=bytes(content), media_type=media_type)
+
+
+def cancel_user_tasks(uid: int, key: str | None = None):
+    cancelled = []
+    for collection, lock in ((tasks, tasks_lock), (summary_tasks, summary_tasks_lock), (mind_map_tasks, mind_map_tasks_lock)):
+        with lock:
+            for task in collection.values():
+                if task.user_id == uid and (key is None or task.task_id == key or getattr(task, "summary_task_id", None) == key) and task.status in {"pending", "running"}:
+                    task.cancel.set()
+                    task.status, task.message = "cancelled", "账号已停用或任务已取消"
+                    if isinstance(task, DownloadTask) and task.process and task.process.poll() is None:
+                        task.process.kill()
+                    cancelled.append(task)
+    with music_batches_lock:
+        for batch in music_batches.values():
+            if batch.get("user_id") == uid and (key is None or batch["batch_id"] == key):
+                batch["stop"].set()
+                batch["status"] = "cancelled"
+                for entry in batch["items"]:
+                    if entry["task"].status in {"pending", "running"}:
+                        entry["cancelled"] = True
+                        entry["task"].cancel.set()
+    for task in cancelled:
+        _persist_task(task, "download" if isinstance(task, DownloadTask) else "summary" if isinstance(task, SummaryTask) else "mind_map", force=True)
+
+
+accounts.cancel_callbacks.append(cancel_user_tasks)
+
+
+@app.on_event("startup")
+def restore_task_state():
+    with library.database() as cursor:
+        cursor.execute("""UPDATE resources SET payload=JSON_SET(payload,'$.status','failed','$.message','服务重启，任务已中断'),updated_at=%s
+            WHERE kind IN ('download','summary','mind_map','watermark','batch') AND deleted=FALSE
+            AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status')) IN ('pending','running','cancelling')""", (time.time(),))
+
+
+@app.get("/auth-worker.js", include_in_schema=False)
+def authentication_worker():
+    return FileResponse(ROOT_DIR / "frontend" / "public" / "auth-worker.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})

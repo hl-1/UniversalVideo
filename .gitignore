@@ -1,4 +1,7 @@
 __pycache__/
+.env
+.env.*
+!.env.example
 *.py[cod]
 .venv/
 venv/
@@ -7,6 +10,7 @@ downloads/*
 downloads/_thumbnails/
 config/*
 !config/ai.example.json
+!config/database.example.json
 
 frontend/node_modules/
 frontend/dist/
