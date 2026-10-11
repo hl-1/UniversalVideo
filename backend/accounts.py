@@ -530,7 +530,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 admin()
             await run_in_threadpool(check_path, path)
             config = await run_in_threadpool(settings)
-            feature = "music" if path.startswith(("/api/music", "/api/library")) else "watermark" if path.startswith("/api/watermarks") else "summary" if path.startswith("/api/summaries") else "video" if path in {"/api/parse", "/api/download", "/api/previews"} else None
+            feature = "music" if path.startswith(("/api/music", "/api/library")) else "watermark" if path.startswith("/api/watermarks") else "summary" if path.startswith("/api/summaries") else "video" if path in {"/api/parse", "/api/download", "/api/previews"} or path.startswith("/api/browser-session") else None
             if feature and not config[f"{feature}_enabled"]:
                 raise HTTPException(403, "此功能已由管理员关闭。")
             response = await call_next(request)

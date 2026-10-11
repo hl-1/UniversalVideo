@@ -13,6 +13,7 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -42,6 +43,7 @@ from backend.administration import router as administration_router
 from backend.workspace import router as workspace_router
 from backend.network import public_url, public_get
 from backend.runtime import browser_executable, executable_name, ffmpeg_directory, node_executable
+from backend.browser_sessions import sessions as browser_sessions, needs_verification, verification_required
 
 
 logger = logging.getLogger("videodream.summary")
@@ -2041,8 +2043,36 @@ def _extract_douyin_response_meta(response: Any, video_id: str | None) -> dict[s
         return {}
 
 
+@contextmanager
+def _temporary_browser_page():
+    with sync_playwright() as playwright:
+        options = {
+            "headless": True,
+            "args": ["--disable-blink-features=AutomationControlled", "--autoplay-policy=no-user-gesture-required",
+                     "--disable-extensions", "--disable-notifications", "--mute-audio"],
+        }
+        executable = _browser_executable()
+        if executable:
+            options["executable_path"] = str(executable)
+        browser = playwright.chromium.launch(**options)
+        try:
+            yield browser.new_page(user_agent=DEFAULT_HEADERS["User-Agent"], locale="zh-CN",
+                                   viewport={"width": 1365, "height": 768})
+        finally:
+            browser.close()
+
+
 def parse_browser_sniffed_page(url: str) -> ParseResponse:
-    executable = _browser_executable()
+    normalized = normalize_url(url)
+    cached = _get_sniff_cache(normalized)
+    if cached:
+        return cached
+    if _is_douyin_url(normalized) and accounts.principal.get():
+        return browser_sessions.run(accounts.owner_id(), lambda page: _parse_browser_sniffed_page(normalized, page), url=normalized)
+    return _parse_browser_sniffed_page(normalized)
+
+
+def _parse_browser_sniffed_page(url: str, persistent_page=None) -> ParseResponse:
 
     captured: list[str] = []
     page_meta: dict[str, Any] = {}
@@ -2057,25 +2087,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
     is_pornhub_page = _is_pornhub_url(normalized_url)
     douyin_meta: dict[str, Any] = {}
 
-    with sync_playwright() as playwright:
-        launch_options = {
-            "headless": True,
-            "args": [
-                "--disable-blink-features=AutomationControlled",
-                "--autoplay-policy=no-user-gesture-required",
-                "--disable-extensions",
-                "--disable-notifications",
-                "--mute-audio",
-            ],
-        }
-        if executable:
-            launch_options["executable_path"] = str(executable)
-        browser = playwright.chromium.launch(**launch_options)
-        page = browser.new_page(
-            user_agent=DEFAULT_HEADERS["User-Agent"],
-            locale="zh-CN",
-            viewport={"width": 1365, "height": 768},
-        )
+    verification_detected = False
+    with nullcontext(persistent_page) if persistent_page is not None else _temporary_browser_page() as page:
 
         def remember(candidate: str) -> None:
             cleaned = html.unescape(candidate).replace("&amp;", "&")
@@ -2091,7 +2104,7 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                     route.abort()
                     return
             remember(request.url)
-            if request.resource_type in {"image", "font", "stylesheet"} or (
+            if (request.resource_type in {"image", "font", "stylesheet"} and not is_douyin_page) or (
                 request.resource_type == "media" and not (is_youtube_page or is_douyin_page or is_pornhub_page)
             ):
                 route.abort()
@@ -2099,14 +2112,24 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
             route.continue_()
 
         page.route("**/*", route_request)
-        page.on("request", lambda request: remember(request.url))
+        def record_request(request: Any) -> None:
+            remember(request.url)
+        page.on("request", record_request)
         def record_response(response: Any) -> None:
             remember(response.url)
             if is_douyin_page:
                 douyin_meta.update(_extract_douyin_response_meta(response, _extract_douyin_video_id(normalized_url)))
         page.on("response", record_response)
         try:
-            page.goto(normalized_url, wait_until="commit", timeout=8000 if is_douyin_page else 12000)
+            if persistent_page is None or page.url != normalized_url:
+                page.goto(normalized_url, wait_until="commit", timeout=8000 if is_douyin_page else 12000)
+            elif is_douyin_page and not needs_verification(page):
+                # Reuse media already loaded during verification before navigating again.
+                resources = page.evaluate("""() => [...performance.getEntriesByType('resource').map(item => item.name), ...Array.from(document.querySelectorAll('video')).map(item => item.currentSrc)]""")
+                for resource in resources:
+                    remember(resource)
+                if not captured:
+                    page.reload(wait_until="commit", timeout=8000)
             deadline = time.time() + (8 if is_douyin_page else 12 if (is_youtube_page or is_pornhub_page) else 4)
             while time.time() < deadline:
                 if is_youtube_page:
@@ -2132,6 +2155,9 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                     break
                 page.wait_for_timeout(500)
             if is_douyin_page:
+                verification_detected = needs_verification(page)
+                if verification_detected:
+                    raise verification_required(normalized_url)
                 try:
                     page.evaluate("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); if (video) { video.muted = true; video.play().catch(() => {}); } }""")
                     page.wait_for_function("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); return video?.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0.05; }""", timeout=3000)
@@ -2148,7 +2174,9 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
                 pornhub_player_data = _extract_pornhub_player_data(page)
             page_html = page.content()
         finally:
-            browser.close()
+            page.remove_listener("request", record_request)
+            page.remove_listener("response", record_response)
+            page.unroute("**/*", route_request)
 
     if is_pornhub_page:
         player_response = _pornhub_player_response(normalized_url, page_meta, pornhub_player_data)
@@ -2163,6 +2191,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
     ranked = sorted(captured, key=_score_video_resource, reverse=True)
     if not ranked:
+        if is_douyin_page:
+            raise verification_required(normalized_url, detected=verification_detected)
         raise HTTPException(status_code=422, detail="浏览器嗅探没有发现可下载的视频资源。")
 
     formats = []
@@ -2218,6 +2248,8 @@ def parse_browser_sniffed_page(url: str) -> ParseResponse:
 
     if _is_youtube_url(normalized_url) and not formats:
         raise HTTPException(status_code=422, detail="浏览器嗅探没有捕获可直接下载的 YouTube 音视频组合。")
+    if is_douyin_page and not formats:
+        raise verification_required(normalized_url, detected=False)
 
     default_title = "YouTube 视频" if _is_youtube_url(normalized_url) else "抖音视频" if _is_douyin_url(normalized_url) else "网页视频"
     default_uploader = "YouTube" if _is_youtube_url(normalized_url) else "抖音" if _is_douyin_url(normalized_url) else urlparse(url).netloc
@@ -2358,7 +2390,9 @@ def parse_video(url: str) -> ParseResponse:
     if _is_douyin_url(url):
         try:
             return parse_browser_sniffed_page(url)
-        except HTTPException:
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict) and exc.detail.get("code") == "browser_verification_required":
+                raise
             try:
                 return parse_douyin_public(url)
             except HTTPException:
@@ -2842,6 +2876,32 @@ def parse_endpoint(payload: ParseRequest) -> ParseResponse:
     return parse_video(str(payload.url))
 
 
+@app.post("/api/browser-session/open")
+def open_browser_session(payload: ParseRequest):
+    url = normalize_url(str(payload.url))
+    public_url(url)
+    if not _is_douyin_url(url) or _is_douyin_search_page(url):
+        raise HTTPException(422, "验证窗口仅支持具体的抖音视频或分享链接。")
+    return browser_sessions.open(accounts.current().id, url)
+
+
+@app.get("/api/browser-session")
+def browser_session_status():
+    return browser_sessions.status(accounts.current().id)
+
+
+@app.delete("/api/browser-session")
+def close_browser_session(reset: bool = False):
+    result = browser_sessions.close(accounts.current().id, reset=reset)
+    if reset:
+        prefix = f"{accounts.current().id}:"
+        with sniff_cache_lock:
+            for key in list(sniff_cache):
+                if key.startswith(prefix):
+                    sniff_cache.pop(key, None)
+    return result
+
+
 @app.post("/api/music/parse")
 def parse_music_endpoint(payload: ParseRequest):
     url = str(payload.url)
@@ -3209,6 +3269,12 @@ def cancel_user_tasks(uid: int, key: str | None = None):
 
 
 accounts.cancel_callbacks.append(cancel_user_tasks)
+accounts.cancel_callbacks.append(browser_sessions.cancel_user)
+
+
+@app.on_event("shutdown")
+def close_browser_sessions():
+    browser_sessions.shutdown()
 
 
 @app.on_event("startup")

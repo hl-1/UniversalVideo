@@ -12,7 +12,7 @@ import { account } from './auth'
 import { pausePlayback } from './musicPlayer'
 import type { MusicTrack } from './musicLibrary'
 import { extractHttpUrl } from './downloadInput'
-import { ArrowRight, Download, Eraser, LoaderCircle, Music2, Video } from 'lucide-vue-next'
+import { ArrowRight, Download, Eraser, ExternalLink, History, LoaderCircle, Music2, Play, RotateCcw, ShieldCheck, Trash2, Video, X } from 'lucide-vue-next'
 
 type VideoFormat = {
   format_id: string
@@ -123,6 +123,21 @@ const loadingSummary = ref(false)
 const loadingMindMap = ref(false)
 const savingFile = ref(false)
 const errorMessage = ref('')
+type BrowserSession = { status: 'closed' | 'waiting' | 'open' | 'expired' | 'error'; visible: boolean; expires_in: number; url?: string }
+const browserSession = ref<BrowserSession | null>(null)
+const verificationTarget = ref('')
+const browserBusy = ref(false)
+let browserTimer: number | undefined
+let browserRevision = 0
+let browserDisposed = false
+const verificationMessage = computed(() => {
+  if (browserBusy.value) return '正在更新验证窗口…'
+  if (browserSession.value?.visible) return browserSession.value.status === 'waiting' ? '抖音正在等待安全验证' : '验证窗口已打开'
+  if (browserSession.value?.status === 'expired') return '验证窗口已超时关闭，会话已保留'
+  if (browserSession.value?.status === 'error') return '验证窗口未能打开'
+  if (browserSession.value?.status === 'closed') return '验证窗口已关闭，会话已保留'
+  return '抖音浏览器会话已保留'
+})
 const saveMessage = ref('')
 const recentLinks = ref<string[]>([])
 const showRecentLinks = ref(false)
@@ -341,10 +356,76 @@ async function readApiError(response: Response) {
   try {
     const body = await response.json()
     if (Array.isArray(body.detail)) return body.detail[0]?.msg || '请求失败，请稍后再试。'
-    return body.detail || '请求失败，请稍后再试。'
+    return body.detail?.message || body.detail || '请求失败，请稍后再试。'
   } catch {
     return '请求失败，请稍后再试。'
   }
+}
+
+function stopBrowserPolling() {
+  browserRevision++
+  if (browserTimer !== undefined) window.clearTimeout(browserTimer)
+  browserTimer = undefined
+}
+
+async function refreshBrowserSession() {
+  stopBrowserPolling()
+  const revision = browserRevision
+  try {
+    const response = await fetch('/api/browser-session')
+    if (!response.ok) throw new Error(await readApiError(response))
+    const data: BrowserSession = await response.json()
+    if (browserDisposed || browserRevision !== revision) return
+    browserSession.value = data
+    if (browserSession.value?.visible) {
+      verificationTarget.value ||= browserSession.value.url || ''
+      browserTimer = window.setTimeout(() => void refreshBrowserSession(), 3000)
+    }
+  } catch (error) {
+    if (!browserDisposed && browserRevision === revision && verificationTarget.value) errorMessage.value = error instanceof Error ? error.message : '读取验证窗口状态失败。'
+  }
+}
+
+async function openVerificationBrowser() {
+  if (!verificationTarget.value || browserBusy.value || loadingParse.value) return
+  browserBusy.value = true
+  errorMessage.value = ''
+  stopBrowserPolling()
+  try {
+    const response = await fetch('/api/browser-session/open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: verificationTarget.value }),
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    browserSession.value = await response.json()
+    if (!browserDisposed) browserTimer = window.setTimeout(() => void refreshBrowserSession(), 3000)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '打开验证窗口失败。'
+  } finally {
+    browserBusy.value = false
+  }
+}
+
+async function closeVerificationBrowser(reset = false) {
+  if (browserBusy.value || loadingParse.value) return
+  browserBusy.value = true
+  stopBrowserPolling()
+  try {
+    const response = await fetch(`/api/browser-session?reset=${reset}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error(await readApiError(response))
+    browserSession.value = await response.json()
+    if (reset) verificationTarget.value = ''
+    errorMessage.value = ''
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '关闭验证窗口失败。'
+  } finally {
+    browserBusy.value = false
+  }
+}
+
+async function retryVerifiedVideo() {
+  url.value = verificationTarget.value
+  await parseVideo()
 }
 
 function resetPreview() {
@@ -415,6 +496,7 @@ async function startPreview() {
 }
 
 async function parseVideo() {
+  if (loadingParse.value || browserBusy.value) return
   const target = extractHttpUrl(url.value)
   if (!target) {
     errorMessage.value = '请先粘贴视频链接或完整的分享文字。'
@@ -436,6 +518,8 @@ async function parseVideo() {
   stopSummaryPolling()
   stopMindMapPolling()
   loadingParse.value = true
+  stopBrowserPolling()
+  verificationTarget.value = ''
 
   try {
     const response = await fetch('/api/parse', {
@@ -443,13 +527,21 @@ async function parseVideo() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: target }),
     })
-    if (!response.ok) throw new Error(await readApiError(response))
+    if (!response.ok) {
+      const detail = (await response.clone().json().catch(() => ({}))).detail
+      if (detail?.code === 'browser_verification_required') {
+        verificationTarget.value = detail.url || target
+        void refreshBrowserSession()
+      }
+      throw new Error(await readApiError(response))
+    }
     parseResult.value = await response.json()
     selectedFormat.value = parseResult.value?.formats.find((item) => item.format_id.startsWith('sniffpair:'))?.format_id || parseResult.value?.formats[0]?.format_id || ''
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '解析失败，请确认链接是否公开可访问。'
   } finally {
     loadingParse.value = false
+    if (browserSession.value?.visible && browserTimer === undefined) void refreshBrowserSession()
   }
 }
 
@@ -553,13 +645,16 @@ function stopPolling() {
 }
 
 onBeforeUnmount(() => {
+  browserDisposed = true
+  stopBrowserPolling()
   stopPolling()
   stopSummaryPolling()
   stopMindMapPolling()
 })
 
 onMounted(() => {
-  loadRecentLinks()
+  void loadRecentLinks()
+  void refreshBrowserSession()
 })
 </script>
 
@@ -596,7 +691,7 @@ onMounted(() => {
           </div>
           <div v-show="mode === 'video'" id="video-panel" role="tabpanel" aria-labelledby="video-tab">
           <div class="search-area">
-            <form class="link-composer" @submit.prevent="parseVideo">
+            <form class="link-composer" @submit.prevent="parseVideo()">
               <textarea
                 v-model="url"
                 aria-label="视频链接或分享文字"
@@ -604,7 +699,7 @@ onMounted(() => {
                 autocomplete="off"
                 @focus="showRecentLinks = true"
                 @blur="hideRecentLinksSoon"
-                @keydown.ctrl.enter.prevent="parseVideo"
+                @keydown.ctrl.enter.prevent="parseVideo()"
               />
               <div class="composer-footer"><span class="composer-source">抖音 · B站 · YouTube</span><button class="composer-submit" type="submit" :disabled="loadingParse || !url.trim()"><LoaderCircle v-if="loadingParse" :size="18" class="spin" /><ArrowRight v-else :size="18" />{{ loadingParse ? '解析中' : '解析视频' }}</button></div>
             </form>
@@ -622,6 +717,15 @@ onMounted(() => {
           </div>
 
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+          <div v-if="verificationTarget || browserSession?.visible" class="browser-verification" role="status" aria-live="polite">
+            <div class="verification-status"><ShieldCheck :size="18" /><span>{{ verificationMessage }}</span></div>
+            <div class="verification-actions">
+              <button v-if="verificationTarget" type="button" class="secondary-action compact" :disabled="browserBusy || loadingParse" @click="openVerificationBrowser"><ExternalLink :size="16" />{{ browserSession?.visible ? '显示验证窗口' : '打开验证窗口' }}</button>
+              <button v-if="verificationTarget" type="button" class="composer-submit" :disabled="browserBusy || loadingParse" @click="retryVerifiedVideo"><LoaderCircle v-if="loadingParse" :size="16" class="spin" /><RotateCcw v-else :size="16" />验证完成，重新解析</button>
+              <button v-if="browserSession?.visible" type="button" class="verification-icon" aria-label="关闭验证窗口" title="关闭验证窗口，保留会话" :disabled="browserBusy || loadingParse" @click="closeVerificationBrowser()"><X :size="18" /></button>
+              <button type="button" class="verification-icon" aria-label="清除抖音会话" title="清除抖音会话" :disabled="browserBusy || loadingParse" @click="closeVerificationBrowser(true)"><Eraser :size="18" /></button>
+            </div>
+          </div>
           <p v-if="saveMessage" class="success-text">{{ saveMessage }}</p>
 
           <div v-if="parseResult" class="result-card">
@@ -653,7 +757,7 @@ onMounted(() => {
                   :title="previewState === 'error' ? '重新连接视频' : '播放视频'"
                   @click="startPreview"
                 >
-                  {{ previewState === 'error' ? '↻' : '▶' }}
+                  <RotateCcw v-if="previewState === 'error'" :size="21" /><Play v-else :size="21" />
                 </button>
               </template>
               <div v-if="previewState === 'loading'" class="preview-loading" role="status">

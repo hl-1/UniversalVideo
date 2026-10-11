@@ -55,6 +55,12 @@ class AccountIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.stack = ExitStack()
+        from backend.browser_sessions import BrowserSessions
+        original_browser = main.browser_sessions
+        browser = BrowserSessions(self.root / ('browser-' + secrets.token_hex(4)))
+        self.stack.enter_context(patch.object(main, 'browser_sessions', browser))
+        callbacks = [browser.cancel_user if getattr(callback, '__self__', None) is original_browser else callback for callback in accounts.cancel_callbacks]
+        self.stack.enter_context(patch.object(accounts, 'cancel_callbacks', callbacks))
         self.prefix = 'videodream:test:' + secrets.token_hex(8) + ':'
         self.stack.enter_context(patch.object(accounts, 'redis_prefix', return_value=self.prefix))
         self.stack.enter_context(patch.object(main, 'public_url', side_effect=lambda value: value))
