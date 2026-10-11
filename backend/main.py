@@ -405,8 +405,13 @@ def _extract_youtube_video_id(url: str) -> str | None:
 
 
 def _is_douyin_url(url: str) -> bool:
-    host = _host(url)
-    return "douyin.com" in host or "iesdouyin.com" in host or "amemv.com" in host
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == domain or host.endswith("." + domain) for domain in ("douyin.com", "iesdouyin.com", "amemv.com"))
+
+
+def _is_douyin_search_page(url: str) -> bool:
+    path = urlparse(url).path
+    return _is_douyin_url(url) and (path.rstrip("/") == "/search" or path.startswith("/search/"))
 
 
 def _extract_douyin_video_id(url: str) -> str | None:
@@ -418,6 +423,9 @@ def _extract_douyin_video_id(url: str) -> str | None:
             match = re.search(r"(\d{8,24})", values[0])
             if match:
                 return match.group(1)
+
+    if _is_douyin_search_page(url):
+        return None
 
     for pattern in (r"/video/(\d{8,24})", r"/note/(\d{8,24})", r"/(\d{8,24})(?:/|$)"):
         match = re.search(pattern, parsed.path)
@@ -2345,6 +2353,8 @@ def _ydl_base_options(url: str | None = None) -> dict[str, Any]:
 
 def parse_video(url: str) -> ParseResponse:
     url = normalize_url(url)
+    if _is_douyin_search_page(url):
+        raise HTTPException(status_code=422, detail="这是抖音搜索结果页，请打开具体视频后复制视频地址，或使用该视频的分享链接。")
     if _is_douyin_url(url):
         try:
             return parse_browser_sniffed_page(url)

@@ -7,6 +7,19 @@ from urllib.parse import urlparse, urljoin
 import requests
 from fastapi import HTTPException
 
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+VIDEO_DOMAINS = ("bilibili.com", "b23.tv", "hdslb.com", "bilivideo.com", "youtube.com", "youtu.be",
+                 "googlevideo.com", "ytimg.com", "douyin.com", "douyinvod.com", "byteimg.com",
+                 "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn", "pornhub.com")
+
+
+def _public_address(host: str, address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    if ip.is_global:
+        return True
+    # TUN proxies use the benchmark range for public platform DNS responses.
+    return ip in FAKE_IP_NETWORK and any(host == domain or host.endswith("." + domain) for domain in VIDEO_DOMAINS)
+
 
 def public_url(value: str) -> str:
     parsed = urlparse(value)
@@ -14,7 +27,7 @@ def public_url(value: str) -> str:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.port not in {None, 80, 443}:
             raise ValueError("Invalid URL")
         addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
-        if not addresses or any(not ipaddress.ip_address(address[4][0]).is_global for address in addresses):
+        if not addresses or any(not _public_address(parsed.hostname.lower(), address[4][0]) for address in addresses):
             raise ValueError("Private address")
     except (ValueError, OSError) as exc:
         raise HTTPException(422, "仅支持可访问的公网 HTTP/HTTPS 地址。") from exc
