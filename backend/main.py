@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Callable, Literal
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -38,7 +38,7 @@ from backend.audio import IncompleteAudioError, download_audio
 from backend import music
 from backend.music_lyrics import router as music_lyrics_router
 from backend.music_library_media import router as music_library_media_router, start_cover_backfill
-from backend import accounts, ai, library
+from backend import accounts, ai, library, speech
 from backend.administration import router as administration_router
 from backend.workspace import router as workspace_router
 from backend.network import public_url, public_get
@@ -872,7 +872,7 @@ def _extract_bilibili_api_summary_source(
         return None
 
 
-def _extract_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[SubtitleSegment]]:
+def _extract_summary_source(url: str, *, speech_fallback: Callable | None = None) -> tuple[dict[str, Any], str, str, list[SubtitleSegment]]:
     if _is_bilibili_url(url):
         platform_source = _extract_bilibili_api_summary_source(url)
         if platform_source:
@@ -889,6 +889,8 @@ def _extract_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[Su
             info = ydl.extract_info(url, download=False)
     except DownloadError as exc:
         if _is_douyin_url(url) and _is_cookie_error(exc):
+            if speech_fallback:
+                return speech_fallback(None)
             return _extract_douyin_page_text_summary_source(url)
         raise
     if not isinstance(info, dict):
@@ -896,6 +898,8 @@ def _extract_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[Su
 
     selected = _select_subtitle(info)
     if not selected:
+        if speech_fallback:
+            return speech_fallback(info)
         if _is_bilibili_url(url):
             raise RuntimeError("平台字幕 API 和 yt-dlp 均未找到可用字幕。")
         raise RuntimeError("没有找到可用字幕。")
@@ -903,6 +907,8 @@ def _extract_summary_source(url: str) -> tuple[dict[str, Any], str, str, list[Su
     content, ext = _download_subtitle(subtitle, info.get("webpage_url") or url)
     segments = _parse_subtitle_content(content, ext)
     if not segments:
+        if speech_fallback:
+            return speech_fallback(info)
         raise RuntimeError("字幕下载成功，但无法解析为带时间戳的文本。")
     return info, language, source, segments
 
@@ -912,6 +918,8 @@ def _summary_source_label(source: str) -> str:
         return "人工字幕"
     if source == "page_text":
         return "页面文案"
+    if source == "speech":
+        return "语音转写（分段时间戳）"
     return "自动字幕"
 
 
@@ -933,7 +941,7 @@ def _transcript_for_prompt(segments: list[SubtitleSegment]) -> str:
     return "\n".join(lines)
 
 
-def _generate_ai_summary(title: str, webpage_url: str, segments: list[SubtitleSegment]) -> str:
+def _generate_ai_summary(title: str, webpage_url: str, segments: list[SubtitleSegment], *, source: str = "manual") -> str:
     config = _load_ai_config()
     client_kwargs: dict[str, str] = {"api_key": config["api_key"]}
     if config.get("base_url"):
@@ -955,7 +963,8 @@ def _generate_ai_summary(title: str, webpage_url: str, segments: list[SubtitleSe
                 "role": "user",
                 "content": (
                     f"视频标题：{title}\n"
-                    f"视频链接：{webpage_url}\n\n"
+                    f"视频链接：{webpage_url}\n\n" +
+                    ("语音转写的时间戳代表音频分段起点，章节定位仅为近似值；转写可能包含识别错误。\n" if source == "speech" else "") +
                     f"字幕：\n{transcript}"
                 ),
             },
@@ -1168,19 +1177,50 @@ def _save_summary_files(task: SummaryTask, result: SummaryResult) -> SummaryResu
     return result
 
 
+def _extract_speech_summary_source(task: SummaryTask, info: dict | None):
+    _set_summary_task(task, progress=10, message="未找到可用字幕，正在准备音轨转写")
+    cached = _get_sniff_cache(task.url)
+    if info is None:
+        cached = cached or parse_video(task.url)
+        info = {"title": cached.title, "duration": cached.duration, "webpage_url": cached.webpage_url or task.url}
+    source_url, direct = task.url, False
+    if cached:
+        selected = next((item for item in cached.formats if item.format_id.startswith("sniffpair:")), None)
+        selected = selected or next((item for item in cached.formats if item.format_id.startswith("sniff:")), None)
+        if selected:
+            direct = True
+            if selected.format_id.startswith("sniffpair:"):
+                source_url = unquote(selected.format_id.removeprefix("sniffpair:").partition("|")[2])
+            else:
+                source_url = unquote(selected.format_id.removeprefix("sniff:"))
+    options = _ydl_base_options(task.url)
+    options["http_headers"]["Referer"] = task.url
+    rows = speech.transcribe_video(
+        url=source_url, title=str(info.get("title") or "视频音轨"), task_id=task.task_id,
+        work_root=ROOT_DIR / ".run" / "speech", ffmpeg_dir=FFMPEG_DIR, options=options, direct=direct,
+        expected_duration=info.get("duration"),
+        checkpoint=lambda: _checkpoint(task, {}),
+        progress=lambda value, message: _set_summary_task(task, progress=value, message=message),
+    )
+    segments = [SubtitleSegment(start=item.start, end=item.end, timestamp=_format_timestamp(item.start), text=item.text) for item in rows]
+    return info, "自动识别", "speech", segments
+
+
 def _run_summary(task: SummaryTask) -> None:
     try:
         _set_summary_task(task, status="running", progress=8.0, message="正在解析视频字幕")
-        info, language, source, segments = _extract_summary_source(task.url)
+        info, language, source, segments = _extract_summary_source(
+            task.url, speech_fallback=lambda info: _extract_speech_summary_source(task, info),
+        )
         title = str(info.get("title") or "未命名视频")
         webpage_url = str(info.get("webpage_url") or task.url)
         _set_summary_task(
             task,
-            progress=42.0,
-            message=f"已提取 {language} 字幕，正在生成 AI 摘要",
+            progress=64.0 if source == "speech" else 42.0,
+            message="语音转写完成，正在生成 AI 摘要" if source == "speech" else f"已提取 {language} 字幕，正在生成 AI 摘要",
             transcript=segments,
         )
-        summary_markdown = _generate_ai_summary(title, webpage_url, segments)
+        summary_markdown = _generate_ai_summary(title, webpage_url, segments, source=source)
         _set_summary_task(task, progress=82.0, message="正在保存总结文件")
         result = SummaryResult(
             title=title,

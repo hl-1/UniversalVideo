@@ -815,7 +815,7 @@ onMounted(() => {
               <div class="summary-meta">
                 <span>{{ summaryTask.result.source }}</span>
                 <span>{{ summaryTask.result.language }}</span>
-                <span>{{ summaryTask.result.transcript.length }} 条字幕</span>
+                <span>{{ summaryTask.result.transcript.length }} 段文本</span>
               </div>
               <div class="summary-actions">
                 <a v-if="summaryTask.result.markdown_url" :href="summaryTask.result.markdown_url" download>下载 Markdown</a>
@@ -823,7 +823,7 @@ onMounted(() => {
               </div>
               <div class="summary-tabs" role="tablist" aria-label="总结视图">
                 <button type="button" role="tab" :aria-selected="summaryTab === 'summary'" @click="summaryTab = 'summary'">总结</button>
-                <button type="button" role="tab" :aria-selected="summaryTab === 'transcript'" @click="summaryTab = 'transcript'">字幕</button>
+                <button type="button" role="tab" :aria-selected="summaryTab === 'transcript'" @click="summaryTab = 'transcript'">字幕与转写</button>
                 <button type="button" role="tab" :aria-selected="summaryTab === 'mind-map'" @click="summaryTab = 'mind-map'">思维导图</button>
               </div>
               <section v-if="summaryTab === 'summary'" class="summary-text" aria-label="AI 总结">
