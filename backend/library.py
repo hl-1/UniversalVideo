@@ -229,6 +229,8 @@ def database():
                     migrate_schema(cursor)
                     cursor.execute("INSERT IGNORE INTO music_profile (id, nickname) VALUES (1, %s)", ("音乐听众",))
                     accounts.migrate(cursor)
+                    from backend import video_store
+                    video_store.migrate(cursor)
                 connection.commit()
                 schema_ready = True
         with connection.cursor() as cursor:

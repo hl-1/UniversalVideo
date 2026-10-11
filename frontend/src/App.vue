@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MindMapCanvas from './MindMapCanvas.vue'
 import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from './mindMap'
-import { getRecentLinks, saveRecentLink } from './recentLinks'
+import { getRecentLinks } from './recentLinks'
+import VideoHistory from './VideoHistory.vue'
+import { readRecordLocation, recordLocation, type MapView, type VideoTaskReference, type VideoView } from './videoHistory'
+import './video-history.css'
 import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
 import WatermarkEditor from './WatermarkEditor.vue'
 import MusicCenter from './MusicCenter.vue'
@@ -10,7 +13,7 @@ import MusicPlayer from './MusicPlayer.vue'
 import AdminWorkspace from './AdminWorkspace.vue'
 import { account } from './auth'
 import { pausePlayback } from './musicPlayer'
-import type { MusicTrack } from './musicLibrary'
+import { api, type MusicTrack } from './musicLibrary'
 import { extractHttpUrl } from './downloadInput'
 import { ArrowRight, Download, Eraser, ExternalLink, History, LoaderCircle, Music2, Play, RotateCcw, ShieldCheck, Trash2, Video, X } from 'lucide-vue-next'
 
@@ -23,6 +26,7 @@ type VideoFormat = {
 }
 
 type ParseResult = {
+  record_id?: string | null
   title: string
   thumbnail?: string | null
   duration?: number | null
@@ -31,7 +35,7 @@ type ParseResult = {
   formats: VideoFormat[]
 }
 
-type TaskStatus = 'pending' | 'running' | 'finished' | 'failed'
+type TaskStatus = 'pending' | 'running' | 'finished' | 'failed' | 'cancelled'
 type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
 type SummaryTab = 'summary' | 'transcript' | 'mind-map'
 
@@ -97,8 +101,9 @@ const url = ref('')
 const mode = ref<'video' | 'music'>('video')
 const appPage = ref<'music' | 'tools' | 'admin'>('music')
 const musicCenter = ref<{ download: (track: MusicTrack) => Promise<void> } | null>(null)
-function openMusicTools(view: 'video' | 'watermark') {
+async function openMusicTools(view: 'video' | 'watermark') {
   appPage.value = 'tools'
+  if (view === 'video' && !activeRecordId.value && lastRecordId.value) await openVideoRecord(lastRecordId.value)
   void nextTick(() => document.getElementById(view === 'watermark' ? 'watermark' : 'workspace')?.scrollIntoView())
 }
 function onToolsPlay(event: Event) {
@@ -139,7 +144,7 @@ const verificationMessage = computed(() => {
   return '抖音浏览器会话已保留'
 })
 const saveMessage = ref('')
-const recentLinks = ref<string[]>([])
+const recentLinks = ref<Array<{ id: string; url: string; submitted_at: number }>>([])
 const showRecentLinks = ref(false)
 const pollingTimer = ref<number | undefined>()
 const summaryPollingTimer = ref<number | undefined>()
@@ -151,7 +156,32 @@ const previewUrl = ref('')
 const previewError = ref('')
 const previewVideoRef = ref<HTMLVideoElement | null>(null)
 const pendingSeekTime = ref<number | null>(null)
+const playbackTime = ref(0)
 const summaryTab = ref<SummaryTab>('summary')
+const videoWorkspace = ref<'current' | 'history'>('current')
+const historyPanel = ref<{ refresh: () => Promise<void> } | null>(null)
+const activeRecordId = ref('')
+const lastRecordId = ref('')
+const recordMessage = ref('')
+const relatedTasks = ref<VideoTaskReference[]>([])
+const restoredView = ref<VideoView | null>(null)
+const currentMapView = ref<MapView | null>(null)
+const previousMindMap = ref<MindMapTask | null>(null)
+const renderedMindMap = computed(() => mindMapTask.value?.result ? mindMapTask.value : previousMindMap.value)
+const summaryVersions = computed(() => relatedTasks.value.filter(item => item.kind === 'summary'))
+const mindMapVersions = computed(() => relatedTasks.value.filter(item => item.kind === 'mind_map' && item.summary_task_id === summaryTask.value?.task_id))
+const viewSaveStatus = ref('')
+const localVideoUrl = ref('')
+const localPreviewFailed = ref(false)
+let restoringRecord = false
+let recordRevision = 0
+let summaryRevision = 0
+let mapRevision = 0
+let previewRevision = 0
+let formatsFresh = false
+let viewSaveTimer: number | undefined
+let viewSaveQueue: Promise<void> = Promise.resolve()
+let lastPlaybackSaved = 0
 
 function changeMode(next: 'video' | 'music', focus = false) {
   if (next === 'music') { returnMusicCenter(); return }
@@ -187,7 +217,7 @@ const previewFormat = computed(() => {
   if (!parseResult.value || (host !== 'douyin.com' && !host.endsWith('.douyin.com'))) return null
   return selectPreviewFormat(parseResult.value.formats, selectedFormat.value)
 })
-const canPreview = computed(() => Boolean(previewFormat.value && previewState.value !== 'loading'))
+const canPreview = computed(() => Boolean((previewFormat.value || (localVideoUrl.value && !localPreviewFailed.value)) && previewState.value !== 'loading'))
 
 function formatDuration(seconds?: number | null) {
   if (!seconds) return ''
@@ -238,13 +268,198 @@ function stopMindMapPolling() {
   }
 }
 
-function loadRecentLinks() {
-  recentLinks.value = getRecentLinks(window.localStorage, `videodream.recentLinks.${account.value?.id}`)
+async function loadRecentLinks() {
+  try {
+    const key = `videodream.recentLinks.${account.value?.id}`
+    const old = getRecentLinks(window.localStorage, key)
+    const data = old.length ? await api('/api/videos/recent-links/migrate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ links: old }) }) : await api('/api/videos/recent-links')
+    recentLinks.value = data.items
+    if (old.length) window.localStorage.removeItem(key)
+  } catch (failure) { errorMessage.value = failure instanceof Error ? failure.message : '最近链接加载失败。' }
 }
 
-function rememberRecentLink(target: string) {
-  recentLinks.value = saveRecentLink(window.localStorage, target, `videodream.recentLinks.${account.value?.id}`)
+async function removeRecentLink(id?: string) {
+  try {
+    const data = await api(`/api/videos/recent-links${id ? `/${id}` : ''}`, { method: 'DELETE' })
+    recentLinks.value = data.items
+  } catch (failure) { errorMessage.value = failure instanceof Error ? failure.message : '删除最近链接失败。' }
 }
+
+function viewPayload(): VideoView {
+  return { tab: summaryTab.value, summary_task_id: summaryTask.value?.task_id || null,
+    mind_map_id: renderedMindMap.value?.task_id || null,
+    selected_format: selectedFormat.value.startsWith('sniff') ? `saved:${Math.max(0, parseResult.value?.formats.findIndex(item => item.format_id === selectedFormat.value) ?? 0)}` : selectedFormat.value,
+    playback_time: previewState.value === 'ready' && previewVideoRef.value ? previewVideoRef.value.currentTime : playbackTime.value,
+    map_view: currentMapView.value }
+}
+
+function saveVideoView(keepalive = false): Promise<void> {
+  window.clearTimeout(viewSaveTimer)
+  if (!activeRecordId.value || restoringRecord) return Promise.resolve()
+  const recordId = activeRecordId.value
+  const payload = viewPayload()
+  viewSaveQueue = viewSaveQueue.then(async () => {
+    try {
+      await api(`/api/videos/records/${recordId}/view`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive })
+      if (activeRecordId.value === recordId) viewSaveStatus.value = '已保存'
+    } catch (failure) { if (activeRecordId.value === recordId) viewSaveStatus.value = failure instanceof Error ? failure.message : '视图保存失败。' }
+  })
+  return viewSaveQueue
+}
+
+function scheduleVideoView() {
+  if (restoringRecord || !activeRecordId.value) return
+  viewSaveStatus.value = '保存中'
+  window.clearTimeout(viewSaveTimer)
+  viewSaveTimer = window.setTimeout(() => void saveVideoView(), 650)
+}
+
+function changeMapView(view: MapView) { currentMapView.value = view; scheduleVideoView() }
+function savePlaybackProgress() {
+  if (!previewVideoRef.value || previewState.value !== 'ready' || previewVideoRef.value.readyState < 1) return
+  playbackTime.value = previewVideoRef.value.currentTime
+  if (Date.now() - lastPlaybackSaved > 5000) {
+    lastPlaybackSaved = Date.now()
+    scheduleVideoView()
+  }
+}
+
+async function refreshTaskReferences() {
+  if (!activeRecordId.value) return
+  const id = activeRecordId.value
+  const revision = recordRevision
+  const detail = await api(`/api/videos/records/${id}`)
+  if (revision === recordRevision && id === activeRecordId.value) relatedTasks.value = detail.tasks
+}
+
+async function openVideoRecord(id: string, requestedTab?: SummaryTab) {
+  const revision = ++recordRevision
+  await saveVideoView()
+  if (revision !== recordRevision) return
+  restoringRecord = true
+  loadingParse.value = false; loadingSummary.value = false; loadingMindMap.value = false; loadingDownload.value = false
+  appPage.value = 'tools'; videoWorkspace.value = 'current'
+  errorMessage.value = ''; saveMessage.value = ''; viewSaveStatus.value = ''
+  stopPolling(); stopSummaryPolling(); stopMindMapPolling(); resetPreview()
+  try {
+    const detail = await api(`/api/videos/records/${id}`)
+    if (revision !== recordRevision) return
+    activeRecordId.value = id; lastRecordId.value = id
+    url.value = detail.url
+    parseResult.value = detail.result ? { ...detail.result, record_id: id } : null
+    selectedFormat.value = detail.view?.selected_format || detail.result?.formats[0]?.format_id || ''
+    formatsFresh = false; coverFailed.value = false; saveHandle.value = null
+    relatedTasks.value = detail.tasks; restoredView.value = detail.view
+    playbackTime.value = detail.view?.playback_time || 0
+    currentMapView.value = detail.view?.map_view || null
+    summaryTab.value = requestedTab || detail.view?.tab || 'summary'
+    recordMessage.value = detail.error || (detail.status === 'running' ? '视频正在解析' : '')
+    summaryTask.value = null; mindMapTask.value = null; previousMindMap.value = null; task.value = null
+    localVideoUrl.value = ''; localPreviewFailed.value = false
+    const summary = summaryVersions.value.find(item => item.task_id === detail.view?.summary_task_id) || summaryVersions.value[0]
+    if (summary) {
+      const restoredSummary = await api(`/api/summaries/${summary.task_id}`)
+      if (revision !== recordRevision) return
+      summaryTask.value = restoredSummary
+      if (['pending', 'running'].includes(summaryTask.value!.status)) summaryPollingTimer.value = window.setInterval(() => pollSummary(summary.task_id), 1400)
+      await restoreMindMapVersions(summary.task_id, detail.view?.mind_map_id)
+    }
+    if (revision !== recordRevision) return
+    const download = detail.tasks.find((item: VideoTaskReference) => item.kind === 'download' && item.status === 'finished' && /\.(mp4|webm)$/i.test(item.filename || '')) || detail.tasks.find((item: VideoTaskReference) => item.kind === 'download' && item.status === 'finished') || detail.tasks.find((item: VideoTaskReference) => item.kind === 'download')
+    if (download) {
+      const restoredTask = await api(`/api/tasks/${download.task_id}`)
+      if (revision !== recordRevision) return
+      task.value = restoredTask
+      if (task.value?.status === 'finished' && /\.(mp4|webm)$/i.test(task.value.filename || '')) localVideoUrl.value = task.value.download_url || ''
+      if (['pending', 'running'].includes(task.value?.status || '')) pollingTimer.value = window.setInterval(() => pollTask(download.task_id), 1200)
+    }
+    if (detail.view?.mind_map_id !== renderedMindMap.value?.task_id) currentMapView.value = null
+    window.history.replaceState(null, '', recordLocation(id, summaryTab.value))
+  } catch (failure) {
+    if (revision === recordRevision) { activeRecordId.value = ''; parseResult.value = null; summaryTask.value = null; mindMapTask.value = null; task.value = null; errorMessage.value = failure instanceof Error ? failure.message : '记录加载失败。'; window.history.replaceState(null, '', '#workspace') }
+  } finally {
+    if (revision === recordRevision) { restoringRecord = false; scheduleVideoView() }
+  }
+}
+
+async function selectSummary(event: Event) {
+  if (!(event.target instanceof HTMLSelectElement)) return
+  const id = event.target.value
+  const revision = recordRevision
+  const selection = ++summaryRevision
+  mapRevision++
+  loadingSummary.value = false; loadingMindMap.value = false
+  stopSummaryPolling(); stopMindMapPolling()
+  try {
+    const selected = await api(`/api/summaries/${id}`)
+    if (revision !== recordRevision || selection !== summaryRevision) return
+    summaryTask.value = selected
+    mindMapTask.value = null; previousMindMap.value = null; currentMapView.value = null
+    if (['pending', 'running'].includes(selected.status)) summaryPollingTimer.value = window.setInterval(() => pollSummary(id), 1400)
+    await restoreMindMapVersions(id)
+    if (revision === recordRevision && selection === summaryRevision) scheduleVideoView()
+  } catch (failure) {
+    if (revision === recordRevision && selection === summaryRevision) errorMessage.value = failure instanceof Error ? failure.message : '总结版本加载失败。'
+  }
+}
+
+async function selectMindMap(event: Event) {
+  if (!(event.target instanceof HTMLSelectElement) || !summaryTask.value) return
+  const revision = recordRevision
+  const selection = ++mapRevision
+  loadingMindMap.value = false
+  stopMindMapPolling(); previousMindMap.value = null; currentMapView.value = null
+  try {
+    await restoreMindMapVersions(summaryTask.value.task_id, event.target.value, false)
+    if (revision === recordRevision && selection === mapRevision) scheduleVideoView()
+  } catch (failure) {
+    if (revision === recordRevision && selection === mapRevision) errorMessage.value = failure instanceof Error ? failure.message : '导图版本加载失败。'
+  }
+}
+
+async function restoreMindMapVersions(summaryId: string, preferredId?: string, trackPending = true) {
+  const revision = recordRevision
+  const selection = mapRevision
+  const versions = mindMapVersions.value
+  const preferred = versions.find(item => item.task_id === preferredId)
+  const finished = versions.find(item => item.task_id === preferredId && item.status === 'finished') || versions.find(item => item.status === 'finished')
+  const pending = trackPending ? versions.find(item => ['pending', 'running'].includes(item.status)) : undefined
+  const selected = pending || preferred || finished || versions[0]
+  if (!selected) return
+  if (finished && finished.task_id !== selected.task_id) {
+    const preview = filterMindMapTask(await api(`/api/summaries/${summaryId}/mind-map?map_id=${finished.task_id}`))
+    if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
+    previousMindMap.value = preview
+    if (preferredId !== finished.task_id) currentMapView.value = null
+  }
+  await pollMindMap(summaryId, selected.task_id)
+  if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
+  if (['pending', 'running'].includes(mindMapTask.value?.status || '')) mindMapPollingTimer.value = window.setInterval(() => pollMindMap(summaryId, selected.task_id), 1400)
+}
+
+async function prepareFormats(force = false) {
+  if (!activeRecordId.value || (formatsFresh && !force)) return true
+  const revision = recordRevision
+  const id = activeRecordId.value
+  const selected = parseResult.value?.formats.find(item => item.format_id === selectedFormat.value)
+  const fresh: ParseResult = await api(`/api/videos/records/${id}/formats?force=${force}`, { method: 'POST' })
+  if (revision !== recordRevision || id !== activeRecordId.value) return false
+  parseResult.value = fresh
+  selectedFormat.value = fresh.formats.find(item => item.label === selected?.label && item.ext === selected?.ext)?.format_id || fresh.formats[0]?.format_id || ''
+  formatsFresh = true
+  return true
+}
+
+function reparseHistory(target: string) { videoWorkspace.value = 'current'; url.value = target; void parseVideo(true) }
+function removedVideoRecord(id: string) {
+  if (activeRecordId.value === id) { recordRevision++; activeRecordId.value = ''; parseResult.value = null; summaryTask.value = null; mindMapTask.value = null; task.value = null; resetPreview(); stopPolling(); stopSummaryPolling(); stopMindMapPolling(); window.history.replaceState(null, '', '#workspace') }
+  if (!activeRecordId.value) { loadingParse.value = false; loadingSummary.value = false; loadingMindMap.value = false; loadingDownload.value = false; restoringRecord = false }
+  if (lastRecordId.value === id) lastRecordId.value = ''
+}
+function restoreFromLocation() { const route = readRecordLocation(window.location.hash); if (route && route.recordId !== activeRecordId.value) void openVideoRecord(route.recordId, route.tab) }
+function flushVideoView() { void saveVideoView(true) }
+watch(summaryTab, () => { if (activeRecordId.value && !restoringRecord) window.history.replaceState(null, '', recordLocation(activeRecordId.value, summaryTab.value)); scheduleVideoView() })
+watch(selectedFormat, scheduleVideoView)
 
 function selectRecentLink(target: string) {
   url.value = target
@@ -258,13 +473,18 @@ function hideRecentLinksSoon() {
 }
 
 async function startSummary() {
-  const target = url.value.trim()
-  if (!target) return
+  const target = parseResult.value?.webpage_url || extractHttpUrl(url.value)
+  if (!target || loadingSummary.value) return
+  const revision = recordRevision
+  const selection = ++summaryRevision
+  mapRevision++
+  const recordId = activeRecordId.value
   errorMessage.value = ''
   saveMessage.value = ''
   loadingSummary.value = true
   summaryTask.value = null
   mindMapTask.value = null
+  previousMindMap.value = null; currentMapView.value = null
   summaryTab.value = 'summary'
   stopSummaryPolling()
   stopMindMapPolling()
@@ -273,28 +493,38 @@ async function startSummary() {
     const response = await fetch('/api/summaries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: target }),
+      body: JSON.stringify({ url: target, parse_record_id: recordId || undefined }),
     })
     if (!response.ok) throw new Error(await readApiError(response))
     const data: { task_id: string } = await response.json()
+    if (revision !== recordRevision || selection !== summaryRevision) return
     await pollSummary(data.task_id)
-    summaryPollingTimer.value = window.setInterval(() => pollSummary(data.task_id), 1400)
+    if (revision !== recordRevision || selection !== summaryRevision) return
+    if (['pending', 'running'].includes(summaryTone.value)) summaryPollingTimer.value = window.setInterval(() => pollSummary(data.task_id), 1400)
+    await refreshTaskReferences()
+    if (revision === recordRevision && selection === summaryRevision) scheduleVideoView()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '总结任务创建失败。'
+    if (revision === recordRevision && selection === summaryRevision) errorMessage.value = error instanceof Error ? error.message : '总结任务创建失败。'
   } finally {
-    loadingSummary.value = false
+    if (revision === recordRevision && selection === summaryRevision) loadingSummary.value = false
   }
 }
 
 async function pollSummary(taskId: string) {
+  const revision = recordRevision
+  const selection = summaryRevision
   try {
     const response = await fetch(`/api/summaries/${taskId}`)
     if (!response.ok) throw new Error(await readApiError(response))
-    summaryTask.value = await response.json()
-    if (summaryTask.value?.status === 'finished' || summaryTask.value?.status === 'failed') {
+    const data = await response.json()
+    if (revision !== recordRevision || selection !== summaryRevision || (summaryTask.value && summaryTask.value.task_id !== taskId)) return
+    summaryTask.value = data
+    if (['finished', 'failed', 'cancelled'].includes(summaryTask.value?.status || '')) {
       stopSummaryPolling()
+      await refreshTaskReferences()
     }
   } catch (error) {
+    if (revision !== recordRevision || selection !== summaryRevision || (summaryTask.value && summaryTask.value.task_id !== taskId)) return
     stopSummaryPolling()
     errorMessage.value = error instanceof Error ? error.message : '总结任务状态查询失败。'
   }
@@ -302,34 +532,52 @@ async function pollSummary(taskId: string) {
 
 async function startMindMap(regenerate = false) {
   const summaryId = summaryTask.value?.task_id
-  if (!summaryId || summaryTask.value?.status !== 'finished') return
+  if (!summaryId || summaryTask.value?.status !== 'finished' || loadingMindMap.value) return
+  const revision = recordRevision
+  const selection = ++mapRevision
   loadingMindMap.value = true
   errorMessage.value = ''
   stopMindMapPolling()
+  previousMindMap.value = renderedMindMap.value
   try {
     const suffix = regenerate ? '?regenerate=true' : ''
     const response = await fetch(`/api/summaries/${summaryId}/mind-map${suffix}`, { method: 'POST' })
     if (!response.ok) throw new Error(await readApiError(response))
-    await pollMindMap(summaryId)
-    if (mindMapTask.value?.status !== 'finished' && mindMapTask.value?.status !== 'failed') {
-      mindMapPollingTimer.value = window.setInterval(() => pollMindMap(summaryId), 1400)
+    const created = await response.json()
+    if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
+    await pollMindMap(summaryId, created.task_id)
+    if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
+    if (['pending', 'running'].includes(mindMapTask.value?.status || '')) {
+      mindMapPollingTimer.value = window.setInterval(() => pollMindMap(summaryId, created.task_id), 1400)
     }
+    await refreshTaskReferences()
+    if (revision === recordRevision && selection === mapRevision) scheduleVideoView()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '思维导图任务创建失败。'
+    if (revision === recordRevision && selection === mapRevision) errorMessage.value = error instanceof Error ? error.message : '思维导图任务创建失败。'
   } finally {
-    loadingMindMap.value = false
+    if (revision === recordRevision && selection === mapRevision) loadingMindMap.value = false
   }
 }
 
-async function pollMindMap(summaryId: string) {
+async function pollMindMap(summaryId: string, mapId?: string) {
+  const revision = recordRevision
+  const selection = mapRevision
   try {
-    const response = await fetch(`/api/summaries/${summaryId}/mind-map`)
+    const response = await fetch(`/api/summaries/${summaryId}/mind-map${mapId ? `?map_id=${mapId}` : ''}`)
     if (!response.ok) throw new Error(await readApiError(response))
     const filtered = filterMindMapTask(await response.json())
     if (!filtered) throw new Error('思维导图接口返回了无效数据。')
+    if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
+    if (filtered.result && renderedMindMap.value && renderedMindMap.value.task_id !== filtered.task_id) currentMapView.value = null
     mindMapTask.value = filtered
-    if (filtered.status === 'finished' || filtered.status === 'failed') stopMindMapPolling()
+    if (filtered.result) previousMindMap.value = null
+    if (['finished', 'failed', 'cancelled'].includes(filtered.status)) {
+      stopMindMapPolling()
+      await refreshTaskReferences()
+      scheduleVideoView()
+    }
   } catch (error) {
+    if (revision !== recordRevision || selection !== mapRevision || summaryTask.value?.task_id !== summaryId) return
     stopMindMapPolling()
     errorMessage.value = error instanceof Error ? error.message : '思维导图状态查询失败。'
   }
@@ -429,6 +677,8 @@ async function retryVerifiedVideo() {
 }
 
 function resetPreview() {
+  previewRevision++
+  if (previewState.value === 'ready' && previewVideoRef.value) playbackTime.value = previewVideoRef.value.currentTime
   previewState.value = 'idle'
   previewUrl.value = ''
   previewError.value = ''
@@ -437,6 +687,8 @@ function resetPreview() {
 }
 
 function handlePreviewError() {
+  if (previewUrl.value === localVideoUrl.value) localPreviewFailed.value = true
+  formatsFresh = false
   previewUrl.value = ''
   previewState.value = 'error'
   previewError.value = '视频连接失败，请重新解析或稍后重试。'
@@ -448,6 +700,8 @@ function handlePreviewReady() {
     previewVideoRef.value.currentTime = clampSeekTime(pendingSeekTime.value, previewVideoRef.value.duration)
     pendingSeekTime.value = null
     void previewVideoRef.value.play().catch(() => undefined)
+  } else if (previewVideoRef.value && playbackTime.value) {
+    previewVideoRef.value.currentTime = clampSeekTime(playbackTime.value, previewVideoRef.value.duration)
   }
 }
 
@@ -470,42 +724,57 @@ async function seekToTimestamp(timestamp: number) {
 }
 
 async function startPreview() {
-  const result = parseResult.value
-  const format = previewFormat.value
-  const target = result?.webpage_url || url.value.trim()
-  if (!result || !format || !target || previewState.value === 'loading') return
+  if (!parseResult.value || previewState.value === 'loading') return
+  const revision = recordRevision
+  const request = ++previewRevision
+  const recordId = activeRecordId.value
 
   previewState.value = 'loading'
   previewUrl.value = ''
   previewError.value = ''
 
   try {
+    if (localVideoUrl.value && !localPreviewFailed.value) { previewUrl.value = localVideoUrl.value; return }
+    if (!await prepareFormats() || revision !== recordRevision || request !== previewRevision) return
+    const format = previewFormat.value
+    const target = parseResult.value?.webpage_url || extractHttpUrl(url.value)
+    if (!format || !target) throw new Error('当前视频没有可用的播放源。')
     const response = await fetch('/api/previews', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: target, format_id: format.format_id }),
+      body: JSON.stringify({ url: target, format_id: format.format_id, parse_record_id: recordId || undefined }),
     })
     if (!response.ok) throw new Error(await readApiError(response))
     const localPreviewUrl = readPreviewUrl(await response.json())
+    if (revision !== recordRevision || request !== previewRevision) return
     if (!localPreviewUrl) throw new Error('预览接口返回了无效地址。')
     previewUrl.value = localPreviewUrl
   } catch (error) {
+    if (revision !== recordRevision || request !== previewRevision) return
     previewState.value = 'error'
     previewError.value = error instanceof Error ? error.message : '视频连接失败，请稍后重试。'
   }
 }
 
-async function parseVideo() {
+async function parseVideo(force = false) {
   if (loadingParse.value || browserBusy.value) return
   const target = extractHttpUrl(url.value)
   if (!target) {
     errorMessage.value = '请先粘贴视频链接或完整的分享文字。'
     return
   }
-  rememberRecentLink(target)
+  loadingParse.value = true
+  const revision = ++recordRevision
+  await saveVideoView()
+  if (revision !== recordRevision) return
+  restoringRecord = false
+  loadingSummary.value = false; loadingMindMap.value = false; loadingDownload.value = false
+  activeRecordId.value = ''; relatedTasks.value = []; restoredView.value = null; currentMapView.value = null
+  previousMindMap.value = null; localVideoUrl.value = ''; localPreviewFailed.value = false; recordMessage.value = ''; viewSaveStatus.value = ''
   errorMessage.value = ''
   saveMessage.value = ''
   resetPreview()
+  playbackTime.value = 0
   stopPolling()
   parseResult.value = null
   task.value = null
@@ -525,38 +794,54 @@ async function parseVideo() {
     const response = await fetch('/api/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: target }),
+      body: JSON.stringify({ url: target, force }),
     })
     if (!response.ok) {
       const detail = (await response.clone().json().catch(() => ({}))).detail
+      if (revision !== recordRevision) return
+      if (detail?.record_id) { activeRecordId.value = detail.record_id; lastRecordId.value = detail.record_id; window.history.replaceState(null, '', recordLocation(detail.record_id)) }
       if (detail?.code === 'browser_verification_required') {
         verificationTarget.value = detail.url || target
         void refreshBrowserSession()
       }
       throw new Error(await readApiError(response))
     }
-    parseResult.value = await response.json()
+    const parsed = await response.json()
+    if (revision !== recordRevision) return
+    parseResult.value = parsed
+    activeRecordId.value = parseResult.value?.record_id || ''
+    lastRecordId.value = activeRecordId.value
+    formatsFresh = true
     selectedFormat.value = parseResult.value?.formats.find((item) => item.format_id.startsWith('sniffpair:'))?.format_id || parseResult.value?.formats[0]?.format_id || ''
+    if (activeRecordId.value) window.history.replaceState(null, '', recordLocation(activeRecordId.value))
+    scheduleVideoView()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '解析失败，请确认链接是否公开可访问。'
+    if (revision === recordRevision) errorMessage.value = error instanceof Error ? error.message : '解析失败，请确认链接是否公开可访问。'
   } finally {
-    loadingParse.value = false
+    if (revision === recordRevision) loadingParse.value = false
+    void loadRecentLinks()
+    void historyPanel.value?.refresh()
     if (browserSession.value?.visible && browserTimer === undefined) void refreshBrowserSession()
   }
 }
 
 async function startDownload() {
   const target = parseResult.value?.webpage_url || extractHttpUrl(url.value)
-  if (!target) return
+  if (!target || loadingDownload.value) return
+  const revision = recordRevision
+  const recordId = activeRecordId.value
   errorMessage.value = ''
   saveMessage.value = ''
   loadingDownload.value = true
   task.value = null
 
   try {
+    if (!await prepareFormats() || revision !== recordRevision) return
     if (window.showSaveFilePicker) {
       try {
-        saveHandle.value = await chooseSaveHandle()
+        const handle = await chooseSaveHandle()
+        if (revision !== recordRevision) return
+        saveHandle.value = handle
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
         throw error
@@ -569,31 +854,42 @@ async function startDownload() {
       body: JSON.stringify({
         url: target,
         format_id: selectedFormat.value || undefined,
+        parse_record_id: recordId || undefined,
       }),
     })
     if (!response.ok) throw new Error(await readApiError(response))
     const data: { task_id: string } = await response.json()
+    if (revision !== recordRevision) return
     await pollTask(data.task_id)
-    pollingTimer.value = window.setInterval(() => pollTask(data.task_id), 1200)
+    if (revision !== recordRevision) return
+    if (['pending', 'running'].includes(taskTone.value)) pollingTimer.value = window.setInterval(() => pollTask(data.task_id), 1200)
+    await refreshTaskReferences()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '下载任务创建失败。'
+    if (revision === recordRevision) errorMessage.value = error instanceof Error ? error.message : '下载任务创建失败。'
   } finally {
-    loadingDownload.value = false
+    if (revision === recordRevision) loadingDownload.value = false
   }
 }
 
 async function pollTask(taskId: string) {
+  const revision = recordRevision
   try {
     const response = await fetch(`/api/tasks/${taskId}`)
     if (!response.ok) throw new Error(await readApiError(response))
-    task.value = await response.json()
-    if (task.value?.status === 'finished' || task.value?.status === 'failed') {
+    const data = await response.json()
+    if (revision !== recordRevision || (task.value && task.value.task_id !== taskId)) return
+    task.value = data
+    if (['finished', 'failed', 'cancelled'].includes(task.value?.status || '')) {
       stopPolling()
-      if (task.value.status === 'finished' && task.value.download_url && saveHandle.value) {
+      await refreshTaskReferences()
+      if (revision !== recordRevision || task.value?.task_id !== taskId) return
+      if (task.value?.status === 'finished' && task.value.download_url && /\.(mp4|webm)$/i.test(task.value.filename || '')) localVideoUrl.value = task.value.download_url
+      if (task.value?.status === 'finished' && task.value.download_url && saveHandle.value) {
         await saveFinishedFile(saveHandle.value)
       }
     }
   } catch (error) {
+    if (revision !== recordRevision || (task.value && task.value.task_id !== taskId)) return
     stopPolling()
     errorMessage.value = error instanceof Error ? error.message : '任务状态查询失败。'
   }
@@ -645,6 +941,9 @@ function stopPolling() {
 }
 
 onBeforeUnmount(() => {
+  flushVideoView()
+  window.removeEventListener('hashchange', restoreFromLocation)
+  window.removeEventListener('pagehide', flushVideoView)
   browserDisposed = true
   stopBrowserPolling()
   stopPolling()
@@ -655,6 +954,11 @@ onBeforeUnmount(() => {
 onMounted(() => {
   void loadRecentLinks()
   void refreshBrowserSession()
+  window.addEventListener('hashchange', restoreFromLocation)
+  window.addEventListener('pagehide', flushVideoView)
+  const route = readRecordLocation(window.location.hash)
+  if (route) void openVideoRecord(route.recordId, route.tab)
+  else void api('/api/videos/last-record').then(data => { lastRecordId.value = data.record_id || '' }).catch(() => {})
 })
 </script>
 
@@ -690,6 +994,9 @@ onMounted(() => {
             <button type="button" @click="changeMode('music')"><Music2 :size="21" /><span>音乐中心</span></button>
           </div>
           <div v-show="mode === 'video'" id="video-panel" role="tabpanel" aria-labelledby="video-tab">
+          <nav class="video-workspace-tabs" aria-label="视频工作台视图"><button :class="{ active: videoWorkspace === 'current' }" @click="videoWorkspace = 'current'"><Video :size="17" />当前视频</button><button :class="{ active: videoWorkspace === 'history' }" @click="saveVideoView(); videoWorkspace = 'history'"><History :size="17" />解析历史</button></nav>
+          <VideoHistory v-if="videoWorkspace === 'history'" ref="historyPanel" @open="openVideoRecord" @reparse="reparseHistory" @removed="removedVideoRecord" />
+          <div v-show="videoWorkspace === 'current'">
           <div class="search-area">
             <form class="link-composer" @submit.prevent="parseVideo()">
               <textarea
@@ -704,19 +1011,14 @@ onMounted(() => {
               <div class="composer-footer"><span class="composer-source">抖音 · B站 · YouTube</span><button class="composer-submit" type="submit" :disabled="loadingParse || !url.trim()"><LoaderCircle v-if="loadingParse" :size="18" class="spin" /><ArrowRight v-else :size="18" />{{ loadingParse ? '解析中' : '解析视频' }}</button></div>
             </form>
             <div v-if="showRecentLinks && hasRecentLinks" class="recent-links" aria-label="最近输入链接">
-              <button
-                v-for="item in recentLinks"
-                :key="item"
-                type="button"
-                @mousedown.prevent="selectRecentLink(item)"
-              >
-                <span>最近</span>
-                <strong>{{ item }}</strong>
-              </button>
+              <div class="video-recent-head"><span>最近提交</span><button class="video-icon" title="清空最近链接" aria-label="清空最近链接" @mousedown.prevent="removeRecentLink()"><Trash2 :size="15" /></button></div>
+              <div v-for="item in recentLinks" :key="item.id" class="video-recent-row"><button type="button" @mousedown.prevent="selectRecentLink(item.url)"><span>最近</span><strong>{{ item.url }}</strong></button><button class="video-icon" title="删除最近链接" aria-label="删除最近链接" @mousedown.prevent="removeRecentLink(item.id)"><X :size="15" /></button></div>
             </div>
           </div>
 
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+          <p v-if="recordMessage" class="video-record-message">{{ recordMessage }}</p>
+          <p v-if="activeRecordId && viewSaveStatus" class="video-save-status" :class="{ failed: !['已保存', '保存中'].includes(viewSaveStatus) }" role="status">{{ viewSaveStatus }}</p>
           <div v-if="verificationTarget || browserSession?.visible" class="browser-verification" role="status" aria-live="polite">
             <div class="verification-status"><ShieldCheck :size="18" /><span>{{ verificationMessage }}</span></div>
             <div class="verification-actions">
@@ -738,6 +1040,8 @@ onMounted(() => {
                 controls
                 playsinline
                 preload="metadata"
+                @timeupdate="savePlaybackProgress"
+                @pause="scheduleVideoView"
                 @loadedmetadata="handlePreviewReady"
                 @error="handlePreviewError"
               />
@@ -810,6 +1114,7 @@ onMounted(() => {
               <span :style="{ width: `${Math.max(4, summaryTask.progress)}%` }"></span>
             </div>
             <p class="summary-message">{{ summaryTask.error || summaryTask.message }}</p>
+            <div v-if="summaryVersions.length > 1" class="video-version-controls"><label>总结版本<select :value="summaryTask.task_id" aria-label="总结版本" @change="selectSummary"><option v-for="item in summaryVersions" :key="item.task_id" :value="item.task_id">{{ new Date(item.created_at * 1000).toLocaleString() }} · {{ item.status === 'finished' ? '完成' : item.status === 'failed' ? '失败' : item.status === 'cancelled' ? '已取消' : '处理中' }}</option></select></label></div>
 
             <div v-if="summaryTask.result" class="summary-result">
               <div class="summary-meta">
@@ -836,6 +1141,7 @@ onMounted(() => {
                 </div>
               </section>
               <section v-else class="mind-map-panel" aria-label="思维导图">
+                <div v-if="mindMapVersions.length" class="video-version-controls"><label>导图版本<select :value="mindMapTask?.task_id || renderedMindMap?.task_id" aria-label="导图版本" @change="selectMindMap"><option v-for="item in mindMapVersions" :key="item.task_id" :value="item.task_id">v{{ item.version }} · {{ item.status === 'finished' ? '完成' : item.status === 'failed' ? '失败' : item.status === 'cancelled' ? '已取消' : '生成中' }}</option></select></label><button class="video-icon" title="重新生成思维导图" aria-label="重新生成思维导图" :disabled="loadingMindMap || ['pending', 'running'].includes(mindMapTask?.status || '')" @click="startMindMap(true)"><RotateCcw :size="17" /></button></div>
                 <div v-if="!mindMapTask" class="mind-map-empty">
                   <button type="button" class="secondary-action" :disabled="loadingMindMap" @click="startMindMap(false)">
                     {{ loadingMindMap ? '正在启动' : '生成思维导图' }}
@@ -855,11 +1161,14 @@ onMounted(() => {
                   <div v-if="mindMapTask.status === 'failed'" class="mind-map-retry">
                     <button type="button" class="secondary-action" :disabled="loadingMindMap" @click="startMindMap(true)">重新生成</button>
                   </div>
-                  <div v-if="mindMapTask.result" class="mind-map-tree-wrap">
+                  <div v-if="renderedMindMap?.result" class="mind-map-tree-wrap">
                     <MindMapCanvas
-                      :result="mindMapTask.result"
+                      :key="renderedMindMap.task_id"
+                      :result="renderedMindMap.result"
+                      :saved-view="currentMapView"
                       :seek-enabled="Boolean(previewVideoRef || canPreview)"
                       @seek="seekToTimestamp"
+                      @view-change="changeMapView"
                     />
                   </div>
                 </template>
@@ -880,6 +1189,7 @@ onMounted(() => {
               {{ savingFile ? '保存中' : '另存为' }}
             </button>
             <a v-if="task.status === 'finished' && task.filename" class="secondary-action compact watermark-entry" href="#watermark"><Eraser :size="16" aria-hidden="true" />去水印</a>
+          </div>
           </div>
           </div>
         </section>

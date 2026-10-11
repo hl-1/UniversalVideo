@@ -1,4 +1,4 @@
-export type MindMapStatus = 'pending' | 'running' | 'finished' | 'failed'
+export type MindMapStatus = 'pending' | 'running' | 'finished' | 'failed' | 'cancelled'
 
 export type MindMapNode = {
   id: string
@@ -23,9 +23,10 @@ export type MindMapTask = {
   message: string
   error?: string | null
   result?: MindMapResult | null
+  version?: number
 }
 
-const statuses: MindMapStatus[] = ['pending', 'running', 'finished', 'failed']
+const statuses: MindMapStatus[] = ['pending', 'running', 'finished', 'failed', 'cancelled']
 const branchColors = ['#2563eb', '#f59e0b', '#22c55e', '#ec4899', '#8b5cf6', '#06b6d4']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,6 +94,7 @@ export function filterMindMapTask(value: unknown): MindMapTask | null {
     message: typeof value.message === 'string' ? value.message : '',
     error: typeof value.error === 'string' ? value.error : null,
     result,
+    version: typeof value.version === 'number' && Number.isInteger(value.version) ? value.version : 1,
   }
 }
 

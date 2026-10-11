@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Query
 
-from backend import accounts
+from backend import accounts, video_store
 from backend.administration import ResourceKind, remove_file
 
 router = APIRouter(prefix="/api/workspace", tags=["personal-workspace"])
@@ -20,7 +20,7 @@ def resources(kind: ResourceKind = "file", page: int = Query(default=1, ge=1), q
         cursor.execute("SELECT COUNT(*) AS n FROM resources" + where, args)
         total = cursor.fetchone()["n"]
         cursor.execute("SELECT * FROM resources" + where + " ORDER BY created_at DESC LIMIT 20 OFFSET %s", args + ((page - 1) * 20,))
-        items = cursor.fetchall()
+        items = [video_store.hydrate(cursor, row) for row in cursor.fetchall()]
     for row in items:
         row["payload"] = json.loads(row["payload"])
         prefix = {"file": "/api/files/", "summary_file": "/api/summary-files/", "image": "/api/library/images/", "thumbnail": "/api/thumbnails/"}.get(kind)
@@ -32,11 +32,14 @@ def resources(kind: ResourceKind = "file", page: int = Query(default=1, ge=1), q
 
 @router.delete("/resources/{kind}/{key}")
 def remove(kind: ResourceKind, key: str):
+    if kind == "video_parse":
+        from backend.video_history import delete_record
+        return delete_record(key)
     row = accounts.resource(kind, key)
     for callback in accounts.cancel_callbacks:
         callback(row["user_id"], key)
     with accounts.database() as cursor:
-        cursor.execute("UPDATE resources SET deleted=TRUE WHERE kind=%s AND resource_key=%s", (kind, key))
+        video_store.tombstone(cursor, kind, key)
         if kind == "file":
             cursor.execute("DELETE FROM music_downloads WHERE filename=%s", (key,))
     remove_file(kind, key)

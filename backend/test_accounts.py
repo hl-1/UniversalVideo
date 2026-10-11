@@ -67,6 +67,9 @@ class AccountIntegrationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(main.executor, 'submit'))
         self.stack.enter_context(patch.object(main.music_batch_executor, 'submit'))
         with library.database() as cursor:
+            from backend import video_store
+            for table in ('video_recent_links', *(item[0] for item in video_store.TABLES.values())):
+                cursor.execute(f'DELETE FROM {table}')
             for table in ('music_playlists', 'music_favorites', 'music_history', 'music_downloads', 'music_lyrics', 'music_tracks', 'music_theme', 'resources', 'audit_logs'):
                 cursor.execute(f'DELETE FROM {table}')
             cursor.execute("DELETE FROM users WHERE id NOT IN (1,%s,%s)", (self.a_id, self.b_id))

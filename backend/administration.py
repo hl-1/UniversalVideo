@@ -133,6 +133,9 @@ def delete_user(uid: int):
             raise HTTPException(409, "不能删除最后一个有效超级管理员。")
         cursor.execute("SELECT kind,resource_key FROM resources WHERE user_id=%s", (uid,))
         files = cursor.fetchall()
+        from backend import video_store
+        for table in ("video_recent_links", *(item[0] for item in video_store.TABLES.values())):
+            cursor.execute(f"DELETE FROM {table} WHERE user_id=%s", (uid,))
         for table in ("music_playlists", "music_favorites", "music_history", "music_downloads", "music_lyrics", "music_tracks", "music_theme", "music_profile", "resources"):
             cursor.execute(f"DELETE FROM {table} WHERE user_id=%s", (uid,))
         cursor.execute("DELETE FROM users WHERE id=%s", (uid,))
@@ -147,8 +150,8 @@ def delete_user(uid: int):
 
 DATA_TABLES = {"favorites": ("music_favorites", "track_id"), "history": ("music_history", "track_id"),
                "playlists": ("music_playlists", "id"), "tracks": ("music_tracks", "id"), "downloads": ("music_downloads", "id")}
-ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import"]
-DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import"]
+ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "video_search", "video_parse", "video_view"]
+DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "video_search", "video_parse", "video_view"]
 
 
 @router.get("/data")
@@ -182,6 +185,9 @@ def data(kind: DataKind = "file", user_id: int | None = None, q: str = Query(def
         cursor.execute("SELECT " + select + " " + source + where + " ORDER BY d.user_id,resource_key LIMIT %s OFFSET %s",
                        parameters + (page_size, (page - 1) * page_size))
         items = cursor.fetchall()
+        if kind not in DATA_TABLES:
+            from backend import video_store
+            items = [video_store.hydrate(cursor, row) for row in items]
     from urllib.parse import quote
     for row in items:
         if "payload" in row:
@@ -215,6 +221,9 @@ def ROOT_DOWNLOADS():
 @router.delete("/data/{kind}/{key}")
 def delete_data(kind: DataKind, key: str):
     accounts.admin()
+    if kind == "video_parse":
+        from backend.video_history import delete_record
+        return delete_record(key)
     if kind not in DATA_TABLES:
         row = accounts.resource(kind, key)
         for callback in accounts.cancel_callbacks:
@@ -224,7 +233,8 @@ def delete_data(kind: DataKind, key: str):
             table, field = DATA_TABLES[kind]
             cursor.execute(f"DELETE FROM {table} WHERE {field}=%s", (key,))
         else:
-            cursor.execute("UPDATE resources SET deleted=TRUE WHERE kind=%s AND resource_key=%s", (kind, key))
+            from backend import video_store
+            video_store.tombstone(cursor, kind, key)
             if kind == "file":
                 cursor.execute("DELETE FROM music_downloads WHERE filename=%s", (key,))
     remove_file(kind, key)

@@ -252,6 +252,13 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
         cursor.execute("SELECT id FROM users WHERE id=%s", (uid,))
         if not cursor.fetchone():
             return
+        from backend import video_store
+        if kind in video_store.KINDS:
+            stored = video_store.get(cursor, kind, key, lock=True, include_deleted=True)
+            if stored and stored["deleted"]:
+                return
+            video_store.save(cursor, kind, key, uid, payload or {})
+            return
         cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
                        (kind, key, uid, json.dumps(payload or {}, ensure_ascii=False, default=str), time.time(), time.time()))
@@ -259,8 +266,12 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
 
 def resource(kind: str, key: str, *, check: bool = True) -> dict:
     with database() as cursor:
-        cursor.execute("SELECT * FROM resources WHERE kind=%s AND resource_key=%s AND deleted=FALSE", (kind, key))
-        row = cursor.fetchone()
+        from backend import video_store
+        if kind in video_store.KINDS:
+            row = video_store.get(cursor, kind, key)
+        else:
+            cursor.execute("SELECT * FROM resources WHERE kind=%s AND resource_key=%s AND deleted=FALSE", (kind, key))
+            row = cursor.fetchone()
     if not row or (check and current().role != "super_admin" and row["user_id"] != current().id):
         raise HTTPException(404, "资源不存在。")
     return row
@@ -502,7 +513,7 @@ def check_path(path: str):
              (r"/api/watermarks/tasks/([^/]+)", "watermark"),
              (r"/api/watermarks/videos/([^/]+)(?:/info)?", "file"),
              (r"/api/music/lyrics/([^/]+)", "file"),
-             (r"/api/music/playback/([^/]+)/content", "playback"), (r"/api/previews/([^/]+)/content", "preview")]
+             (r"/api/music/playback/([^/]+)/content", "playback")]
     for pattern, kind in rules:
         match = re.fullmatch(pattern, path)
         if match and path not in {"/api/music/lyrics/fetch", "/api/music/imports/text", "/api/music/imports/screenshots"}:
@@ -531,7 +542,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 admin()
             await run_in_threadpool(check_path, path)
             config = await run_in_threadpool(settings)
-            feature = "music" if path.startswith(("/api/music", "/api/library")) else "watermark" if path.startswith("/api/watermarks") else "summary" if path.startswith("/api/summaries") else "video" if path in {"/api/parse", "/api/download", "/api/previews"} or path.startswith("/api/browser-session") else None
+            feature = "music" if path.startswith(("/api/music", "/api/library")) else "watermark" if path.startswith("/api/watermarks") else "summary" if path.startswith("/api/summaries") else "video" if path in {"/api/parse", "/api/download"} or path.startswith(("/api/browser-session", "/api/previews", "/api/videos")) else None
             if feature and not config[f"{feature}_enabled"]:
                 raise HTTPException(403, "此功能已由管理员关闭。")
             response = await call_next(request)

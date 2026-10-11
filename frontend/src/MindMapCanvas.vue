@@ -3,14 +3,47 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MindElixir, { type MindElixirInstance, type Theme } from 'mind-elixir'
 import 'mind-elixir/style.css'
 import { mindMapPanDelta, toMindElixirData, type MindMapResult } from './mindMap'
+import type { MapView } from './videoHistory'
+import { FoldVertical, Maximize2, Minus, Plus, UnfoldVertical } from 'lucide-vue-next'
 
-const props = defineProps<{ result: MindMapResult; seekEnabled?: boolean }>()
-const emit = defineEmits<{ seek: [timestamp: number] }>()
+const props = defineProps<{ result: MindMapResult; seekEnabled?: boolean; savedView?: MapView | null }>()
+const emit = defineEmits<{ seek: [timestamp: number]; viewChange: [view: MapView] }>()
 
 const host = ref<HTMLDivElement | null>(null)
 const panPosition = ref(0)
 const panTravel = ref(0)
 let mind: MindElixirInstance | null = null
+let restoring = true
+let captureQueued = false
+let resizeObserver: ResizeObserver | null = null
+
+function mapData() {
+  const data = toMindElixirData(props.result)
+  const collapsed = new Set(props.savedView?.collapsed || [])
+  const visit = (node: typeof data.nodeData) => { node.expanded = !collapsed.has(node.id); node.children?.forEach(visit) }
+  visit(data.nodeData)
+  return data
+}
+
+function captureView() {
+  if (restoring || !mind || !host.value || captureQueued) return
+  captureQueued = true
+  requestAnimationFrame(() => {
+    captureQueued = false
+    if (restoring || !mind || !host.value || !host.value.clientWidth) return
+    const root = MindElixir.E('video-mind-map-root', host.value)
+    if (!root) return
+    const collapsed: string[] = []
+    const data = mind.getData()
+    const visit = (node: typeof data.nodeData) => { if (node.expanded === false) collapsed.push(node.id); node.children?.forEach(visit) }
+    visit(data.nodeData)
+    const rect = root.getBoundingClientRect()
+    const container = host.value.getBoundingClientRect()
+    // Relative root coordinates preserve framing across different screen sizes.
+    emit('viewChange', { scale: mind.scaleVal, x: (rect.left - container.left) / container.width,
+      y: (rect.top - container.top) / container.height, collapsed })
+  })
+}
 
 const theme: Theme = {
   name: 'videodream',
@@ -42,16 +75,30 @@ const theme: Theme = {
   },
 }
 
-function fitMap() {
+function fitMap(save = true, restore = false) {
+  restoring = true
   requestAnimationFrame(() => {
-    if (!mind || !host.value) return
+    if (!mind || !host.value || !host.value.clientWidth) { restoring = false; return }
     mind.scaleFit()
     const targetScale = host.value.clientWidth >= 760
       ? mind.scaleVal * 1.18
       : Math.max(0.6, mind.scaleVal * 1.2)
     mind.toCenter()
     mind.scale(Math.min(1.35, targetScale))
-    requestAnimationFrame(alignMapLeft)
+    requestAnimationFrame(() => {
+      alignMapLeft()
+      if (restore && props.savedView && mind && host.value) {
+        mind.scale(props.savedView.scale)
+        const root = MindElixir.E('video-mind-map-root', host.value)
+        if (root) {
+          const rect = root.getBoundingClientRect()
+          const container = host.value.getBoundingClientRect()
+          mind.move(props.savedView.x * container.width - (rect.left - container.left), props.savedView.y * container.height - (rect.top - container.top))
+        }
+      }
+      restoring = false
+      if (save) captureView()
+    })
   })
 }
 
@@ -81,10 +128,10 @@ function syncSeekButtons() {
 
 function renderMap() {
   if (!mind) return
-  mind.refresh(toMindElixirData(props.result))
+  mind.refresh(mapData())
   nextTick(() => {
     syncSeekButtons()
-    fitMap()
+    fitMap(false, true)
   })
 }
 
@@ -105,7 +152,7 @@ function setAllExpanded(expanded: boolean) {
   if (!mind || !host.value) return
   const root = MindElixir.E('video-mind-map-root', host.value)
   if (root) mind.expandNodeAll(root, expanded)
-  nextTick(fitMap)
+  nextTick(() => fitMap())
 }
 
 function handleClick(event: MouseEvent) {
@@ -132,18 +179,29 @@ onMounted(() => {
     scaleMax: 1.6,
     theme,
   })
-  mind.init(toMindElixirData(props.result))
+  mind.init(mapData())
+  mind.bus.addListener('scale', captureView)
+  mind.bus.addListener('move', captureView)
+  mind.bus.addListener('expandNode', captureView)
   host.value.addEventListener('click', handleClick)
   nextTick(() => {
     syncSeekButtons()
-    fitMap()
+    fitMap(false, true)
   })
+  let previousWidth = 0
+  resizeObserver = new ResizeObserver(entries => {
+    const width = entries[0]?.contentRect.width || 0
+    if (width > 0 && width !== previousWidth) fitMap(false, true)
+    previousWidth = width
+  })
+  resizeObserver.observe(host.value)
 })
 
 watch(() => props.result, renderMap, { deep: true })
 watch(() => props.seekEnabled, syncSeekButtons)
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
   host.value?.removeEventListener('click', handleClick)
   mind?.destroy()
   mind = null
@@ -153,11 +211,11 @@ onBeforeUnmount(() => {
 <template>
   <div class="video-mind-map-shell">
     <div class="video-mind-map-tools" aria-label="思维导图视图控制">
-      <button type="button" aria-label="全部收起" title="全部收起" @click="setAllExpanded(false)">⊟</button>
-      <button type="button" aria-label="全部展开" title="全部展开" @click="setAllExpanded(true)">⊞</button>
-      <button type="button" aria-label="缩小" title="缩小" @click="zoom(-0.1)">−</button>
-      <button type="button" aria-label="适应画布" title="适应画布" @click="fitMap">⌾</button>
-      <button type="button" aria-label="放大" title="放大" @click="zoom(0.1)">+</button>
+      <button type="button" aria-label="全部收起" title="全部收起" @click="setAllExpanded(false)"><FoldVertical :size="17" /></button>
+      <button type="button" aria-label="全部展开" title="全部展开" @click="setAllExpanded(true)"><UnfoldVertical :size="17" /></button>
+      <button type="button" aria-label="缩小" title="缩小" @click="zoom(-0.1)"><Minus :size="17" /></button>
+      <button type="button" aria-label="适应画布" title="适应画布" @click="fitMap()"><Maximize2 :size="17" /></button>
+      <button type="button" aria-label="放大" title="放大" @click="zoom(0.1)"><Plus :size="17" /></button>
     </div>
     <div ref="host" class="video-mind-map-canvas" aria-label="AI 视频总结思维导图"></div>
     <label class="video-mind-map-pan">

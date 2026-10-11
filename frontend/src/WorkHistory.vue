@@ -10,7 +10,7 @@ const rows = ref<any[]>([])
 const loading = ref(false)
 const error = ref('')
 const detail = ref<any>(null)
-const kinds: Record<string, string> = { file: '我的文件', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量下载', music_import: '批量找歌' }
+const kinds: Record<string, string> = { file: '我的文件', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量下载', music_import: '批量找歌', video_parse: '视频解析', video_search: '视频搜索记录', video_view: '视频预览状态' }
 const statuses: Record<string, string> = { pending: '排队中', running: '处理中', finished: '完成', failed: '失败', cancelled: '已取消', cancelling: '正在停止', recognizing: '截图识别中', searching: '搜索中', draft: '待搜索' }
 let timer: number | undefined
 let generation = 0

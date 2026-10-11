@@ -5,6 +5,7 @@ import json
 import hashlib
 import html
 import logging
+import math
 import os
 import secrets
 import subprocess
@@ -22,8 +23,10 @@ from urllib.request import Request, urlopen
 
 import requests
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from playwright.sync_api import sync_playwright
@@ -38,7 +41,7 @@ from backend.audio import IncompleteAudioError, download_audio
 from backend import music
 from backend.music_lyrics import router as music_lyrics_router
 from backend.music_library_media import router as music_library_media_router, start_cover_backfill
-from backend import accounts, ai, library, music_imports, speech
+from backend import accounts, ai, library, music_imports, speech, video_cache, video_history, video_store
 from backend.administration import router as administration_router
 from backend.workspace import router as workspace_router
 from backend.network import public_url, public_get
@@ -65,6 +68,7 @@ TaskStatus = Literal["pending", "running", "finished", "failed", "cancelled"]
 
 class ParseRequest(BaseModel):
     url: HttpUrl
+    force: bool = False
 
 
 class DownloadRequest(BaseModel):
@@ -72,15 +76,18 @@ class DownloadRequest(BaseModel):
     format_id: str | None = Field(default=None, max_length=4096)
     media_type: Literal["video", "audio"] = "video"
     audio_format: Literal["m4a", "mp3"] = "m4a"
+    parse_record_id: str | None = Field(default=None, max_length=64)
 
 
 class SummaryRequest(BaseModel):
     url: HttpUrl
+    parse_record_id: str | None = Field(default=None, max_length=64)
 
 
 class PreviewRequest(BaseModel):
     url: HttpUrl
     format_id: str = Field(min_length=1, max_length=4096)
+    parse_record_id: str | None = Field(default=None, max_length=64)
 
 
 class PreviewResponse(BaseModel):
@@ -103,6 +110,7 @@ class ParseResponse(BaseModel):
     uploader: str | None = None
     webpage_url: str | None = None
     formats: list[FormatInfo]
+    record_id: str | None = None
 
 
 class DownloadResponse(BaseModel):
@@ -177,6 +185,7 @@ class MindMapTaskResponse(BaseModel):
     message: str = ""
     error: str | None = None
     result: MindMapResult | None = None
+    version: int = 1
 
 
 class TaskResponse(BaseModel):
@@ -215,6 +224,7 @@ class DownloadTask:
         self.user_id = accounts.owner_id() if accounts.principal.get() else 0
         self.cancel = threading.Event()
         self.process: subprocess.Popen | None = None
+        self.parse_record_id: str | None = None
 
     def to_response(self) -> TaskResponse:
         download_url = f"/api/files/{quote(self.filename, safe='')}" if self.filename else None
@@ -240,6 +250,7 @@ class SummaryTask:
         self.error: str | None = None
         self.result: SummaryResult | None = None
         self.transcript: list[SubtitleSegment] = []
+        self.parse_record_id: str | None = None
         self.created_at = time.time()
         self.updated_at = time.time()
         self.user_id = accounts.owner_id() if accounts.principal.get() else 0
@@ -269,6 +280,8 @@ class MindMapTask:
         self.result: MindMapResult | None = None
         self.created_at = time.time()
         self.updated_at = time.time()
+        self.version = 1
+        self.parse_record_id: str | None = None
 
     def to_response(self) -> MindMapTaskResponse:
         return MindMapTaskResponse(
@@ -279,10 +292,26 @@ class MindMapTask:
             message=self.message,
             error=self.error,
             result=self.result,
+            version=self.version,
         )
 
 
 app = FastAPI(title="VideoDream API", version="1.0.0")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_response(request, exc):
+    def finite(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: finite(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [finite(item) for item in value]
+        return value
+    return JSONResponse({"detail": finite(jsonable_encoder(exc.errors()))}, status_code=422)
+
+
 app.include_router(watermark_router)
 app.include_router(music.router)
 app.include_router(music_imports.router)
@@ -292,6 +321,7 @@ app.include_router(library.router)
 app.include_router(accounts.router)
 app.include_router(administration_router)
 app.include_router(workspace_router)
+app.include_router(video_history.router)
 app.add_middleware(accounts.AuthenticationMiddleware)
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 if (FRONTEND_DIST / "assets").is_dir():
@@ -1266,6 +1296,16 @@ def _local_thumbnail(filename: str) -> str:
     return f"/api/thumbnails/{quote(Path(filename).name, safe='')}"
 
 
+def _cache_thumbnail(url: str) -> str:
+    response = image_proxy(url)
+    ext = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(response.media_type, "jpg")
+    filename = f"video-{accounts.owner_id()}-{hashlib.sha256(url.encode()).hexdigest()[:24]}.{ext}"
+    path = THUMBNAIL_DIR / filename
+    path.write_bytes(response.body)
+    accounts.register_resource("thumbnail", filename, {"filename": filename, "size": path.stat().st_size})
+    return _local_thumbnail(filename)
+
+
 def _thumbnail_url(url: str | None) -> str | None:
     if not isinstance(url, str) or not url:
         return None
@@ -1656,7 +1696,14 @@ def _is_youtube_progressive_stream(url: str) -> bool:
 
 def _get_sniff_cache(url: str) -> ParseResponse | None:
     if accounts.principal.get():
-        url = f"{accounts.owner_id()}:{url}"
+        value = video_cache.get(video_cache.parse_key(url))
+        if not value:
+            return None
+        try:
+            return ParseResponse.model_validate(value)
+        except ValueError:
+            video_cache.remove(video_cache.parse_key(url))
+            return None
     with sniff_cache_lock:
         cached = sniff_cache.get(url)
         if not cached:
@@ -1670,7 +1717,11 @@ def _get_sniff_cache(url: str) -> ParseResponse | None:
 
 def _set_sniff_cache(url: str, response: ParseResponse) -> None:
     if accounts.principal.get():
-        url = f"{accounts.owner_id()}:{url}"
+        value = response.model_dump(exclude={"record_id"})
+        ttl = video_cache.parse_ttl(value)
+        if ttl > 0:
+            video_cache.put(video_cache.parse_key(url), value, ttl)
+        return
     with sniff_cache_lock:
         sniff_cache[url] = (time.time(), response)
 
@@ -1711,9 +1762,18 @@ def _cleanup_preview_sessions(now: float) -> None:
 
 @app.post("/api/previews", response_model=PreviewResponse)
 def create_preview(payload: PreviewRequest) -> PreviewResponse:
+    video_history.validate_relation(payload.parse_record_id, normalize_url(str(payload.url)))
     media_url, referer = _resolve_douyin_preview_source(str(payload.url), payload.format_id)
     now = time.time()
     token = secrets.token_urlsafe(24)
+    ttl = video_cache.media_ttl([media_url])
+    if ttl <= 0:
+        raise HTTPException(410, "播放源已过期，请重新解析。")
+    if accounts.principal.get():
+        value = {"user_id": accounts.owner_id(), "media_url": media_url, "referer": referer, "expires_at": now + ttl, "parse_record_id": payload.parse_record_id}
+        if not video_cache.put(video_cache.key("preview", token), value, ttl):
+            raise HTTPException(503, "预览缓存暂不可用，请稍后重试。")
+        return PreviewResponse(preview_url=f"/api/previews/{token}/content", expires_in=ttl)
     with preview_sessions_lock:
         _cleanup_preview_sessions(now)
         preview_sessions[token] = PreviewSession(
@@ -1721,7 +1781,6 @@ def create_preview(payload: PreviewRequest) -> PreviewResponse:
             referer=referer,
             expires_at=now + PREVIEW_TTL_SECONDS,
         )
-    accounts.register_resource("preview", token)
     return PreviewResponse(
         preview_url=f"/api/previews/{token}/content",
         expires_in=PREVIEW_TTL_SECONDS,
@@ -1730,6 +1789,16 @@ def create_preview(payload: PreviewRequest) -> PreviewResponse:
 
 def _get_preview_session(token: str) -> PreviewSession:
     now = time.time()
+    if accounts.principal.get():
+        value = video_cache.get(video_cache.key("preview", token))
+        if not value or value.get("user_id") != accounts.current().id:
+            raise HTTPException(404, "预览会话不存在，请重新获取播放源。")
+        if value.get("parse_record_id"):
+            video_history.owned_record(value["parse_record_id"])
+        if value["expires_at"] <= now:
+            video_cache.remove(video_cache.key("preview", token))
+            raise HTTPException(410, "预览地址已过期，请重新获取播放源。")
+        return PreviewSession(value["media_url"], value["referer"], value["expires_at"])
     with preview_sessions_lock:
         session = preview_sessions.get(token)
         if not session:
@@ -1772,6 +1841,9 @@ def preview_content(
         content_type.startswith("video/") or content_type == "application/octet-stream"
     ):
         upstream.close()
+        if accounts.principal.get():
+            video_cache.remove(video_cache.key("preview", token))
+            video_cache.remove(video_cache.parse_key(session.referer))
         raise HTTPException(status_code=502, detail="抖音视频源返回了无效内容，请重新解析后重试。")
 
     allowed_headers = {"content-type", "content-length", "content-range", "accept-ranges"}
@@ -2492,6 +2564,15 @@ def _checkpoint(task, changes):
             raise HTTPException(401, "任务已取消。")
         if time.monotonic() - getattr(task, "_checked_at", 0) >= 1:
             accounts.active_worker(task.user_id)
+            kind = "download" if isinstance(task, DownloadTask) else "summary" if isinstance(task, SummaryTask) else "mind_map"
+            with accounts.database() as cursor:
+                if kind in video_store.TABLES:
+                    stored = video_store.get(cursor, kind, task.task_id, include_deleted=True)
+                else:
+                    cursor.execute("SELECT deleted,payload FROM resources WHERE kind=%s AND resource_key=%s", (kind, task.task_id))
+                    stored = cursor.fetchone()
+                if stored and (stored["deleted"] or json.loads(stored["payload"]).get("status") == "cancelled"):
+                    raise HTTPException(409, "任务已取消或删除。")
             task._checked_at = time.monotonic()
     except HTTPException:
         task.cancel.set()
@@ -2507,7 +2588,44 @@ def _persist_task(task, kind, force=False):
         snapshot = task.to_response().model_dump()
         if isinstance(task, SummaryTask):
             snapshot["transcript"] = [segment.model_dump() for segment in task.transcript]
-        accounts.register_resource(kind, task.task_id, snapshot, uid=task.user_id)
+        snapshot.update(parse_record_id=getattr(task, "parse_record_id", None), url=getattr(task, "url", None), worker_id=video_history.WORKER_ID)
+        with accounts.database() as cursor:
+            record_id = getattr(task, "parse_record_id", None)
+            if record_id:
+                cursor.execute("SELECT deleted FROM video_parse_records WHERE record_id=%s FOR UPDATE", (record_id,))
+                parent = cursor.fetchone()
+            else:
+                parent = None
+            if kind in video_store.TABLES:
+                stored = video_store.get(cursor, kind, task.task_id, lock=True, include_deleted=True)
+            else:
+                cursor.execute("SELECT deleted,payload FROM resources WHERE kind=%s AND resource_key=%s FOR UPDATE", (kind, task.task_id))
+                stored = cursor.fetchone()
+            if stored and stored["deleted"]:
+                task.cancel.set()
+                if isinstance(task, SummaryTask):
+                    paths = list(SUMMARY_DIR.glob(f"{task.task_id}.*.summary.*"))
+                    file_kind = "summary_file"
+                else:
+                    paths = [DOWNLOAD_DIR / task.filename] if getattr(task, "filename", None) else []
+                    file_kind = "file"
+                for path in paths:
+                    path.unlink(missing_ok=True)
+                    cursor.execute("UPDATE resources SET deleted=TRUE WHERE kind=%s AND resource_key=%s AND user_id=%s", (file_kind, path.name, task.user_id))
+                return
+            if stored and json.loads(stored["payload"]).get("status") == "cancelled":
+                task.cancel.set()
+                task.status = "cancelled"
+                snapshot.update(status="cancelled", message="任务已取消")
+            if record_id and not stored and (not parent or parent["deleted"]):
+                raise HTTPException(409, "解析记录已删除，无法创建任务。")
+            now = time.time()
+            if kind in video_store.TABLES:
+                video_store.save(cursor, kind, task.task_id, task.user_id, snapshot, updated=now)
+            else:
+                cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
+                               (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now))
         if task.status == "finished" and getattr(task, "filename", None):
             path = DOWNLOAD_DIR / task.filename
             accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0}, uid=task.user_id)
@@ -2914,7 +3032,48 @@ def frontend_endpoint() -> FileResponse:
 @app.post("/api/parse", response_model=ParseResponse)
 def parse_endpoint(payload: ParseRequest) -> ParseResponse:
     public_url(str(payload.url))
-    return parse_video(str(payload.url))
+    url = normalize_url(str(payload.url))
+    if not accounts.principal.get():
+        return parse_video(url)
+    record_id = video_history.create_record(url)
+    try:
+        if payload.force:
+            video_cache.remove(video_cache.parse_key(url))
+        result = _get_sniff_cache(url) or parse_video(url)
+        if result.thumbnail and not result.thumbnail.startswith("/api/thumbnails/"):
+            image_url = parse_qs(urlparse(result.thumbnail).query).get("url", [result.thumbnail])[0]
+            try:
+                result.thumbnail = _cache_thumbnail(image_url)
+            except Exception:
+                pass
+        video_history.finish_record(record_id, result.model_dump())
+        video_history.link_legacy_results(record_id)
+        _set_sniff_cache(url, result)
+        if result.webpage_url and result.webpage_url != url:
+            _set_sniff_cache(result.webpage_url, result)
+        return result.model_copy(update={"record_id": record_id})
+    except Exception as exc:
+        message = exc.detail if isinstance(exc, HTTPException) else _clean_error(exc, url)
+        if isinstance(message, dict):
+            message = message.get("message", str(message))
+        video_history.finish_record(record_id, error=str(message))
+        if isinstance(exc, HTTPException):
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            raise HTTPException(exc.status_code, detail | {"record_id": record_id}) from exc
+        raise HTTPException(422, {"message": str(message), "record_id": record_id}) from exc
+
+
+@app.post("/api/videos/records/{record_id}/formats", response_model=ParseResponse)
+def refresh_record_formats(record_id: str, force: bool = False):
+    row = video_history.owned_record(record_id)
+    stored = video_history.decode(row)
+    url = normalize_url((stored.get("result") or {}).get("webpage_url") or stored["url"])
+    public_url(url)
+    if force:
+        video_cache.remove(video_cache.parse_key(url))
+    result = _get_sniff_cache(url) or parse_video(url)
+    _set_sniff_cache(url, result)
+    return result.model_copy(update={"record_id": record_id})
 
 
 @app.post("/api/browser-session/open")
@@ -2935,11 +3094,7 @@ def browser_session_status():
 def close_browser_session(reset: bool = False):
     result = browser_sessions.close(accounts.current().id, reset=reset)
     if reset:
-        prefix = f"{accounts.current().id}:"
-        with sniff_cache_lock:
-            for key in list(sniff_cache):
-                if key.startswith(prefix):
-                    sniff_cache.pop(key, None)
+        video_cache.clear_user(accounts.current().id)
     return result
 
 
@@ -2959,6 +3114,7 @@ def parse_music_endpoint(payload: ParseRequest):
 @app.post("/api/download", response_model=DownloadResponse)
 def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
     public_url(str(payload.url))
+    relation = video_history.validate_relation(payload.parse_record_id, normalize_url(str(payload.url)))
     if payload.format_id and payload.format_id.startswith(("sniff:", "sniffpair:")):
         cached = _get_sniff_cache(normalize_url(str(payload.url)))
         if not cached or not any(item.format_id == payload.format_id for item in cached.formats):
@@ -2971,10 +3127,17 @@ def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
         media_type=payload.media_type,
         audio_format=payload.audio_format,
     )
+    task.parse_record_id = payload.parse_record_id
+    if relation:
+        task.user_id = relation["user_id"]
     with tasks_lock:
         tasks[task_id] = task
     _persist_task(task, "download", force=True)
-    accounts.submit(executor, _run_download, task)
+    owner_marker = accounts.data_owner.set(task.user_id)
+    try:
+        accounts.submit(executor, _run_download, task)
+    finally:
+        accounts.data_owner.reset(owner_marker)
     return DownloadResponse(task_id=task_id)
 
 
@@ -3163,12 +3326,20 @@ def music_batch_archive(batch_id: str) -> FileResponse:
 @app.post("/api/summaries", response_model=SummaryResponse)
 def summary_endpoint(payload: SummaryRequest) -> SummaryResponse:
     public_url(str(payload.url))
+    relation = video_history.validate_relation(payload.parse_record_id, normalize_url(str(payload.url)))
     task_id = uuid.uuid4().hex[:12]
     task = SummaryTask(task_id=task_id, url=str(payload.url))
+    task.parse_record_id = payload.parse_record_id
+    if relation:
+        task.user_id = relation["user_id"]
     with summary_tasks_lock:
         summary_tasks[task_id] = task
     _persist_task(task, "summary", force=True)
-    accounts.submit(executor, _run_summary, task)
+    owner_marker = accounts.data_owner.set(task.user_id)
+    try:
+        accounts.submit(executor, _run_summary, task)
+    finally:
+        accounts.data_owner.reset(owner_marker)
     return SummaryResponse(task_id=task_id)
 
 
@@ -3196,21 +3367,59 @@ def summary_task_endpoint(task_id: str) -> SummaryTaskResponse:
 
 @app.post("/api/summaries/{task_id}/mind-map", response_model=MindMapResponse)
 def create_mind_map_endpoint(task_id: str, regenerate: bool = False) -> MindMapResponse:
+    stored_row = accounts.resource("summary", task_id) if accounts.principal.get() else None
     with summary_tasks_lock:
         summary = summary_tasks.get(task_id)
     if not summary:
         if not accounts.principal.get():
             raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
-        stored_row = accounts.resource("summary", task_id)
         stored = json.loads(stored_row["payload"])
         summary = SummaryTask(task_id, (stored.get("result") or {}).get("webpage_url", "https://example.com"))
         summary.user_id = stored_row["user_id"]
         summary.status = stored["status"]
         summary.result = SummaryResult.model_validate(stored["result"]) if stored.get("result") else None
         summary.transcript = [SubtitleSegment.model_validate(row) for row in stored.get("transcript", [])]
+        summary.parse_record_id = stored.get("parse_record_id")
         summary_tasks[task_id] = summary
     if summary.status != "finished" or not summary.result:
         raise HTTPException(status_code=409, detail="总结完成后才能生成思维导图。")
+    if accounts.principal.get():
+        with accounts.database() as cursor:
+            record_id = json.loads(stored_row["payload"]).get("parse_record_id")
+            if record_id:
+                # Match task persistence and deletion: lock the parse record before its results.
+                cursor.execute("SELECT deleted FROM video_parse_records WHERE record_id=%s AND user_id=%s FOR UPDATE", (record_id, stored_row["user_id"]))
+                record = cursor.fetchone()
+                if not record or record["deleted"]:
+                    raise HTTPException(404, "解析记录已删除。")
+            parent = video_store.get(cursor, "summary", task_id, lock=True)
+            if not parent:
+                raise HTTPException(404, "总结任务不存在。")
+            if json.loads(parent["payload"])["status"] != "finished":
+                raise HTTPException(409, "总结完成后才能生成思维导图。")
+            cursor.execute("SELECT * FROM video_mind_maps WHERE user_id=%s AND deleted=FALSE AND summary_task_id=%s ORDER BY created_at DESC,task_id DESC", (parent["user_id"], task_id))
+            versions = [json.loads(video_store.adapt("mind_map", row)["payload"]) for row in cursor.fetchall()]
+            active = next((row for row in versions if row["status"] in {"pending", "running"}), None)
+            finished = next((row for row in versions if row["status"] == "finished"), None)
+            existing = active or (finished if not regenerate else None)
+            if existing:
+                return MindMapResponse(task_id=existing["task_id"])
+            task = MindMapTask(uuid.uuid4().hex[:12], task_id)
+            task.user_id = parent["user_id"]
+            task.parse_record_id = json.loads(parent["payload"]).get("parse_record_id")
+            cursor.execute("SELECT COALESCE(MAX(version),0) AS version FROM video_mind_maps WHERE summary_task_id=%s", (task_id,))
+            task.version = cursor.fetchone()["version"] + 1
+            value = task.to_response().model_dump() | {"parse_record_id": task.parse_record_id, "worker_id": video_history.WORKER_ID}
+            now = time.time()
+            video_store.save(cursor, "mind_map", task.task_id, task.user_id, value, created=now)
+        with mind_map_tasks_lock:
+            mind_map_tasks[task_id] = task
+        owner_marker = accounts.data_owner.set(task.user_id)
+        try:
+            accounts.submit(executor, _run_mind_map, task, summary)
+        finally:
+            accounts.data_owner.reset(owner_marker)
+        return MindMapResponse(task_id=task.task_id)
     with mind_map_tasks_lock:
         existing = mind_map_tasks.get(task_id)
         if existing and not regenerate and existing.status in {"pending", "running", "finished"}:
@@ -3228,13 +3437,21 @@ def create_mind_map_endpoint(task_id: str, regenerate: bool = False) -> MindMapR
 
 
 @app.get("/api/summaries/{task_id}/mind-map", response_model=MindMapTaskResponse)
-def mind_map_task_endpoint(task_id: str) -> MindMapTaskResponse:
-    if accounts.principal.get() and task_id not in mind_map_tasks:
+def mind_map_task_endpoint(task_id: str, map_id: str | None = None) -> MindMapTaskResponse:
+    if accounts.principal.get():
+        parent = accounts.resource("summary", task_id)
         with library.database() as cursor:
-            cursor.execute("SELECT payload FROM resources WHERE kind='mind_map' AND deleted=FALSE AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.summary_task_id'))=%s ORDER BY updated_at DESC LIMIT 1", (task_id,))
+            args: tuple = (parent["user_id"], task_id)
+            query = "SELECT * FROM video_mind_maps WHERE deleted=FALSE AND user_id=%s AND summary_task_id=%s"
+            if map_id:
+                query += " AND task_id=%s"
+                args += (map_id,)
+            query += " ORDER BY (status='finished') DESC,created_at DESC,task_id DESC LIMIT 1"
+            cursor.execute(query, args)
             stored = cursor.fetchone()
-        if stored:
-            return MindMapTaskResponse.model_validate(json.loads(stored["payload"]))
+        if not stored:
+            raise HTTPException(404, "思维导图任务不存在。")
+        return MindMapTaskResponse.model_validate(json.loads(video_store.adapt("mind_map", stored)["payload"]))
     with summary_tasks_lock:
         if task_id not in summary_tasks:
             raise HTTPException(status_code=404, detail="总结任务不存在或服务已重启。")
@@ -3325,14 +3542,16 @@ accounts.cancel_callbacks.append(browser_sessions.cancel_user)
 @app.on_event("shutdown")
 def close_browser_sessions():
     browser_sessions.shutdown()
+    video_history.stop_worker()
 
 
 @app.on_event("startup")
 def restore_task_state():
-    with library.database() as cursor:
-        cursor.execute("""UPDATE resources SET payload=JSON_SET(payload,'$.status','failed','$.message','服务重启，任务已中断'),updated_at=%s
-            WHERE kind IN ('download','summary','mind_map','watermark','batch') AND deleted=FALSE
-            AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status')) IN ('pending','running','cancelling')""", (time.time(),))
+    video_history.start_worker()
+    try:
+        video_history.restore_interrupted()
+    except video_cache.redis.RedisError:
+        logger.warning("Redis unavailable; interrupted task reconciliation deferred")
 
 
 @app.get("/auth-worker.js", include_in_schema=False)
