@@ -3,8 +3,9 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MindElixir, { type MindElixirInstance, type Theme } from 'mind-elixir'
 import 'mind-elixir/style.css'
 import { mindMapPanDelta, toMindElixirData, type MindMapResult } from './mindMap'
+import { createMindMapImage, mindMapImageFilename, type MindMapImageFormat } from './mindMapExport'
 import type { MapView } from './videoHistory'
-import { FoldVertical, Maximize2, Minus, Plus, UnfoldVertical } from 'lucide-vue-next'
+import { Download, FileImage, FoldVertical, Image, LoaderCircle, Maximize2, Minus, Plus, UnfoldVertical } from 'lucide-vue-next'
 
 const props = defineProps<{ result: MindMapResult; seekEnabled?: boolean; savedView?: MapView | null }>()
 const emit = defineEmits<{ seek: [timestamp: number]; viewChange: [view: MapView] }>()
@@ -12,7 +13,13 @@ const emit = defineEmits<{ seek: [timestamp: number]; viewChange: [view: MapView
 const host = ref<HTMLDivElement | null>(null)
 const panPosition = ref(0)
 const panTravel = ref(0)
+const exportControl = ref<HTMLDivElement | null>(null)
+const exportTrigger = ref<HTMLButtonElement | null>(null)
+const exportMenuOpen = ref(false)
+const exporting = ref(false)
+const exportError = ref('')
 let mind: MindElixirInstance | null = null
+let disposed = false
 let restoring = true
 let captureQueued = false
 let resizeObserver: ResizeObserver | null = null
@@ -155,6 +162,64 @@ function setAllExpanded(expanded: boolean) {
   nextTick(() => fitMap())
 }
 
+async function toggleExportMenu() {
+  exportMenuOpen.value = !exportMenuOpen.value
+  if (exportMenuOpen.value) {
+    await nextTick()
+    exportControl.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+  }
+}
+
+function closeExportMenu(event: PointerEvent) {
+  if (event.target instanceof Node && !exportControl.value?.contains(event.target)) exportMenuOpen.value = false
+}
+
+function handleExportKeys(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    exportMenuOpen.value = false
+    exportTrigger.value?.focus()
+    return
+  }
+  const buttons = Array.from(exportControl.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') || [])
+  if (!buttons.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+    : (current + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length
+  buttons[index]?.focus()
+}
+
+function handleExportFocus(event: FocusEvent) {
+  if (event.relatedTarget instanceof Node && !exportControl.value?.contains(event.relatedTarget)) exportMenuOpen.value = false
+}
+
+async function exportImage(format: MindMapImageFormat) {
+  if (exporting.value) return
+  exportMenuOpen.value = false
+  exporting.value = true
+  exportError.value = ''
+  const result = props.result
+  try {
+    const blob = await createMindMapImage(result, theme, format)
+    if (disposed) return
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = mindMapImageFilename(result.title, format)
+    document.body.appendChild(anchor)
+    try { anchor.click() } finally {
+      anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  } catch {
+    if (!disposed) exportError.value = `${format.toUpperCase()} 导出失败，请重试。`
+  } finally {
+    exporting.value = false
+    if (!disposed) await nextTick(() => exportTrigger.value?.focus())
+  }
+}
+
 function handleClick(event: MouseEvent) {
   const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.video-mind-time') : null
   if (!target || !host.value?.contains(target) || !props.seekEnabled) return
@@ -184,6 +249,7 @@ onMounted(() => {
   mind.bus.addListener('move', captureView)
   mind.bus.addListener('expandNode', captureView)
   host.value.addEventListener('click', handleClick)
+  document.addEventListener('pointerdown', closeExportMenu)
   nextTick(() => {
     syncSeekButtons()
     fitMap(false, true)
@@ -201,6 +267,8 @@ watch(() => props.result, renderMap, { deep: true })
 watch(() => props.seekEnabled, syncSeekButtons)
 
 onBeforeUnmount(() => {
+  disposed = true
+  document.removeEventListener('pointerdown', closeExportMenu)
   resizeObserver?.disconnect()
   host.value?.removeEventListener('click', handleClick)
   mind?.destroy()
@@ -216,7 +284,20 @@ onBeforeUnmount(() => {
       <button type="button" aria-label="缩小" title="缩小" @click="zoom(-0.1)"><Minus :size="17" /></button>
       <button type="button" aria-label="适应画布" title="适应画布" @click="fitMap()"><Maximize2 :size="17" /></button>
       <button type="button" aria-label="放大" title="放大" @click="zoom(0.1)"><Plus :size="17" /></button>
+      <div ref="exportControl" class="video-mind-map-export-control" @keydown="handleExportKeys" @focusout="handleExportFocus">
+        <button ref="exportTrigger" type="button" aria-label="导出思维导图" :title="exporting ? '正在导出' : '导出思维导图'"
+          aria-haspopup="menu" :aria-expanded="exportMenuOpen" :aria-busy="exporting" :disabled="exporting"
+          @click="toggleExportMenu" @keydown.down.prevent="!exportMenuOpen && toggleExportMenu()">
+          <LoaderCircle v-if="exporting" :size="17" class="video-mind-map-export-spinner" />
+          <Download v-else :size="17" />
+        </button>
+        <div v-if="exportMenuOpen" class="video-mind-map-export-menu" role="menu" aria-label="导出格式">
+          <button type="button" role="menuitem" @click="exportImage('svg')"><FileImage :size="16" /><span>导出 SVG</span></button>
+          <button type="button" role="menuitem" @click="exportImage('png')"><Image :size="16" /><span>导出 PNG</span></button>
+        </div>
+      </div>
     </div>
+    <p v-if="exportError" class="video-mind-map-export-error" role="alert">{{ exportError }}</p>
     <div ref="host" class="video-mind-map-canvas" aria-label="AI 视频总结思维导图"></div>
     <label class="video-mind-map-pan">
       <input

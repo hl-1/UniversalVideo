@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.3",
+    "@zumer/snapdom": "^3.3.3",
     "lucide-vue-next": "^0.577.0",
     "mind-elixir": "^5.14.0",
     "vite": "^8.0.10",
