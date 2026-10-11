@@ -72,6 +72,7 @@ let generation = 0
 const hasLink = computed(() => Boolean(extractHttpUrl(input.value)))
 const singleActive = computed(() => downloading.value || task.value?.status === 'running' || task.value?.status === 'pending')
 const batchActive = computed(() => batchBusy.value || ['pending', 'running', 'cancelling'].includes(batch.value?.status || ''))
+const batchComplete = computed(() => batch.value?.status === 'finished' && batch.value.finished === batch.value.total && !batch.value.failed && !batch.value.cancelled)
 const activeTask = computed(() => singleActive.value || batchActive.value)
 const checkedTracks = computed(() => tracks.value.filter(track => checked.value.has(trackKey(track))))
 const allChecked = computed(() => tracks.value.length > 0 && tracks.value.slice(0, 100).every(track => checked.value.has(trackKey(track))))
@@ -129,7 +130,15 @@ function toggleChecked(track: Track, event: Event) {
   checkbox.checked = checked.value.has(key)
 }
 function toggleAll() {
-  checked.value = allChecked.value ? new Set() : new Set(tracks.value.slice(0, 100).map(trackKey))
+  selectFirst(allChecked.value ? 0 : 100)
+}
+function selectFirst(count: number) {
+  checked.value = new Set(tracks.value.slice(0, Math.min(count, 100)).map(trackKey))
+}
+function quickSelect(event: Event) {
+  const select = event.target as HTMLSelectElement
+  selectFirst(select.value === 'all' ? 100 : Number(select.value))
+  select.value = ''
 }
 function rememberBatch(id?: string) {
   try {
@@ -142,13 +151,29 @@ function stopBatchPolling() {
   batchTimer = undefined
   batchController?.abort()
 }
-async function pollBatch(id: string, revision = batchGeneration) {
+function dismissBatch() {
+  if (batchActive.value || batchSaving.value) return
+  stopBatchPolling()
+  batchGeneration++
+  batch.value = null
+  batchError.value = ''
+  batchSaved.value = ''
+  batchPollingError.value = false
+  rememberBatch()
+}
+async function pollBatch(id: string, revision = batchGeneration, restore = false) {
   if (disposed || revision !== batchGeneration) return
   batchController = new AbortController()
   try {
     const response = await fetch(`/api/music/batches/${id}`, { signal: batchController.signal })
+    if (disposed || revision !== batchGeneration) return
     if (!response.ok) {
-      if (response.status === 404) { batch.value = null; rememberBatch(); batchBusy.value = false }
+      if (response.status === 404) {
+        batch.value = null
+        rememberBatch()
+        batchBusy.value = false
+        if (restore) return
+      }
       throw new Error(await apiError(response))
     }
     const data: Batch = await response.json()
@@ -158,7 +183,13 @@ async function pollBatch(id: string, revision = batchGeneration) {
     batchBusy.value = false
     if (batchPollingError.value) batchError.value = ''
     batchPollingError.value = false
-    if (batchActive.value) batchTimer = window.setTimeout(() => pollBatch(id, revision), 1200)
+    if (batchActive.value) {
+      rememberBatch(id)
+      batchTimer = window.setTimeout(() => pollBatch(id, revision), 1200)
+    } else if (batchComplete.value) {
+      rememberBatch()
+      if (restore || !props.active) dismissBatch()
+    }
   } catch (failure) {
     if (disposed || revision !== batchGeneration || failure instanceof DOMException && failure.name === 'AbortError') return
     batchPollingError.value = true
@@ -303,6 +334,7 @@ async function submit() {
   if (!text) { error.value = '请输入歌曲名称或粘贴链接。'; return }
   const link = extractHttpUrl(text)
   if (!link && source.value === 'video') { error.value = '请粘贴视频链接或完整的抖音分享文字。'; return }
+  if (batchComplete.value) dismissBatch()
   controller?.abort()
   controller = new AbortController()
   const current = ++generation
@@ -414,11 +446,12 @@ async function search(query: string, provider = 'all') {
 defineExpose({ search, downloadTrack })
 watch(libraryRevision, () => { void loadLocalTracks() })
 watch(() => trackArtwork(selected.value), () => { failedCover.value = false })
+watch(() => props.active, active => { if (!active && batchComplete.value) dismissBatch() })
 onMounted(() => {
   void loadLocalTracks()
   let id: string | null = null
   try { id = localStorage.getItem(batchStorageKey) } catch { return }
-  if (id && /^[a-f0-9]{12}$/.test(id)) { batchBusy.value = true; void pollBatch(id) }
+  if (id && /^[a-f0-9]{12}$/.test(id)) { batchBusy.value = true; void pollBatch(id, batchGeneration, true) }
 })
 onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; stopBatchPolling(); generation++; controller?.abort(); stopPolling() })
 </script>
@@ -441,16 +474,17 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
     <p v-if="saved" class="success-text" role="status">{{ saved }}</p>
     <p v-if="batchError" class="error-text" role="alert">{{ batchError }}</p>
     <p v-if="batchSaved" class="success-text" role="status">{{ batchSaved }}</p>
-    <section v-if="batch" class="music-batch" aria-label="批量下载队列">
-      <div class="batch-heading"><div><h2>{{ batchHeading }}</h2><p>成功 {{ batch.finished }} / {{ batch.total }}<span v-if="batch.failed"> · 失败 {{ batch.failed }}</span><span v-if="batch.cancelled"> · 已取消 {{ batch.cancelled }}</span> · {{ batch.audio_format.toUpperCase() }}</p></div><strong>{{ Math.round(batch.progress) }}%</strong></div>
-      <progress :value="batch.progress" max="100" aria-label="批量音频下载进度" />
+    <section v-if="batch" class="music-batch" :class="{ 'batch-complete': batchComplete }" aria-label="批量下载队列">
+      <div class="batch-heading"><div><h2>{{ batchHeading }}</h2><p>成功 {{ batch.finished }} / {{ batch.total }}<span v-if="batch.failed"> · 失败 {{ batch.failed }}</span><span v-if="batch.cancelled"> · 已取消 {{ batch.cancelled }}</span> · {{ batch.audio_format.toUpperCase() }}</p></div><strong v-if="!batchComplete">{{ Math.round(batch.progress) }}%</strong></div>
+      <progress v-if="!batchComplete" :value="batch.progress" max="100" aria-label="批量音频下载进度" />
       <div class="batch-actions">
         <button v-if="batchActive" type="button" class="secondary-action" :disabled="batchBusy || batch.status === 'cancelling'" @click="updateBatch('cancel')"><Square :size="15" />{{ batch.status === 'cancelling' ? '等待当前歌曲结束' : '停止后续' }}</button>
         <button v-if="batch.failed && !batchActive" type="button" class="secondary-action" :disabled="batchSaving" @click="updateBatch('retry')"><RefreshCw :size="16" />重试失败歌曲</button>
         <button v-if="batch.download_url" type="button" class="composer-submit" :disabled="batchSaving" @click="saveBatch"><LoaderCircle v-if="batchSaving" :size="18" class="spin" /><FileArchive v-else :size="18" />{{ batchSaving ? '打包保存中' : `保存 ZIP · ${batch.finished} 首` }}</button>
         <button v-if="batchPollingError" type="button" class="track-play" title="刷新队列" aria-label="刷新队列" @click="stopBatchPolling(); pollBatch(batch.batch_id)"><RefreshCw :size="17" /></button>
+        <button v-if="!batchActive" type="button" class="track-play" :disabled="batchSaving" title="关闭下载记录" aria-label="关闭下载记录" @click="dismissBatch"><X :size="18" /></button>
       </div>
-      <ol class="batch-items">
+      <ol v-if="!batchComplete" class="batch-items">
         <li v-for="item in batch.items" :key="item.task_id" :class="item.status">
           <Check v-if="item.status === 'finished'" :size="16" /><LoaderCircle v-else-if="item.status === 'running'" :size="16" class="spin" /><X v-else-if="item.status === 'failed' || item.status === 'cancelled'" :size="16" /><Music2 v-else :size="16" />
           <div class="batch-item-name"><strong>{{ item.title }}</strong><span>{{ item.artist }} · {{ providers[item.provider] }}</span><p v-if="item.error">{{ item.error }}</p></div>
@@ -473,7 +507,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
     </div>
     <div v-if="tracks.length" class="track-results">
       <div class="results-heading"><h2>搜索结果</h2><span>{{ tracks.length }} 首</span></div>
-      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ tracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><span class="batch-selected">已选 {{ checkedTracks.length }} 首</span><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
+      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ tracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ tracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首</span><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
       <div v-for="(track, index) in tracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">
         <label class="track-check" @click.stop><input type="checkbox" :checked="checked.has(trackKey(track))" :disabled="checkedTracks.length >= 100 && !checked.has(trackKey(track))" :aria-label="`勾选 ${track.title} ${track.artist || ''}`" @change="toggleChecked(track, $event)" /></label>
         <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}</span></span></button>
@@ -489,6 +523,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
 
 <style scoped>
 .music-workspace .track-row { grid-template-columns: 20px minmax(0, 1fr) 36px 80px 116px 45px 18px; }
+.music-workspace .track-row.checked { background: var(--music-accent-soft, #edf9f4); }
 .track-actions, .audio-selected-actions { display: flex; align-items: center; gap: 4px; }
 .audio-selected-actions { flex-shrink: 0; gap: 8px; }
 .track-favorite.liked { color: #d06575; border-color: #e7b2bd; background: #fdf1f4; }
@@ -497,6 +532,12 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
 .music-format-toolbar select { height: 32px; padding: 0 26px 0 10px; border: 1px solid #dce2ec; border-radius: 5px; color: #354760; background: #fff; font-size: 12px; }
 .music-batch .batch-items li { grid-template-columns: 18px minmax(0, 1fr) 76px 76px; }
 .batch-item-actions { display: flex; align-items: center; gap: 4px; }
+.batch-quick-select { height: 34px; min-width: 106px; max-width: 100%; padding: 0 26px 0 10px; border: 1px solid var(--music-line, #dce2ec); border-radius: 5px; color: var(--music-text, #354760); background: var(--music-surface, #fff); font: inherit; font-size: 12px; }
+.music-batch.batch-complete { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; padding: 14px 0; }
+.batch-complete .batch-heading { flex: 1; min-width: 160px; }
+.batch-complete .batch-heading h2 { font-size: 14px; }
+.batch-complete .batch-heading p { font-size: 12px; }
+.batch-complete .batch-actions { padding: 0; }
 @media (max-width: 700px) {
   .music-workspace .track-row { grid-template-columns: 18px minmax(0, 1fr) 32px 104px; gap: 6px; padding-left: 0; padding-right: 0; }
   .music-workspace .track-row > .track-check { grid-column: 1; grid-row: 1; }
