@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MindElixir, { type MindElixirInstance, type Theme } from 'mind-elixir'
 import 'mind-elixir/style.css'
-import { mindMapPanDelta, toMindElixirData, type MindMapResult } from './mindMap'
+import { toMindElixirData, type MindMapResult } from './mindMap'
 import { createMindMapImage, mindMapImageFilename, type MindMapImageFormat } from './mindMapExport'
 import type { MapView } from './videoHistory'
 import { Download, FileImage, FoldVertical, Image, LoaderCircle, Maximize2, Minus, Plus, UnfoldVertical } from 'lucide-vue-next'
@@ -23,6 +23,9 @@ let disposed = false
 let restoring = true
 let captureQueued = false
 let resizeObserver: ResizeObserver | null = null
+let layoutFrame: number | undefined
+
+function mapPadding() { return host.value && host.value.clientWidth < 760 ? 24 : 36 }
 
 function mapData() {
   const data = toMindElixirData(props.result)
@@ -38,6 +41,7 @@ function captureView() {
   requestAnimationFrame(() => {
     captureQueued = false
     if (restoring || !mind || !host.value || !host.value.clientWidth) return
+    updatePanTravel()
     const root = MindElixir.E('video-mind-map-root', host.value)
     if (!root) return
     const collapsed: string[] = []
@@ -83,29 +87,33 @@ const theme: Theme = {
 }
 
 function fitMap(save = true, restore = false) {
+  const savedView = restore && props.savedView ? { ...props.savedView } : null
   restoring = true
-  requestAnimationFrame(() => {
-    if (!mind || !host.value || !host.value.clientWidth) { restoring = false; return }
-    mind.scaleFit()
-    const targetScale = host.value.clientWidth >= 760
-      ? mind.scaleVal * 1.18
-      : Math.max(0.6, mind.scaleVal * 1.2)
+  if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
+  // Keep fitting and restoration atomic so resize cannot save a temporary centered view.
+  layoutFrame = requestAnimationFrame(() => {
+    layoutFrame = undefined
+    if (!mind || !host.value || !host.value.clientWidth || !host.value.clientHeight) { restoring = false; return }
+    const root = MindElixir.E('video-mind-map-root', host.value)
+    const bounds = mind.nodes.getBoundingClientRect()
+    const rootRect = root.getBoundingClientRect()
+    const padding = mapPadding()
+    const width = (bounds.right - rootRect.left) / mind.scaleVal
+    const height = bounds.height / mind.scaleVal
+    const targetScale = Math.min(1, (host.value.clientWidth - padding * 2) / width,
+      (host.value.clientHeight - padding * 2) / height)
+    mind.scale(Math.max(mind.scaleMin, targetScale))
     mind.toCenter()
-    mind.scale(Math.min(1.35, targetScale))
-    requestAnimationFrame(() => {
-      alignMapLeft()
-      if (restore && props.savedView && mind && host.value) {
-        mind.scale(props.savedView.scale)
-        const root = MindElixir.E('video-mind-map-root', host.value)
-        if (root) {
-          const rect = root.getBoundingClientRect()
-          const container = host.value.getBoundingClientRect()
-          mind.move(props.savedView.x * container.width - (rect.left - container.left), props.savedView.y * container.height - (rect.top - container.top))
-        }
-      }
-      restoring = false
-      if (save) captureView()
-    })
+    alignMapLeft()
+    if (savedView) {
+      mind.scale(Math.min(mind.scaleMax, Math.max(mind.scaleMin, savedView.scale)))
+      const rect = root.getBoundingClientRect()
+      const container = host.value.getBoundingClientRect()
+      mind.move(savedView.x * container.width - (rect.left - container.left), savedView.y * container.height - (rect.top - container.top))
+    }
+    updatePanTravel()
+    restoring = false
+    if (save) captureView()
   })
 }
 
@@ -115,16 +123,22 @@ function alignMapLeft() {
   if (!root) return
   const hostRect = host.value.getBoundingClientRect()
   const rootRect = root.getBoundingClientRect()
-  mind.move(hostRect.left + 36 - rootRect.left, 0)
-  panPosition.value = 0
-  requestAnimationFrame(updatePanTravel)
+  const nodesRect = mind.nodes.getBoundingClientRect()
+  mind.move(hostRect.left + mapPadding() - rootRect.left,
+    hostRect.top + hostRect.height / 2 - (nodesRect.top + nodesRect.height / 2))
 }
 
 function updatePanTravel() {
   if (!mind || !host.value) return
   const hostRect = host.value.getBoundingClientRect()
+  const rootRect = MindElixir.E('video-mind-map-root', host.value).getBoundingClientRect()
   const nodesRect = mind.nodes.getBoundingClientRect()
-  panTravel.value = Math.max(0, nodesRect.right - hostRect.right + 36)
+  const padding = mapPadding()
+  const travel = nodesRect.right - rootRect.left - (hostRect.width - padding * 2)
+  panTravel.value = travel > 1 ? travel : 0
+  panPosition.value = panTravel.value > 0
+    ? Math.min(100, Math.max(0, (hostRect.left + padding - rootRect.left) / panTravel.value * 100))
+    : 0
 }
 
 function syncSeekButtons() {
@@ -144,15 +158,18 @@ function renderMap() {
 
 function zoom(delta: number) {
   if (!mind) return
-  mind.scale(Math.min(1.6, Math.max(0.5, mind.scaleVal + delta)))
+  mind.scale(Math.min(mind.scaleMax, Math.max(mind.scaleMin, mind.scaleVal + delta)))
   requestAnimationFrame(updatePanTravel)
 }
 
 function handleHorizontalPan(event: Event) {
-  if (!mind || !(event.target instanceof HTMLInputElement)) return
+  if (!mind || !host.value || !(event.target instanceof HTMLInputElement)) return
+  updatePanTravel()
   const next = Number(event.target.value)
-  mind.move(mindMapPanDelta(panPosition.value, next, panTravel.value), 0)
-  panPosition.value = next
+  const rootRect = MindElixir.E('video-mind-map-root', host.value).getBoundingClientRect()
+  const hostRect = host.value.getBoundingClientRect()
+  mind.move(hostRect.left + mapPadding() - next / 100 * panTravel.value - rootRect.left, 0)
+  updatePanTravel()
 }
 
 function setAllExpanded(expanded: boolean) {
@@ -237,13 +254,15 @@ onMounted(() => {
     toolBar: false,
     keypress: false,
     allowUndo: false,
-    overflowHidden: true,
+    overflowHidden: false,
     compact: false,
     alignment: 'root',
-    scaleMin: 0.5,
+    scaleMin: 0.2,
     scaleMax: 1.6,
     theme,
   })
+  // The library's overflowHidden option also disables pointer controls.
+  mind.container.style.overflow = 'hidden'
   mind.init(mapData())
   mind.bus.addListener('scale', captureView)
   mind.bus.addListener('move', captureView)
@@ -254,11 +273,14 @@ onMounted(() => {
     syncSeekButtons()
     fitMap(false, true)
   })
-  let previousWidth = 0
+  let previousWidth = host.value.clientWidth
+  let previousHeight = host.value.clientHeight
   resizeObserver = new ResizeObserver(entries => {
     const width = entries[0]?.contentRect.width || 0
-    if (width > 0 && width !== previousWidth) fitMap(false, true)
+    const height = entries[0]?.contentRect.height || 0
+    if (width > 0 && height > 0 && (width !== previousWidth || height !== previousHeight)) fitMap(false, true)
     previousWidth = width
+    previousHeight = height
   })
   resizeObserver.observe(host.value)
 })
@@ -269,6 +291,7 @@ watch(() => props.seekEnabled, syncSeekButtons)
 onBeforeUnmount(() => {
   disposed = true
   document.removeEventListener('pointerdown', closeExportMenu)
+  if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   resizeObserver?.disconnect()
   host.value?.removeEventListener('click', handleClick)
   mind?.destroy()
