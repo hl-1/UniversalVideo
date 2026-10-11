@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, ImagePlus, Palette, RefreshCw, RotateCcw } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, Palette, RefreshCw } from 'lucide-vue-next'
 import MusicWorkspace from './MusicWorkspace.vue'
 import MusicImportWorkspace from './MusicImportWorkspace.vue'
 import MusicTrackList from './MusicTrackList.vue'
 import TrackCover from './TrackCover.vue'
-import ThemeSettings from './ThemeSettings.vue'
-import ImageSettings from './ImageSettings.vue'
+import AppearanceSettings from './AppearanceSettings.vue'
 import AccountSettings from './AccountSettings.vue'
 import WorkHistory from './WorkHistory.vue'
 import { account, logout } from './auth'
 import { LogOut, ShieldCheck } from 'lucide-vue-next'
 import { api, counts, duration, getTracks, jsonRequest, libraryError, libraryRevision, playlists, profile,
-  refreshLibrary, trackArtwork, trackArtworkMap, trackKey, trackPayload, type MusicTrack, type Playlist, type Profile } from './musicLibrary'
+  refreshLibrary, trackArtwork, trackKey, trackPayload, type MusicTrack, type Playlist } from './musicLibrary'
 import { loadMusicTheme, themeError } from './musicTheme'
 import { addToQueue, playMode, playTrack } from './musicPlayer'
 import './music-center.css'
@@ -33,7 +32,8 @@ const error = ref('')
 const toast = ref('')
 const searchWorkspace = ref<{ search: (query: string, source?: string) => Promise<void>; downloadTrack: (track: MusicTrack) => Promise<void>; showBatch: (id: string) => Promise<void>; activeTask: boolean } | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
-const draft = ref<Profile>({ ...profile.value })
+const appearanceTrack = ref<MusicTrack | null>(null)
+const appearancePlaylist = ref<Playlist | null>(null)
 const modal = ref<'playlist' | 'add' | null>(null)
 const modalBusy = ref(false)
 const modalError = ref('')
@@ -45,7 +45,6 @@ const menuTrack = ref<MusicTrack | null>(null)
 const menuPosition = ref({ top: 0, left: 0 })
 const menuElement = ref<HTMLElement | null>(null)
 const dialogElement = ref<HTMLElement | null>(null)
-const imageEditor = ref<{ title: string; endpoint: string; image?: string | null; track?: MusicTrack; avatar?: boolean } | null>(null)
 const coverProgress = ref({ running: false, completed: 0, updated: 0, total: 0, failed: 0 })
 let coverTimer: number | undefined
 let coverPolling = false
@@ -55,7 +54,7 @@ let generation = 0
 let toastTimer: number | undefined
 const navigation: Array<{ view: View; playlistId: string }> = []
 const activePlaylist = computed(() => playlists.value.find(item => item.id === playlistId.value))
-const titles: Record<View, string> = { home: '音乐中心', search: '搜索歌曲', bulk: '批量找歌', favorites: '我喜欢的音乐', history: '最近播放', downloads: '本地和下载', trials: '试听列表', playlist: '我的歌单', profile: '个人中心', appearance: '外观设置', resources: '任务与文件' }
+const titles: Record<View, string> = { home: '音乐中心', search: '搜索歌曲', bulk: '批量找歌', favorites: '我喜欢的音乐', history: '最近播放', downloads: '本地和下载', trials: '试听列表', playlist: '我的歌单', profile: '账号安全', appearance: '外观设置', resources: '任务与文件' }
 const title = computed(() => view.value === 'playlist' ? activePlaylist.value?.name || '我的歌单' : titles[view.value])
 const greeting = new Date().getHours() < 12 ? '上午好' : new Date().getHours() < 18 ? '下午好' : '晚上好'
 const themes = [
@@ -79,8 +78,12 @@ function go(next: View, id = '', remember = true) {
   playlistId.value = id
   menuTrack.value = null
   error.value = ''
-  if (next === 'profile') draft.value = { ...profile.value }
   window.scrollTo({ top: 0 })
+}
+function openAppearance(track: MusicTrack | null = null, playlist: Playlist | null = null) {
+  go('appearance')
+  appearanceTrack.value = track
+  appearancePlaylist.value = playlist
 }
 function back() { const previous = navigation.pop(); if (previous) go(previous.view, previous.playlistId, false) }
 async function loadContent() {
@@ -200,52 +203,6 @@ async function clearHistory() {
   try { await api('/api/library/history', { method: 'DELETE' }); await refreshLibrary(); message('播放历史已清空') }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '清空失败。' }
 }
-async function saveProfile() {
-  if (modalBusy.value || !draft.value.nickname.trim()) return
-  modalBusy.value = true
-  try {
-    await api('/api/library/profile', jsonRequest('PATCH', draft.value))
-    await refreshLibrary()
-    message('个人资料已保存')
-  } catch (failure) { error.value = failure instanceof Error ? failure.message : '资料保存失败。' }
-  finally { modalBusy.value = false }
-}
-async function avatarChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  modalBusy.value = true
-  try {
-    const form = new FormData()
-    form.append('file', file)
-    const result = await api<{ avatar: string }>('/api/library/profile/avatar', { method: 'POST', body: form })
-    draft.value.avatar = result.avatar
-    await refreshLibrary()
-    message('头像已保存')
-  } catch (failure) { error.value = failure instanceof Error ? failure.message : '头像上传失败。' }
-  finally { modalBusy.value = false }
-}
-async function resetAvatar() {
-  try { await api('/api/library/profile/avatar', { method: 'DELETE' }); draft.value.avatar = null; await refreshLibrary() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '头像恢复失败。' }
-}
-async function editTrackCover(track: MusicTrack) {
-  menuTrack.value = null
-  try {
-    const id = track.id || (await api<{ id: string }>('/api/library/tracks', jsonRequest('POST', trackPayload(track)))).id
-    imageEditor.value = { title: `${track.title} · 封面`, endpoint: `/api/library/tracks/${id}/cover`, image: trackArtwork(track), track }
-  } catch (failure) { error.value = failure instanceof Error ? failure.message : '封面设置加载失败。' }
-}
-function editPlaylistCover() {
-  const playlist = activePlaylist.value
-  if (playlist) imageEditor.value = { title: `${playlist.name} · 封面`, endpoint: `/api/library/playlists/${playlist.id}/cover`, image: playlist.thumbnail }
-}
-async function imageSaved(result: { thumbnail?: string | null; avatar?: string | null }) {
-  if (imageEditor.value?.track) trackArtworkMap.value.set(trackKey(imageEditor.value.track), result.thumbnail || null)
-  await refreshLibrary()
-  message('图片已保存')
-}
 async function backfill() {
   if (coverProgress.value.running) return
   try {
@@ -318,7 +275,7 @@ defineExpose({ download, search })
   <div class="music-center">
     <aside class="mc-sidebar" aria-label="音乐中心导航">
       <button class="mc-brand" @click="go('home')"><Headphones :size="25" /><span>VideoDream</span></button>
-      <button class="mc-profile" @click="go('profile')"><span class="mc-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt="头像" /><UserRound v-else :size="23" /></span><span><strong>{{ profile.nickname }}</strong><small>我的音乐空间</small></span><ChevronRight :size="16" /></button>
+      <button class="mc-profile" title="外观设置" aria-label="外观设置" @click="openAppearance()"><span class="mc-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt="头像" /><UserRound v-else :size="23" /></span><span><strong>{{ profile.nickname }}</strong><small>我的音乐空间</small></span><ChevronRight :size="16" /></button>
       <nav class="mc-discover" aria-label="发现音乐"><button :class="{ active: view === 'home' }" @click="go('home')"><Home :size="19" />推荐</button><button :class="{ active: view === 'search' }" @click="go('search')"><Compass :size="19" />发现</button><button :class="{ active: view === 'bulk' }" @click="go('bulk')"><ListMusic :size="19" />批量找歌</button><button @click="radio"><Radio :size="19" />私人电台</button></nav>
       <div class="mc-nav-label">我的音乐</div>
       <nav class="mc-library-nav" aria-label="我的音乐"><button :class="{ active: view === 'favorites' }" @click="go('favorites')"><Heart :size="19" /><span>我喜欢</span><small>{{ counts.favorites }}</small></button><button :class="{ active: view === 'history' }" @click="go('history')"><Clock3 :size="19" /><span>最近播放</span><small>{{ counts.history }}</small></button><button :class="{ active: view === 'downloads' }" @click="go('downloads')"><FolderOpen :size="19" /><span>本地和下载</span><small>{{ counts.downloads }}</small></button><button :class="{ active: view === 'trials' }" @click="go('trials')"><Headphones :size="19" /><span>试听列表</span><small>{{ counts.trials }}</small></button></nav>
@@ -327,10 +284,10 @@ defineExpose({ download, search })
       <div class="mc-tools-nav"><button @click="go('resources')"><FolderOpen :size="18" />任务与文件<ArrowRight :size="15" /></button><button @click="emit('openTools', 'video')"><Video :size="18" />视频下载<ArrowRight :size="15" /></button><button @click="emit('openTools', 'watermark')"><Eraser :size="18" />视频去水印<ArrowRight :size="15" /></button></div>
     </aside>
     <div class="mc-body">
-      <header class="mc-topbar"><button class="mc-icon" title="返回" aria-label="返回" :disabled="!navigation.length" @click="back"><ArrowLeft :size="21" /></button><form class="mc-search" @submit.prevent="search()"><Search :size="19" /><input v-model="query" aria-label="搜索音乐" placeholder="搜索歌曲、歌手或粘贴链接" /><button v-if="query" type="button" class="mc-icon" title="清空搜索" aria-label="清空搜索" @click="query = ''"><X :size="15" /></button></form><select v-model="source" aria-label="音乐搜索来源" class="mc-source"><option value="all">全部平台</option><option value="qq">QQ 音乐</option><option value="netease">网易云音乐</option><option value="kugou">酷狗音乐</option><option value="video">视频音轨</option></select><div class="mc-account-actions"><button class="mc-icon mc-settings" title="个人中心" aria-label="个人中心" @click="go('profile')"><Settings2 :size="20" /></button><button v-if="account?.role === 'super_admin'" class="mc-icon" title="管理后台" aria-label="管理后台" @click="emit('openAdmin')"><ShieldCheck :size="20" /></button><button class="mc-icon" title="退出登录" aria-label="退出登录" @click="logoutAccount"><LogOut :size="20" /></button></div></header>
+      <header class="mc-topbar"><button class="mc-icon" title="返回" aria-label="返回" :disabled="!navigation.length" @click="back"><ArrowLeft :size="21" /></button><form class="mc-search" @submit.prevent="search()"><Search :size="19" /><input v-model="query" aria-label="搜索音乐" placeholder="搜索歌曲、歌手或粘贴链接" /><button v-if="query" type="button" class="mc-icon" title="清空搜索" aria-label="清空搜索" @click="query = ''"><X :size="15" /></button></form><select v-model="source" aria-label="音乐搜索来源" class="mc-source"><option value="all">全部平台</option><option value="qq">QQ 音乐</option><option value="netease">网易云音乐</option><option value="kugou">酷狗音乐</option><option value="video">视频音轨</option></select><div class="mc-account-actions"><button class="mc-icon mc-settings" title="个人中心" aria-label="个人中心" @click="openAppearance()"><Settings2 :size="20" /></button><button v-if="account?.role === 'super_admin'" class="mc-icon" title="管理后台" aria-label="管理后台" @click="emit('openAdmin')"><ShieldCheck :size="20" /></button><button class="mc-icon" title="退出登录" aria-label="退出登录" @click="logoutAccount"><LogOut :size="20" /></button></div></header>
       <main class="mc-content">
         <div v-if="libraryError || error" class="mc-error" role="alert"><span>{{ error || libraryError }}</span><button class="mc-icon" title="重新加载" aria-label="重新加载" @click="refreshLibrary().then(loadContent)"><LoaderCircle v-if="loading" :size="18" class="spin" /><ArrowRight v-else :size="18" /></button></div>
-        <div class="mc-page-heading"><div class="mc-heading-title"><button v-if="view === 'playlist'" class="playlist-heading-cover" title="更换歌单封面" aria-label="更换歌单封面" @click="editPlaylistCover"><TrackCover :src="activePlaylist?.thumbnail" :title="activePlaylist?.name" /></button><div><p v-if="view === 'home'">{{ greeting }}，{{ profile.nickname }}</p><p v-else-if="!['profile', 'appearance', 'search'].includes(view)">{{ view === 'playlist' ? '自建歌单' : '我的音乐' }}</p><h1>{{ title }}</h1><p v-if="view === 'playlist' && activePlaylist?.description" class="mc-description">{{ activePlaylist.description }}</p><p v-if="view === 'downloads' && coverProgress.running" role="status">正在补全封面 {{ coverProgress.completed }}/{{ coverProgress.total }}</p></div></div><div class="mc-heading-actions"><template v-if="view === 'downloads'"><button class="mc-icon" :disabled="coverProgress.running" title="补全封面" aria-label="补全封面" @click="backfill"><LoaderCircle v-if="coverProgress.running" :size="18" class="spin" /><RefreshCw v-else :size="18" /></button><button class="mc-command" :disabled="importing" @click="importInput?.click()"><LoaderCircle v-if="importing" :size="17" class="spin" /><Upload v-else :size="17" />{{ importing ? '导入中' : '导入音乐' }}</button></template><button v-if="view === 'history' && tracks.length" class="mc-icon" title="清空播放历史" aria-label="清空播放历史" @click="clearHistory"><Trash2 :size="18" /></button><template v-if="view === 'playlist'"><button class="mc-icon" title="更换歌单封面" aria-label="上传歌单封面" @click="editPlaylistCover"><ImagePlus :size="18" /></button><button class="mc-icon" title="编辑歌单" aria-label="编辑歌单" @click="openModal('playlist', activePlaylist || null)"><Pencil :size="18" /></button><button class="mc-icon" title="删除歌单" aria-label="删除歌单" @click="deletePlaylist"><Trash2 :size="18" /></button></template></div></div>
+        <div class="mc-page-heading"><div class="mc-heading-title"><span v-if="view === 'playlist'" class="playlist-heading-cover"><TrackCover :src="activePlaylist?.thumbnail" :title="activePlaylist?.name" /></span><div><p v-if="view === 'home'">{{ greeting }}，{{ profile.nickname }}</p><p v-else-if="!['profile', 'appearance', 'search'].includes(view)">{{ view === 'playlist' ? '自建歌单' : '我的音乐' }}</p><h1>{{ title }}</h1><p v-if="view === 'playlist' && activePlaylist?.description" class="mc-description">{{ activePlaylist.description }}</p><p v-if="view === 'downloads' && coverProgress.running" role="status">正在补全封面 {{ coverProgress.completed }}/{{ coverProgress.total }}</p></div></div><div class="mc-heading-actions"><template v-if="view === 'downloads'"><button class="mc-icon" :disabled="coverProgress.running" title="补全封面" aria-label="补全封面" @click="backfill"><LoaderCircle v-if="coverProgress.running" :size="18" class="spin" /><RefreshCw v-else :size="18" /></button><button class="mc-command" :disabled="importing" @click="importInput?.click()"><LoaderCircle v-if="importing" :size="17" class="spin" /><Upload v-else :size="17" />{{ importing ? '导入中' : '导入音乐' }}</button></template><button v-if="view === 'history' && tracks.length" class="mc-icon" title="清空播放历史" aria-label="清空播放历史" @click="clearHistory"><Trash2 :size="18" /></button><template v-if="view === 'playlist'"><button class="mc-icon" title="歌单外观设置" aria-label="歌单外观设置" @click="openAppearance(null, activePlaylist || null)"><Palette :size="18" /></button><button class="mc-icon" title="编辑歌单" aria-label="编辑歌单" @click="openModal('playlist', activePlaylist || null)"><Pencil :size="18" /></button><button class="mc-icon" title="删除歌单" aria-label="删除歌单" @click="deletePlaylist"><Trash2 :size="18" /></button></template></div></div>
         <template v-if="view === 'home'">
           <section class="mc-themes" aria-label="主题音乐"><button v-for="theme in themes" :key="theme.query" class="mc-theme" :class="theme.className" @click="search(theme.query, 'all')"><img :src="theme.image" :alt="theme.title" /><span class="mc-theme-caption"><span><small>{{ theme.subtitle }}</small><strong>{{ theme.title }}</strong></span><span class="theme-play"><Play :size="18" fill="currentColor" /></span></span></button></section>
           <section class="mc-home-section"><div class="mc-section-heading"><h2>{{ recent.length ? '继续聆听' : '本地音乐' }}</h2><button class="mc-text-button" @click="go(recent.length ? 'history' : 'downloads')">查看全部<ChevronRight :size="16" /></button></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="22" class="spin" /></div><div v-else-if="(recent.length ? recent : local).length" class="mc-home-tracks"><div v-for="track in (recent.length ? recent : local)" :key="trackKey(track)" class="mc-home-track"><button @click="playTrack(track, recent.length ? recent : local)"><TrackCover :src="trackArtwork(track)" :title="track.title" /><span><strong>{{ track.title }}</strong><small>{{ track.artist || '本地音乐' }}</small></span></button><button class="mc-icon" :title="`播放 ${track.title}`" :aria-label="`播放 ${track.title}`" @click="playTrack(track, recent.length ? recent : local)"><Play :size="17" /></button></div></div><div v-else class="mc-empty"><Headphones :size="30" /><p>暂无播放记录</p></div></section>
@@ -339,19 +296,17 @@ defineExpose({ download, search })
         <MusicImportWorkspace v-show="view === 'bulk'" :active="view === 'bulk'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" />
         <section v-show="view === 'search' || view === 'bulk'" class="mc-search-workspace"><MusicWorkspace ref="searchWorkspace" :active="view === 'search' || view === 'bulk'" :queue-only="view === 'bulk'" :embedded="true" @track-menu="showMenu" /></section>
         <template v-if="!['home', 'search', 'bulk', 'profile', 'appearance', 'resources'].includes(view)"><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
-        <nav v-if="view === 'profile' || view === 'appearance'" class="mc-profile-tabs" aria-label="个人设置"><button :aria-current="view === 'profile' ? 'page' : undefined" @click="go('profile')"><UserRound :size="17" />个人资料</button><button :aria-current="view === 'appearance' ? 'page' : undefined" @click="go('appearance')"><Palette :size="17" />外观设置</button></nav>
-        <form v-if="view === 'profile'" class="mc-profile-form" @submit.prevent="saveProfile"><div class="profile-avatar-row"><label class="mc-avatar-upload"><span class="mc-avatar large"><img v-if="draft.avatar" :src="draft.avatar" alt="个人头像" /><UserRound v-else :size="36" /></span><span>更换头像</span><input type="file" accept="image/jpeg,image/png,image/webp" aria-label="更换头像" :disabled="modalBusy" @change="avatarChange" /></label><button type="button" class="mc-icon" :disabled="!draft.avatar || modalBusy" title="恢复默认头像" aria-label="恢复默认头像" @click="resetAvatar"><RotateCcw :size="18" /></button></div><label>昵称<input v-model="draft.nickname" maxlength="40" required /></label><label>个人简介<textarea v-model="draft.bio" maxlength="200" rows="3" /></label><div class="mc-profile-stats"><span><strong>{{ counts.favorites }}</strong>喜欢</span><span><strong>{{ counts.history }}</strong>已听歌曲</span><span><strong>{{ playlists.length }}</strong>歌单</span></div><button class="mc-command primary" :disabled="modalBusy || !draft.nickname.trim()" type="submit"><LoaderCircle v-if="modalBusy" :size="17" class="spin" /><UserRound v-else :size="17" />保存资料</button></form>
+        <nav v-if="view === 'profile' || view === 'appearance'" class="mc-profile-tabs" aria-label="个人设置"><button :aria-current="view === 'appearance' ? 'page' : undefined" @click="openAppearance()"><Palette :size="17" />外观设置</button><button :aria-current="view === 'profile' ? 'page' : undefined" @click="go('profile')"><ShieldCheck :size="17" />账号安全</button></nav>
         <AccountSettings v-if="view === 'profile'" />
         <WorkHistory v-if="view === 'resources'" />
-        <p v-if="view === 'appearance' && themeError" class="mc-error" role="alert">{{ themeError }}</p><ThemeSettings v-if="view === 'appearance'" />
+        <p v-if="view === 'appearance' && themeError" class="mc-error" role="alert">{{ themeError }}</p><AppearanceSettings v-if="view === 'appearance'" :initial-track="appearanceTrack" :initial-playlist="appearancePlaylist" />
       </main>
     </div>
     <input ref="importInput" type="file" multiple accept=".mp3,.m4a,.flac,.wav,.ogg,.aac,.opus" hidden aria-label="导入本地音乐" @change="importFiles" />
     <div v-if="toast" class="mc-toast" role="status">{{ toast }}</div>
   </div>
   <Teleport to="body">
-    <div v-if="menuTrack" class="mc-menu-backdrop" @click.self="menuTrack = null" @keydown.esc="menuTrack = null"><div ref="menuElement" class="mc-track-menu" :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }"><button @click="queueSong"><ListMusic :size="17" />加入播放队列</button><button @click="selectPlaylist"><Plus :size="17" />加入歌单</button><button @click="editTrackCover(menuTrack!)"><ImagePlus :size="17" />更换封面</button><button @click="download(menuTrack!); menuTrack = null"><Download :size="17" />{{ menuTrack.local_url ? '保存音频' : '下载歌曲' }}</button><a v-if="!menuTrack.webpage_url.startsWith('/api/')" :href="menuTrack.webpage_url" target="_blank" rel="noreferrer" @click="menuTrack = null"><ArrowRight :size="17" />原始页面</a><button v-if="view === 'playlist' || view === 'history' || view === 'trials'" class="danger" @click="removeSong"><Trash2 :size="17" />{{ view === 'playlist' ? '移出歌单' : '移除记录' }}</button></div></div>
+    <div v-if="menuTrack" class="mc-menu-backdrop" @click.self="menuTrack = null" @keydown.esc="menuTrack = null"><div ref="menuElement" class="mc-track-menu" :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }"><button @click="queueSong"><ListMusic :size="17" />加入播放队列</button><button @click="selectPlaylist"><Plus :size="17" />加入歌单</button><button @click="openAppearance(menuTrack!)"><Palette :size="17" />外观设置</button><button @click="download(menuTrack!); menuTrack = null"><Download :size="17" />{{ menuTrack.local_url ? '保存音频' : '下载歌曲' }}</button><a v-if="!menuTrack.webpage_url.startsWith('/api/')" :href="menuTrack.webpage_url" target="_blank" rel="noreferrer" @click="menuTrack = null"><ArrowRight :size="17" />原始页面</a><button v-if="view === 'playlist' || view === 'history' || view === 'trials'" class="danger" @click="removeSong"><Trash2 :size="17" />{{ view === 'playlist' ? '移出歌单' : '移除记录' }}</button></div></div>
     <div v-if="modal" class="mc-modal-backdrop" @click.self="closeModal"><section ref="dialogElement" class="mc-modal" role="dialog" aria-modal="true" aria-labelledby="music-modal-title" @keydown="modalKey"><header><h2 id="music-modal-title">{{ modal === 'add' ? '加入歌单' : editingPlaylist ? '编辑歌单' : '创建歌单' }}</h2><button class="mc-icon" :disabled="modalBusy" title="关闭" aria-label="关闭" @click="closeModal"><X :size="21" /></button></header><p v-if="modalError" class="mc-modal-error" role="alert">{{ modalError }}</p><form v-if="modal === 'playlist'" @submit.prevent="savePlaylist"><label>歌单名称<input v-model="modalName" maxlength="80" required /></label><label>简介<textarea v-model="modalDescription" maxlength="300" rows="3" /></label><footer><button type="button" class="mc-command" :disabled="modalBusy" @click="closeModal">取消</button><button class="mc-command primary" :disabled="modalBusy || !modalName.trim()" type="submit"><LoaderCircle v-if="modalBusy" :size="17" class="spin" />保存</button></footer></form><div v-else class="mc-add-playlists"><button v-for="playlist in playlists" :key="playlist.id" :disabled="modalBusy" @click="addToPlaylist(playlist.id)"><ListMusic :size="21" /><span>{{ playlist.name }}<small>{{ playlist.count }} 首歌曲</small></span><Plus :size="17" /></button><button :disabled="modalBusy" @click="openModal('playlist')"><Plus :size="21" />新建歌单</button></div></section></div>
   </Teleport>
-  <ImageSettings v-if="imageEditor" :title="imageEditor.title" :endpoint="imageEditor.endpoint" :image="imageEditor.image" @saved="imageSaved" @close="imageEditor = null" />
 </template>

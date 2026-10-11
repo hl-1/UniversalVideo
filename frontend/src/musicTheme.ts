@@ -45,6 +45,7 @@ export function applyMusicTheme(theme: MusicTheme) {
   if (![theme.accent, theme.background, theme.text].every(color => /^#[a-f\d]{6}$/i.test(color))) return
   const root = document.documentElement
   root.dataset.musicTheme = theme.mode
+  root.toggleAttribute('data-music-background', Boolean(theme.background_image))
   const white = 1.05 / (luminance(theme.accent) + .05)
   const black = (luminance(theme.accent) + .05) / .05
   const values: Record<string, string> = {

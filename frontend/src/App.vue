@@ -659,7 +659,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" :class="{ 'music-page': appPage === 'music' }">
     <div v-show="appPage === 'music'"><MusicCenter ref="musicCenter" @open-tools="openMusicTools" @open-admin="pausePlayback(); appPage = 'admin'" /></div>
     <AdminWorkspace v-if="appPage === 'admin'" @back="appPage = 'music'" />
     <div v-show="appPage === 'tools'" class="tools-page" @play.capture="onToolsPlay">

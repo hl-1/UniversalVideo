@@ -531,11 +531,13 @@ def index_track(payload: TrackInput) -> dict:
 
 
 @router.get("/tracks")
-def tracks(view: Literal["favorites", "history", "downloads", "trials", "playlist"] = "history", playlist_id: str = "") -> dict:
+def tracks(view: Literal["all", "favorites", "history", "downloads", "trials", "playlist"] = "history", playlist_id: str = "") -> dict:
     sync_downloads()
     with database() as cursor:
         parameters = ()
-        if view == "favorites":
+        if view == "all":
+            query = TRACK_SELECT + "WHERE t.user_id=%s ORDER BY t.title,t.id"
+        elif view == "favorites":
             query = TRACK_SELECT + "WHERE t.user_id=%s AND f.track_id IS NOT NULL ORDER BY f.created_at DESC"
         elif view in {"history", "trials"}:
             query = TRACK_SELECT + "WHERE t.user_id=%s AND h.track_id IS NOT NULL "

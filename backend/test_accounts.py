@@ -117,6 +117,17 @@ class AccountIntegrationTests(unittest.TestCase):
         for path in ('users', 'settings', 'logs', 'statistics', 'data'):
             self.assertEqual(self.a.get('/api/admin/' + path).status_code, 403, path)
 
+    def test_all_tracks_includes_indexed_songs_and_isolates_accounts(self):
+        a_key = self.a.post('/api/library/tracks', json=self.track).json()['id']
+        b_key = self.b.post('/api/library/tracks', json=self.track).json()['id']
+        self.assertNotEqual(a_key, b_key)
+        self.assertEqual(self.a.get('/api/library/tracks?view=history').json()['tracks'], [])
+        for client, expected in ((self.a, a_key), (self.b, b_key)):
+            response = client.get('/api/library/tracks?view=all')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual([track['id'] for track in response.json()['tracks']], [expected])
+        self.assertEqual(self.admin.get('/api/library/tracks?view=all').json()['tracks'], [])
+
     def test_library_isolation_and_guessed_identifiers(self):
         key = self.a.put('/api/library/favorites', json={'track': self.track, 'liked': True}).json()['id']
         self.a.post('/api/library/history', json={'track': self.track}).raise_for_status()
