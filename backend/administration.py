@@ -147,8 +147,8 @@ def delete_user(uid: int):
 
 DATA_TABLES = {"favorites": ("music_favorites", "track_id"), "history": ("music_history", "track_id"),
                "playlists": ("music_playlists", "id"), "tracks": ("music_tracks", "id"), "downloads": ("music_downloads", "id")}
-ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch"]
-DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch"]
+ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import"]
+DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import"]
 
 
 @router.get("/data")
@@ -278,7 +278,7 @@ def statistics():
         users = cursor.fetchall()
         cursor.execute("SELECT kind,COUNT(*) AS count FROM resources WHERE deleted=FALSE GROUP BY kind")
         resources = cursor.fetchall()
-        cursor.execute("SELECT JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status')) AS status,COUNT(*) AS count FROM resources WHERE deleted=FALSE AND kind IN ('download','summary','mind_map','watermark','batch') GROUP BY status")
+        cursor.execute("SELECT JSON_UNQUOTE(JSON_EXTRACT(payload,'$.status')) AS status,COUNT(*) AS count FROM resources WHERE deleted=FALSE AND kind IN ('download','summary','mind_map','watermark','batch','music_import') GROUP BY status")
         tasks = cursor.fetchall()
     files = [path for path in ROOT_DOWNLOADS().rglob("*") if path.is_file() and not path.is_symlink()]
     return {"users": users, "resources": resources, "tasks": tasks, "storage_bytes": sum(path.stat().st_size for path in files),

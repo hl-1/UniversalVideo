@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, ImagePlus, Palette, RefreshCw, RotateCcw } from 'lucide-vue-next'
 import MusicWorkspace from './MusicWorkspace.vue'
+import MusicImportWorkspace from './MusicImportWorkspace.vue'
 import MusicTrackList from './MusicTrackList.vue'
 import TrackCover from './TrackCover.vue'
 import ThemeSettings from './ThemeSettings.vue'
@@ -18,7 +19,7 @@ import './music-center.css'
 import './music-theme.css'
 
 const emit = defineEmits<{ openTools: [view: 'video' | 'watermark']; openAdmin: [] }>()
-type View = 'home' | 'search' | 'favorites' | 'history' | 'downloads' | 'trials' | 'playlist' | 'profile' | 'appearance' | 'resources'
+type View = 'home' | 'search' | 'bulk' | 'favorites' | 'history' | 'downloads' | 'trials' | 'playlist' | 'profile' | 'appearance' | 'resources'
 const view = ref<View>('home')
 const playlistId = ref('')
 const query = ref('')
@@ -30,7 +31,7 @@ const loading = ref(false)
 const importing = ref(false)
 const error = ref('')
 const toast = ref('')
-const searchWorkspace = ref<{ search: (query: string, source?: string) => Promise<void>; downloadTrack: (track: MusicTrack) => Promise<void> } | null>(null)
+const searchWorkspace = ref<{ search: (query: string, source?: string) => Promise<void>; downloadTrack: (track: MusicTrack) => Promise<void>; showBatch: (id: string) => Promise<void>; activeTask: boolean } | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
 const draft = ref<Profile>({ ...profile.value })
 const modal = ref<'playlist' | 'add' | null>(null)
@@ -54,7 +55,7 @@ let generation = 0
 let toastTimer: number | undefined
 const navigation: Array<{ view: View; playlistId: string }> = []
 const activePlaylist = computed(() => playlists.value.find(item => item.id === playlistId.value))
-const titles: Record<View, string> = { home: '音乐中心', search: '搜索歌曲', favorites: '我喜欢的音乐', history: '最近播放', downloads: '本地和下载', trials: '试听列表', playlist: '我的歌单', profile: '个人中心', appearance: '外观设置', resources: '任务与文件' }
+const titles: Record<View, string> = { home: '音乐中心', search: '搜索歌曲', bulk: '批量找歌', favorites: '我喜欢的音乐', history: '最近播放', downloads: '本地和下载', trials: '试听列表', playlist: '我的歌单', profile: '个人中心', appearance: '外观设置', resources: '任务与文件' }
 const title = computed(() => view.value === 'playlist' ? activePlaylist.value?.name || '我的歌单' : titles[view.value])
 const greeting = new Date().getHours() < 12 ? '上午好' : new Date().getHours() < 18 ? '下午好' : '晚上好'
 const themes = [
@@ -84,7 +85,7 @@ function go(next: View, id = '', remember = true) {
 function back() { const previous = navigation.pop(); if (previous) go(previous.view, previous.playlistId, false) }
 async function loadContent() {
   const revision = ++generation
-  if (['search', 'profile', 'appearance', 'resources'].includes(view.value)) return
+  if (['search', 'bulk', 'profile', 'appearance', 'resources'].includes(view.value)) return
   loading.value = true
   try {
     if (view.value === 'home') {
@@ -318,7 +319,7 @@ defineExpose({ download, search })
     <aside class="mc-sidebar" aria-label="音乐中心导航">
       <button class="mc-brand" @click="go('home')"><Headphones :size="25" /><span>VideoDream</span></button>
       <button class="mc-profile" @click="go('profile')"><span class="mc-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt="头像" /><UserRound v-else :size="23" /></span><span><strong>{{ profile.nickname }}</strong><small>我的音乐空间</small></span><ChevronRight :size="16" /></button>
-      <nav class="mc-discover" aria-label="发现音乐"><button :class="{ active: view === 'home' }" @click="go('home')"><Home :size="19" />推荐</button><button :class="{ active: view === 'search' }" @click="go('search')"><Compass :size="19" />发现</button><button @click="radio"><Radio :size="19" />私人电台</button></nav>
+      <nav class="mc-discover" aria-label="发现音乐"><button :class="{ active: view === 'home' }" @click="go('home')"><Home :size="19" />推荐</button><button :class="{ active: view === 'search' }" @click="go('search')"><Compass :size="19" />发现</button><button :class="{ active: view === 'bulk' }" @click="go('bulk')"><ListMusic :size="19" />批量找歌</button><button @click="radio"><Radio :size="19" />私人电台</button></nav>
       <div class="mc-nav-label">我的音乐</div>
       <nav class="mc-library-nav" aria-label="我的音乐"><button :class="{ active: view === 'favorites' }" @click="go('favorites')"><Heart :size="19" /><span>我喜欢</span><small>{{ counts.favorites }}</small></button><button :class="{ active: view === 'history' }" @click="go('history')"><Clock3 :size="19" /><span>最近播放</span><small>{{ counts.history }}</small></button><button :class="{ active: view === 'downloads' }" @click="go('downloads')"><FolderOpen :size="19" /><span>本地和下载</span><small>{{ counts.downloads }}</small></button><button :class="{ active: view === 'trials' }" @click="go('trials')"><Headphones :size="19" /><span>试听列表</span><small>{{ counts.trials }}</small></button></nav>
       <div class="mc-playlist-label"><span>自建歌单</span><button class="mc-icon" title="创建歌单" aria-label="创建歌单" @click="targetTrack = null; openModal('playlist')"><Plus :size="18" /></button></div>
@@ -335,8 +336,9 @@ defineExpose({ download, search })
           <section class="mc-home-section"><div class="mc-section-heading"><h2>{{ recent.length ? '继续聆听' : '本地音乐' }}</h2><button class="mc-text-button" @click="go(recent.length ? 'history' : 'downloads')">查看全部<ChevronRight :size="16" /></button></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="22" class="spin" /></div><div v-else-if="(recent.length ? recent : local).length" class="mc-home-tracks"><div v-for="track in (recent.length ? recent : local)" :key="trackKey(track)" class="mc-home-track"><button @click="playTrack(track, recent.length ? recent : local)"><TrackCover :src="trackArtwork(track)" :title="track.title" /><span><strong>{{ track.title }}</strong><small>{{ track.artist || '本地音乐' }}</small></span></button><button class="mc-icon" :title="`播放 ${track.title}`" :aria-label="`播放 ${track.title}`" @click="playTrack(track, recent.length ? recent : local)"><Play :size="17" /></button></div></div><div v-else class="mc-empty"><Headphones :size="30" /><p>暂无播放记录</p></div></section>
           <section class="mc-home-section"><div class="mc-section-heading"><h2>我的歌单</h2><button class="mc-text-button" @click="targetTrack = null; openModal('playlist')"><Plus :size="16" />创建歌单</button></div><div v-if="playlists.length" class="mc-playlist-grid"><button v-for="playlist in playlists" :key="playlist.id" class="mc-playlist-item" @click="go('playlist', playlist.id)"><span class="playlist-art"><img v-if="playlist.thumbnail" :src="playlist.thumbnail" :alt="playlist.name" /><ListMusic v-else :size="29" /></span><span><strong>{{ playlist.name }}</strong><small>{{ playlist.count }} 首歌曲</small></span><ChevronRight :size="17" /></button></div><div v-else class="mc-empty compact"><ListMusic :size="29" /><p>暂无歌单</p></div></section>
         </template>
-        <section v-show="view === 'search'" class="mc-search-workspace"><MusicWorkspace ref="searchWorkspace" :active="view === 'search'" :embedded="true" @track-menu="showMenu" /></section>
-        <template v-if="!['home', 'search', 'profile', 'appearance', 'resources'].includes(view)"><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
+        <MusicImportWorkspace v-show="view === 'bulk'" :active="view === 'bulk'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" />
+        <section v-show="view === 'search' || view === 'bulk'" class="mc-search-workspace"><MusicWorkspace ref="searchWorkspace" :active="view === 'search' || view === 'bulk'" :queue-only="view === 'bulk'" :embedded="true" @track-menu="showMenu" /></section>
+        <template v-if="!['home', 'search', 'bulk', 'profile', 'appearance', 'resources'].includes(view)"><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
         <nav v-if="view === 'profile' || view === 'appearance'" class="mc-profile-tabs" aria-label="个人设置"><button :aria-current="view === 'profile' ? 'page' : undefined" @click="go('profile')"><UserRound :size="17" />个人资料</button><button :aria-current="view === 'appearance' ? 'page' : undefined" @click="go('appearance')"><Palette :size="17" />外观设置</button></nav>
         <form v-if="view === 'profile'" class="mc-profile-form" @submit.prevent="saveProfile"><div class="profile-avatar-row"><label class="mc-avatar-upload"><span class="mc-avatar large"><img v-if="draft.avatar" :src="draft.avatar" alt="个人头像" /><UserRound v-else :size="36" /></span><span>更换头像</span><input type="file" accept="image/jpeg,image/png,image/webp" aria-label="更换头像" :disabled="modalBusy" @change="avatarChange" /></label><button type="button" class="mc-icon" :disabled="!draft.avatar || modalBusy" title="恢复默认头像" aria-label="恢复默认头像" @click="resetAvatar"><RotateCcw :size="18" /></button></div><label>昵称<input v-model="draft.nickname" maxlength="40" required /></label><label>个人简介<textarea v-model="draft.bio" maxlength="200" rows="3" /></label><div class="mc-profile-stats"><span><strong>{{ counts.favorites }}</strong>喜欢</span><span><strong>{{ counts.history }}</strong>已听歌曲</span><span><strong>{{ playlists.length }}</strong>歌单</span></div><button class="mc-command primary" :disabled="modalBusy || !draft.nickname.trim()" type="submit"><LoaderCircle v-if="modalBusy" :size="17" class="spin" /><UserRound v-else :size="17" />保存资料</button></form>
         <AccountSettings v-if="view === 'profile'" />

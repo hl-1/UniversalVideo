@@ -248,9 +248,9 @@ def search(q: str = Query(min_length=1, max_length=100), source: Literal["all", 
             found = future.result()
             tracks.extend(found)
             has_more = has_more or len(found) >= SEARCH_PAGE_SIZE
-            statuses.append({"provider": provider, "message": f"找到 {len(found)} 首歌曲" if found else "未找到歌曲或平台未返回结果。"})
+            statuses.append({"provider": provider, "available": True, "message": f"找到 {len(found)} 首歌曲" if found else "未找到歌曲或平台未返回结果。"})
         except Exception:
-            statuses.append({"provider": provider, "message": "搜索接口暂不可用，可能需要登录或触发了平台限制。"})
+            statuses.append({"provider": provider, "available": False, "message": "搜索接口暂不可用，可能需要登录或触发了平台限制。"})
     return {"tracks": tracks, "sources": statuses, "page": page, "has_more": has_more and page < 20}
 
 

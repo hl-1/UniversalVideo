@@ -29,7 +29,7 @@ type Batch = {
   items: BatchItem[]
   download_url?: string | null
 }
-const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean }>(), { active: true, embedded: false })
+const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean; queueOnly?: boolean }>(), { active: true, embedded: false, queueOnly: false })
 const emit = defineEmits<{ 'track-menu': [track: MusicTrack, event: MouseEvent] }>()
 const input = ref('')
 const source = ref('video')
@@ -443,7 +443,16 @@ async function search(query: string, provider = 'all') {
   source.value = provider
   await submit()
 }
-defineExpose({ search, downloadTrack })
+async function showBatch(id: string) {
+  stopBatchPolling()
+  const revision = ++batchGeneration
+  batchError.value = ''
+  batchSaved.value = ''
+  batchBusy.value = true
+  rememberBatch(id)
+  await pollBatch(id, revision)
+}
+defineExpose({ search, downloadTrack, showBatch, activeTask })
 watch(libraryRevision, () => { void loadLocalTracks() })
 watch(() => trackArtwork(selected.value), () => { failedCover.value = false })
 watch(() => props.active, active => { if (!active && batchComplete.value) dismissBatch() })
@@ -458,7 +467,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
 
 <template>
   <div class="music-workspace" :role="embedded ? undefined : 'tabpanel'" :id="embedded ? undefined : 'music-panel'" :aria-labelledby="embedded ? undefined : 'music-tab'">
-    <form v-if="!embedded" class="link-composer" @submit.prevent="submit">
+    <form v-if="!embedded && !queueOnly" class="link-composer" @submit.prevent="submit">
       <textarea v-model="input" aria-label="歌曲名称或音乐视频链接" :disabled="singleActive" :placeholder="source === 'video' ? '粘贴抖音视频链接或分享文字…' : '输入歌名、歌手，或粘贴歌曲链接…'" @keydown.ctrl.enter.prevent="submit" />
       <div class="composer-footer">
         <label><span>来源</span><select v-model="source" :disabled="busy || singleActive" aria-label="音乐来源">
@@ -469,9 +478,9 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
         <button class="composer-submit" :disabled="busy || singleActive || !input.trim()" type="submit"><LoaderCircle v-if="busy" :size="18" class="spin" /><Search v-else-if="!hasLink && source !== 'video'" :size="18" /><ArrowRight v-else :size="18" />{{ busy ? '处理中' : hasLink || source === 'video' ? '解析音轨' : '搜索歌曲' }}</button>
       </div>
     </form>
-    <div v-if="embedded" class="music-format-toolbar"><label><span>下载格式</span><select v-model="audioFormat" :disabled="activeTask" aria-label="音频导出格式"><option value="m4a">M4A</option><option value="mp3">MP3</option></select></label></div>
-    <p v-if="error" class="error-text" role="alert">{{ error }}</p>
-    <p v-if="saved" class="success-text" role="status">{{ saved }}</p>
+    <div v-if="embedded && !queueOnly" class="music-format-toolbar"><label><span>下载格式</span><select v-model="audioFormat" :disabled="activeTask" aria-label="音频导出格式"><option value="m4a">M4A</option><option value="mp3">MP3</option></select></label></div>
+    <p v-if="error && !queueOnly" class="error-text" role="alert">{{ error }}</p>
+    <p v-if="saved && !queueOnly" class="success-text" role="status">{{ saved }}</p>
     <p v-if="batchError" class="error-text" role="alert">{{ batchError }}</p>
     <p v-if="batchSaved" class="success-text" role="status">{{ batchSaved }}</p>
     <section v-if="batch" class="music-batch" :class="{ 'batch-complete': batchComplete }" aria-label="批量下载队列">
@@ -493,8 +502,8 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
         </li>
       </ol>
     </section>
-    <div v-if="sourceMessages.length" class="source-messages"><p v-for="item in sourceMessages" :key="item.provider"><strong>{{ providers[item.provider] }}</strong>{{ item.message }}</p></div>
-    <div v-if="selected" ref="audioResult" class="audio-result">
+    <div v-if="sourceMessages.length && !queueOnly" class="source-messages"><p v-for="item in sourceMessages" :key="item.provider"><strong>{{ providers[item.provider] }}</strong>{{ item.message }}</p></div>
+    <div v-if="selected && !queueOnly" ref="audioResult" class="audio-result">
       <div class="audio-cover"><img v-if="trackArtwork(selected) && !failedCover" :src="trackArtwork(selected) || undefined" :alt="selected.title" @error="failedCover = true" /><Music2 v-else :size="32" /></div>
       <div class="audio-meta"><span class="status-chip">{{ selected.provider ? providers[selected.provider] : '视频音轨' }}</span><h2>{{ selected.title }}</h2><div class="meta-row"><span>{{ selected.artist || selected.uploader }}</span><time>{{ duration(selected.duration) }}</time><span v-if="selected.access">{{ selected.access }}</span><a :href="selected.webpage_url" target="_blank" rel="noreferrer">原始页面<ExternalLink :size="13" /></a></div></div>
       <div class="audio-selected-actions"><button class="track-play track-favorite" :class="{ liked: isLiked(selected) }" type="button" :title="isLiked(selected) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(selected) ? '取消喜欢' : '喜欢'} ${selected.title}`" :aria-pressed="isLiked(selected)" @click="toggleFavorite(selected)"><Heart :size="17" :fill="isLiked(selected) ? 'currentColor' : 'none'" /></button><button v-if="embedded" class="track-play" type="button" title="更多操作" :aria-label="`更多操作 ${selected.title}`" @click="emit('track-menu', selected, $event)"><MoreHorizontal :size="18" /></button><button class="composer-submit" :disabled="activeTask || busy" @click="download"><LoaderCircle v-if="activeTask" :size="18" class="spin" /><Download v-else :size="18" />{{ activeTask ? '处理中' : `下载 ${audioFormat.toUpperCase()}` }}</button></div>
@@ -505,7 +514,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
       <button v-if="pollingError" class="secondary-action" @click="poll(task.task_id)"><RefreshCw :size="16" />刷新任务</button>
       <div v-if="downloadedTrack" class="audio-finished"><button type="button" class="composer-submit" @click="toggleTrack(downloadedTrack)"><Pause v-if="currentTrack?.local_url === downloadedTrack.local_url && playbackState === 'playing'" :size="18" /><Play v-else :size="18" />{{ currentTrack?.local_url === downloadedTrack.local_url && playbackState === 'playing' ? '暂停' : '播放已下载歌曲' }}</button><button class="composer-submit" :disabled="saving" @click="save"><Download :size="18" />{{ saving ? '保存中' : '另存为' }}</button></div>
     </div>
-    <div v-if="tracks.length" class="track-results">
+    <div v-if="tracks.length && !queueOnly" class="track-results">
       <div class="results-heading"><h2>搜索结果</h2><span>{{ tracks.length }} 首</span></div>
       <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ tracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ tracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首</span><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
       <div v-for="(track, index) in tracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">

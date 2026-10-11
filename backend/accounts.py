@@ -498,13 +498,14 @@ def check_path(path: str):
              (r"/api/thumbnails/([^/]+)", "thumbnail"), (r"/api/library/images/([^/]+)", "image"),
              (r"/api/tasks/([^/]+)", "download"), (r"/api/summaries/([^/]+)(?:/mind-map)?", "summary"),
              (r"/api/music/batches/([^/]+)(?:/(?:cancel|retry|archive))?", "batch"),
+             (r"/api/music/imports/([^/]+)(?:/(?:search|cancel|download))?", "music_import"),
              (r"/api/watermarks/tasks/([^/]+)", "watermark"),
              (r"/api/watermarks/videos/([^/]+)(?:/info)?", "file"),
              (r"/api/music/lyrics/([^/]+)", "file"),
              (r"/api/music/playback/([^/]+)/content", "playback"), (r"/api/previews/([^/]+)/content", "preview")]
     for pattern, kind in rules:
         match = re.fullmatch(pattern, path)
-        if match and path != "/api/music/lyrics/fetch":
+        if match and path not in {"/api/music/lyrics/fetch", "/api/music/imports/text", "/api/music/imports/screenshots"}:
             resource(kind, match[1])
             break
 

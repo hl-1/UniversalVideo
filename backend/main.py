@@ -38,7 +38,7 @@ from backend.audio import IncompleteAudioError, download_audio
 from backend import music
 from backend.music_lyrics import router as music_lyrics_router
 from backend.music_library_media import router as music_library_media_router, start_cover_backfill
-from backend import accounts, ai, library, speech
+from backend import accounts, ai, library, music_imports, speech
 from backend.administration import router as administration_router
 from backend.workspace import router as workspace_router
 from backend.network import public_url, public_get
@@ -285,6 +285,7 @@ class MindMapTask:
 app = FastAPI(title="VideoDream API", version="1.0.0")
 app.include_router(watermark_router)
 app.include_router(music.router)
+app.include_router(music_imports.router)
 app.include_router(music_lyrics_router)
 app.include_router(music_library_media_router)
 app.include_router(library.router)
@@ -3082,6 +3083,15 @@ def create_music_batch(payload: MusicBatchRequest) -> dict[str, Any]:
 def music_batch_status(batch_id: str) -> dict[str, Any]:
     with music_batches_lock:
         return _music_batch_response(_get_music_batch(batch_id))
+
+
+@app.post("/api/music/imports/{import_id}/download")
+def download_music_import(import_id: str, payload: music_imports.ImportDownload):
+    tracks = music_imports.selected_tracks(import_id, payload)
+    return create_music_batch(MusicBatchRequest(
+        tracks=[BatchTrackRequest(token=track.token, webpage_url=track.webpage_url) for track in tracks],
+        audio_format=payload.audio_format,
+    ))
 
 
 @app.post("/api/music/batches/{batch_id}/cancel")

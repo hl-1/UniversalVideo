@@ -30,7 +30,7 @@ const settings = ref<any>(null)
 const serviceKey = ref('')
 const replaceKey = ref(false)
 const stats = ref<any>(null)
-const kinds: Record<string, string> = { file: '文件', image: '图片', thumbnail: '封面', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量任务', favorites: '收藏', history: '历史', playlists: '歌单', tracks: '歌曲', downloads: '音乐下载' }
+const kinds: Record<string, string> = { file: '文件', image: '图片', thumbnail: '封面', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量任务', music_import: '批量找歌', favorites: '收藏', history: '历史', playlists: '歌单', tracks: '歌曲', downloads: '音乐下载' }
 const pages = computed(() => Math.max(1, Math.ceil(total.value / 20)))
 let revision = 0
 function fail(failure: unknown) { error.value = failure instanceof Error ? failure.message : '操作失败。' }
