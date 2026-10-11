@@ -37,10 +37,11 @@ from backend.audio import IncompleteAudioError, download_audio
 from backend import music
 from backend.music_lyrics import router as music_lyrics_router
 from backend.music_library_media import router as music_library_media_router, start_cover_backfill
-from backend import accounts, library
+from backend import accounts, ai, library
 from backend.administration import router as administration_router
 from backend.workspace import router as workspace_router
 from backend.network import public_url, public_get
+from backend.runtime import browser_executable, executable_name, ffmpeg_directory, node_executable
 
 
 logger = logging.getLogger("videodream.summary")
@@ -51,10 +52,8 @@ THUMBNAIL_DIR = DOWNLOAD_DIR / "_thumbnails"
 SUMMARY_DIR = DOWNLOAD_DIR / "_summaries"
 CONFIG_DIR = ROOT_DIR / "config"
 AI_CONFIG_PATH = CONFIG_DIR / "ai.json"
-FFMPEG_DIR = Path(r"C:\softWare\environment\ffmpeg")
-NODE_EXE = Path(r"C:\softWare\environment\nodejs\node.exe")
-CHROME_EXE = Path(r"C:\Users\11871\AppData\Local\Google\Chrome\Application\chrome.exe")
-EDGE_EXE = Path(r"C:\Program Files (x86)\Microsoft\EdgeCore\126.0.2592.113\msedge.exe")
+FFMPEG_DIR = ffmpeg_directory()
+NODE_EXE = node_executable()
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 THUMBNAIL_DIR.mkdir(exist_ok=True)
 SUMMARY_DIR.mkdir(exist_ok=True)
@@ -907,28 +906,7 @@ def _summary_source_label(source: str) -> str:
 
 
 def _load_ai_config() -> dict[str, str]:
-    if accounts.principal.get():
-        config = accounts.settings()
-        if not config["ai_api_key"]:
-            raise RuntimeError("请在管理后台配置 AI 服务密钥。")
-        return {"api_key": config["ai_api_key"], "model": config["ai_model"], "base_url": config["ai_base_url"]}
-    if not AI_CONFIG_PATH.exists():
-        raise RuntimeError("缺少 AI 配置文件：请根据 config/ai.example.json 创建 config/ai.json。")
-    try:
-        payload = json.loads(AI_CONFIG_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("AI 配置文件不是合法 JSON。") from exc
-    api_key = str(payload.get("api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
-    model = str(payload.get("model") or "").strip()
-    base_url = str(payload.get("base_url") or "").strip()
-    if not api_key:
-        raise RuntimeError("AI 配置缺少 api_key。")
-    if not model:
-        raise RuntimeError("AI 配置缺少 model。")
-    config = {"api_key": api_key, "model": model}
-    if base_url:
-        config["base_url"] = base_url
-    return config
+    return ai.load_config("text", legacy_path=AI_CONFIG_PATH)
 
 
 def _transcript_for_prompt(segments: list[SubtitleSegment]) -> str:
@@ -1505,18 +1483,7 @@ def parse_sniffed_page(url: str) -> ParseResponse:
 
 
 def _browser_executable() -> Path | None:
-    playwright_root = Path.home() / "AppData" / "Local" / "ms-playwright"
-    playwright_candidates = []
-    if playwright_root.exists():
-        playwright_candidates = sorted(
-            playwright_root.glob("chromium-*/chrome-win*/chrome.exe"),
-            reverse=True,
-        )
-
-    for candidate in (CHROME_EXE, EDGE_EXE, *playwright_candidates):
-        if candidate.exists():
-            return candidate
-    return None
+    return browser_executable()
 
 
 def _is_probable_video_resource(url: str) -> bool:
@@ -2337,9 +2304,9 @@ def _ydl_base_options(url: str | None = None) -> dict[str, Any]:
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         },
     }
-    if (FFMPEG_DIR / "ffmpeg.exe").exists():
+    if (FFMPEG_DIR / executable_name("ffmpeg")).is_file():
         options["ffmpeg_location"] = str(FFMPEG_DIR)
-    if NODE_EXE.exists():
+    if NODE_EXE and NODE_EXE.is_file():
         options["js_runtimes"] = {"node": {"path": str(NODE_EXE)}}
     if url and _is_bilibili_url(url):
         options["http_headers"].update(
@@ -2564,7 +2531,7 @@ def _run_sniffed_download(task: DownloadTask, media_url: str) -> None:
 
     try:
         if ext == "m3u8":
-            ffmpeg = FFMPEG_DIR / "ffmpeg.exe"
+            ffmpeg = FFMPEG_DIR / executable_name("ffmpeg")
             if not ffmpeg.exists():
                 raise RuntimeError("当前资源是 HLS/m3u8，需要先安装 ffmpeg。")
             command = [
@@ -2676,7 +2643,7 @@ def _run_sniffed_pair_download(task: DownloadTask, video_url: str, audio_url: st
     target_path = DOWNLOAD_DIR / f"{task.task_id}.sniffed-merged.mp4"
     _set_task(task, status="running", progress=2.0, message="正在合并网页视频和音频")
     try:
-        ffmpeg = FFMPEG_DIR / "ffmpeg.exe"
+        ffmpeg = FFMPEG_DIR / executable_name("ffmpeg")
         if not ffmpeg.exists():
             raise RuntimeError("需要 ffmpeg 合并视频和音频。")
         headers = f"User-Agent: {DEFAULT_HEADERS['User-Agent']}\r\nReferer: {task.url}\r\n"

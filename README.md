@@ -75,28 +75,28 @@ VideoDream 是一个本地运行的视频下载工作台，前端使用 Vue 3 + 
 .\.run\startup-venv\Scripts\python.exe scripts\initialize-accounts.py --username admin
 ```
 
-未使用 `startup-venv` 时改用 `.venv\Scripts\python.exe`。密码不通过命令行参数传入，不提供默认密码。脚本还会在忽略的 `.env` 中生成 JWT 密钥。Access Token 在浏览器内存保存 15 分钟；Refresh Token 使用 HttpOnly / SameSite Cookie 和 Redis 会话，最长 7 天，轮换不延长会话期限。修改或重置密码、停用账号会撤销全部会话。
+未使用 `startup-venv` 时改用 `.venv\Scripts\python.exe`。密码不通过命令行参数传入，不提供默认密码。脚本还会在忽略的 `.env.universal-video.local` 中生成 JWT 密钥。Access Token 在浏览器内存保存 15 分钟；Refresh Token 使用 HttpOnly / SameSite Cookie 和 Redis 会话，最长 7 天，轮换不延长会话期限。修改或重置密码、停用账号会撤销全部会话。
 
 开发访问地址固定为 `http://127.0.0.1:5174/`。生产环境配置 HTTPS、`VIDEODREAM_COOKIE_SECURE=true`，并将 `VIDEODREAM_ORIGINS` 设置为实际前端地址。媒体资源通过同源 Service Worker 添加认证头，文件、图片、歌词及 Range 请求均需认证；旧匿名地址不能直接访问。Redis 不可用时返回 503，不允许仅凭 JWT 访问。
 
-连接配置放在项目根目录 `.env`（已忽略，不提交），参考 `.env.example`：
+MySQL、Redis、JWT 和 AI API 配置统一放在项目根目录 `.env.universal-video.local`（已忽略，不提交），参考 `.env.example`：
 
 ```dotenv
-MYSQL_HOST=localhost
-MYSQL_PORT=3307
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
 MYSQL_DATABASE=videodream
 MYSQL_USER=videodream_local
 MYSQL_PASSWORD=replace-with-your-password
-REDIS_HOST=localhost
-REDIS_PORT=6378
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
 REDIS_PASSWORD=
 REDIS_TTL=3600
 REDIS_DATABASE=0
 ```
 
-首次连接需要预先创建 MySQL 数据库，并授予用户该库的建表、修改表结构、查询和写入权限；后端自动创建表并执行归属迁移。进程环境变量覆盖 `.env`，也支持旧的 `config/database.json` 作为备用。Redis 必须可用，负责会话、刷新摘要、用户会话索引及认证限流。
+首次连接需要预先创建 MySQL 数据库，并授予用户该库的建表、修改表结构、查询和写入权限；后端自动创建表并执行归属迁移。配置优先级为进程环境变量、`.env.universal-video.local`、旧 `.env`；也支持旧的 `config/database.json` 作为 MySQL 备用。Redis 必须可用，负责会话、刷新摘要、用户会话索引及认证限流。
 
-本机已有 MySQL 容器时，也可用 `scripts/setup-music-mysql.py --container <容器名>` 建立独立数据库和账号，凭证保存到本地忽略的 `config/database.json`；`.env` 中存在 MySQL 配置时仍以 `.env` 为准。
+本机已有 MySQL 容器时，也可用 `scripts/setup-music-mysql.py --container <容器名>` 建立独立数据库和账号，凭证保存到本地忽略的 `config/database.json`；本地环境配置文件中存在 MySQL 配置时以环境配置文件为准。
 
 下载工作台在输入框上方提供「视频下载」和「音乐下载」。音乐模式默认选择视频音轨，可粘贴抖音完整分享文字或视频链接，解析后导出 M4A、MP3，并试听、另存为。抖音 DASH 音视频分离时优先下载独立音频流；AAC 导出 M4A 时保留原始编码。视频包含的歌曲片段、人声和音效会全部保留，不会自动补全成原曲。
 
@@ -138,11 +138,22 @@ $env:VIDEODREAM_INPAINTING_DEVICE = "auto"
 
 CUDA 与 DirectML 使用不同的 ONNX Runtime 安装包，同一个虚拟环境只保留一种。CUDA 依赖会安装本地运行库，不需要单独安装完整的 CUDA Toolkit。
 
-运行时需要 `C:\softWare\environment\ffmpeg` 中的 `ffmpeg.exe` 和 `ffprobe.exe`，以及 `delogo`、`libx264` 支持。输出保留音频，视频重新编码为 H.264 MP4，生成独立文件。
+运行时需要 ffmpeg 和 ffprobe，以及 `delogo`、`libx264` 支持。程序自动识别 Windows 的 `.exe` 和 macOS/Linux 的可执行文件；优先从 PATH 查找，兼容 Windows 原目录 `C:\softWare\environment\ffmpeg` 和 macOS 的 Homebrew 目录。输出保留音频，视频重新编码为 H.264 MP4，生成独立文件。
 
 ## AI 视频总结配置
 
-AI 总结使用 OpenAI 兼容接口。复制 `config/ai.example.json` 为 `config/ai.json`，填写：
+AI 总结使用 OpenAI 兼容接口。在项目根目录的统一配置文件 `.env.universal-video.local` 中填写：
+
+```dotenv
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=replace-with-your-api-key
+LLM_MODEL=gpt-4.1-mini
+LLM_ASR_MODEL=
+```
+
+管理后台已保存的 AI 密钥优先使用；后台未配置密钥时，自动读取此本地文件中的 API 地址、密钥和模型。进程中的同名环境变量优先于本地文件。此文件使用 UTF-8 dotenv 格式，配置值按字面量读取，不展开 `${...}`。
+
+兼容原有配置：未登录的脚本调用还可复制 `config/ai.example.json` 为 `config/ai.json`，填写：
 
 ```json
 {
@@ -154,19 +165,40 @@ AI 总结使用 OpenAI 兼容接口。复制 `config/ai.example.json` 为 `confi
 
 B 站总结优先调用平台字幕 API，直接获取创作者上传或平台生成的字幕；平台接口没有字幕时，再使用 yt-dlp 提取内嵌字幕或自动字幕。弹幕不会作为字幕参与总结。
 
-`config/ai.json` 已被 `.gitignore` 忽略，请不要提交真实密钥。
+`.env.universal-video.local` 和 `config/ai.json` 已被 `.gitignore` 忽略，请不要提交真实密钥。
 
 ## 运行环境
 
-- Python 3.11+
-- Node.js 20+
+- Python 3.11+（可选 AI 修复依赖需要 Python 3.12+）
+- Node.js 20 系列需要 20.19+，或使用 22.12 及以上版本
 - ffmpeg
+- MySQL 和 Redis
 
-项目当前默认使用：
+优先使用本机已有的 Python 和 Node，只要满足版本要求。创建 `.venv` 会复用当前 Python 解释器，不需要另外安装 Python 3.12，也不会把项目依赖装到全局环境。具体兼容性以依赖安装和测试结果为准。
 
-```text
-C:\softWare\environment\ffmpeg
+ffmpeg/ffprobe、Node 和 Chrome/Edge 自动从本机查找；没有本机浏览器时使用 Playwright 安装的 Chromium。启动前可通过进程环境变量 `VIDEODREAM_FFMPEG_DIR`、`VIDEODREAM_NODE_EXE`、`VIDEODREAM_BROWSER_EXE` 指定自定义目录或可执行文件路径。
+
+### macOS 本地运行
+
+已有 MySQL、Redis 时复用现有服务，仅补装缺少的工具。ffmpeg 缺失时可运行 `brew install ffmpeg`。
+
+在项目根目录执行：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
+npm --prefix frontend ci
+cp .env.example .env.universal-video.local
 ```
+
+在 `.env.universal-video.local` 中填写已创建的 MySQL 数据库和用户。Homebrew 常见端口为 MySQL `3306`、Redis `6379`，需要与本机实际服务一致。将 `VIDEODREAM_JWT_SECRET` 留空，初始化脚本会生成随机密钥。若本机没有 Chrome/Edge，先执行 `.venv/bin/python -m playwright install chromium`。
+
+```bash
+.venv/bin/python scripts/initialize-accounts.py --username admin
+.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
+```
+
+另开终端，在项目根目录运行 `npm --prefix frontend run dev`，访问 `http://127.0.0.1:5174/`。
 
 ## 首次安装
 

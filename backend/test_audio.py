@@ -7,18 +7,19 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 from backend import audio, main, music
+from backend.runtime import executable_name
 
 
 class AudioExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not (main.FFMPEG_DIR / "ffmpeg.exe").is_file():
+        if not (main.FFMPEG_DIR / executable_name("ffmpeg")).is_file():
             raise unittest.SkipTest("ffmpeg is not installed")
         cls.work = tempfile.TemporaryDirectory()
         cls.directory = Path(cls.work.name)
         cls.source = cls.directory / "source.mp4"
         subprocess.run([
-            str(main.FFMPEG_DIR / "ffmpeg.exe"), "-v", "error", "-y",
+            str(main.FFMPEG_DIR / executable_name("ffmpeg")), "-v", "error", "-y",
             "-f", "lavfi", "-i", "color=size=64x64:duration=2",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
             "-c:v", "libx264", "-c:a", "aac", "-shortest", str(cls.source),
@@ -46,7 +47,7 @@ class AudioExportTests(unittest.TestCase):
 
     def test_rejects_video_without_audio(self):
         silent = self.directory / "silent.mp4"
-        subprocess.run([str(main.FFMPEG_DIR / "ffmpeg.exe"), "-v", "error", "-y", "-i", str(self.source), "-an", "-c:v", "copy", str(silent)], check=True, capture_output=True)
+        subprocess.run([str(main.FFMPEG_DIR / executable_name("ffmpeg")), "-v", "error", "-y", "-i", str(self.source), "-an", "-c:v", "copy", str(silent)], check=True, capture_output=True)
         with self.assertRaisesRegex(RuntimeError, "音轨"):
             audio.export_audio(silent, self.directory / "silent.m4a", main.FFMPEG_DIR)
 

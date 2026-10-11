@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 
 from backend import inpainting, watermark, test_watermark as fixtures
+from backend.runtime import executable_name
 
 
 class InpaintingValidationTests(unittest.TestCase):
@@ -70,7 +71,7 @@ class LaMaProcessingTests(unittest.TestCase):
 
     def _make_video(self):
         subprocess.run([
-            str(watermark.FFMPEG_DIR / "ffmpeg.exe"), "-v", "error", "-y",
+            str(watermark.FFMPEG_DIR / executable_name("ffmpeg")), "-v", "error", "-y",
             "-f", "lavfi", "-i", "color=c=0x204030:size=320x180:rate=5:duration=0.8",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=0.8", "-vf", "drawbox=x=60:y=30:w=50:h=30:color=white:t=fill",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(self.source),
@@ -116,7 +117,7 @@ class LaMaProcessingTests(unittest.TestCase):
         self.assertEqual((result_info.width, result_info.height), (320, 180))
         self.assertAlmostEqual(result_info.duration, info.duration, delta=0.2)
         from json import loads
-        result = subprocess.run([str(watermark.FFMPEG_DIR / "ffprobe.exe"), "-v", "error", "-show_streams", "-of", "json", str(output)], check=True, capture_output=True)
+        result = subprocess.run([str(watermark.FFMPEG_DIR / executable_name("ffprobe")), "-v", "error", "-show_streams", "-of", "json", str(output)], check=True, capture_output=True)
         self.assertIn("audio", [stream["codec_type"] for stream in loads(result.stdout)["streams"]])
 
     def test_cancel_during_ai_processing_cleans_partial_and_keeps_source(self):

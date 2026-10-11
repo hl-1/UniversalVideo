@@ -38,6 +38,8 @@ class SettingsUpdate(BaseModel):
     watermark_enabled: bool
     ai_base_url: str = Field(min_length=1, max_length=2048)
     ai_model: str = Field(min_length=1, max_length=100)
+    ai_vision_model: str | None = Field(default=None, max_length=100)
+    ai_asr_model: str | None = Field(default=None, max_length=100)
     ai_api_key: str | None = Field(default=None, max_length=4096)
 
 
@@ -244,7 +246,7 @@ def update_settings(payload: SettingsUpdate):
     from backend.network import public_url
     public_url(payload.ai_base_url)
     config = accounts.settings()
-    config.update(payload.model_dump(exclude={"ai_api_key"}))
+    config.update(payload.model_dump(exclude={"ai_api_key"}, exclude_none=True))
     if payload.ai_api_key is not None:
         config["ai_api_key"] = payload.ai_api_key
     with accounts.database() as cursor:

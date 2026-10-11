@@ -4,6 +4,7 @@ __pycache__/
 !.env.example
 *.py[cod]
 .venv/
+.run/
 venv/
 downloads/*
 !downloads/.gitkeep

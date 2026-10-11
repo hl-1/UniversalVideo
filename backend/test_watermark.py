@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 
 from backend import watermark
+from backend.runtime import executable_name
 
 
 class WatermarkTests(unittest.TestCase):
@@ -164,7 +165,7 @@ class WatermarkTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [self.source])
 
     def test_real_processing_removes_logo_preserves_source_and_audio(self):
-        ffmpeg = watermark.FFMPEG_DIR / "ffmpeg.exe"
+        ffmpeg = watermark.FFMPEG_DIR / executable_name("ffmpeg")
         subprocess.run([
             str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y",
             "-f", "lavfi", "-i", "color=c=0x204030:size=320x180:rate=10:duration=1",
@@ -182,7 +183,7 @@ class WatermarkTests(unittest.TestCase):
         self.assertTrue(output.is_file())
         self.assertEqual(hashlib.sha256(self.source.read_bytes()).hexdigest(), before)
         self.assertEqual((watermark._probe_video(output).width, watermark._probe_video(output).height), (320, 180))
-        probe = subprocess.run([str(watermark.FFMPEG_DIR / "ffprobe.exe"), "-v", "error", "-show_streams", "-of", "json", str(output)], check=True, capture_output=True, text=True)
+        probe = subprocess.run([str(watermark.FFMPEG_DIR / executable_name("ffprobe")), "-v", "error", "-show_streams", "-of", "json", str(output)], check=True, capture_output=True, text=True)
         self.assertIn("audio", [stream["codec_type"] for stream in json.loads(probe.stdout)["streams"]])
         frame = subprocess.run([str(ffmpeg), "-v", "error", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], check=True, capture_output=True).stdout
         center = (45 * 320 + 85) * 3

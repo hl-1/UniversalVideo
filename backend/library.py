@@ -15,17 +15,17 @@ from typing import Literal
 from urllib.parse import quote, urlparse, unquote
 
 import pymysql
-from dotenv import dotenv_values
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from backend import accounts
+from backend.runtime import executable_name, ffmpeg_directory
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT_DIR / "config" / "database.json"
 DOWNLOAD_DIR = ROOT_DIR / "downloads"
-FFMPEG_DIR = Path(r"C:\softWare\environment\ffmpeg")
+FFMPEG_DIR = ffmpeg_directory()
 router = APIRouter(prefix="/api/library", tags=["music-library"])
 logger = logging.getLogger("videodream.library")
 schema_lock = threading.Lock()
@@ -197,7 +197,7 @@ def database_config() -> dict:
             config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except (ValueError, OSError) as exc:
             raise HTTPException(503, "音乐库数据库配置无法读取。") from exc
-    local_environment = dotenv_values(ROOT_DIR / ".env")
+    local_environment = accounts.local_environment()
     for key in ("host", "port", "database", "user", "password"):
         variable = f"MYSQL_{key.upper()}"
         value = os.getenv(variable, local_environment.get(variable))
@@ -427,7 +427,7 @@ def migrate_file_lyrics(cursor, path: Path, key: str) -> None:
 
 def inspect_audio(path: Path) -> dict:
     result = subprocess.run(
-        [str(FFMPEG_DIR / "ffprobe.exe"), "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
+        [str(FFMPEG_DIR / executable_name("ffprobe")), "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     if result.returncode:
@@ -443,7 +443,7 @@ def inspect_audio(path: Path) -> dict:
     if any(stream.get("disposition", {}).get("attached_pic") for stream in streams):
         cover = DOWNLOAD_DIR / "_thumbnails" / f"audio-{hashlib.sha256(path.name.encode()).hexdigest()[:24]}.jpg"
         cover.parent.mkdir(exist_ok=True)
-        artwork = subprocess.run([str(FFMPEG_DIR / "ffmpeg.exe"), "-loglevel", "error", "-nostdin", "-y",
+        artwork = subprocess.run([str(FFMPEG_DIR / executable_name("ffmpeg")), "-loglevel", "error", "-nostdin", "-y",
                                   "-i", str(path), "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=300:-1", str(cover)],
                                  capture_output=True, timeout=30)
         if artwork.returncode == 0:

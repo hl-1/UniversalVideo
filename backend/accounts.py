@@ -25,6 +25,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.concurrency import run_in_threadpool
 
 ROOT = Path(__file__).resolve().parent.parent
+LOCAL_CONFIG_PATH = ROOT / ".env.universal-video.local"
 ACCESS_TTL = 900
 SESSION_TTL = 604800
 COOKIE = "videodream_refresh"
@@ -66,8 +67,12 @@ def admin() -> Principal:
     return user
 
 
+def local_environment() -> dict:
+    return dotenv_values(ROOT / ".env") | dotenv_values(LOCAL_CONFIG_PATH, interpolate=False)
+
+
 def environment(name: str, default=None):
-    return os.getenv(name, dotenv_values(ROOT / ".env").get(name, default))
+    return os.getenv(name, local_environment().get(name, default))
 
 
 def signing_key() -> str:
@@ -151,7 +156,18 @@ AUTH_SCHEMA = [
 ]
 DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video_enabled": True,
                     "summary_enabled": True, "watermark_enabled": True,
-                    "ai_base_url": "https://api.openai.com/v1", "ai_model": "gpt-4.1-mini", "ai_api_key": ""}
+                    "ai_base_url": "https://api.openai.com/v1", "ai_model": "gpt-4.1-mini", "ai_api_key": "",
+                    "ai_vision_model": "", "ai_asr_model": ""}
+
+
+def local_ai_config() -> dict[str, str]:
+    local = local_environment()
+    config = {}
+    for field in ("base_url", "model", "api_key"):
+        default = DEFAULT_SETTINGS[f"ai_{field}"]
+        value = os.getenv(f"LLM_{field.upper()}", local.get(f"LLM_{field.upper()}"))
+        config[field] = str(value if value is not None else default).strip()
+    return config
 
 
 def migrate(cursor):
@@ -185,7 +201,8 @@ def migrate(cursor):
         if ai.is_file():
             previous = json.loads(ai.read_text(encoding="utf-8"))
             initial.update(ai_base_url=previous.get("base_url", initial["ai_base_url"]),
-                           ai_model=previous.get("model", initial["ai_model"]), ai_api_key=previous.get("api_key", ""))
+                           ai_model=previous.get("model", initial["ai_model"]), ai_api_key=previous.get("api_key", ""),
+                           ai_vision_model=previous.get("vision_model", ""))
         cursor.execute("INSERT IGNORE INTO system_settings VALUES (1,%s)", (json.dumps(initial),))
         mapped = 0
         for path in library.DOWNLOAD_DIR.rglob("*"):
@@ -215,7 +232,16 @@ def settings() -> dict:
     with database() as cursor:
         cursor.execute("SELECT config FROM system_settings WHERE id=1")
         row = cursor.fetchone()
-    return DEFAULT_SETTINGS | (json.loads(row["config"]) if row else {})
+    config = DEFAULT_SETTINGS | (json.loads(row["config"]) if row else {})
+    if not config["ai_api_key"]:
+        local = local_ai_config()
+        if local["api_key"]:
+            config.update({f"ai_{field}": value for field, value in local.items()})
+    if not config["ai_vision_model"]:
+        config["ai_vision_model"] = str(environment("LLM_VISION_MODEL", "")).strip()
+    if not config["ai_asr_model"]:
+        config["ai_asr_model"] = str(environment("LLM_ASR_MODEL", "")).strip()
+    return config
 
 
 def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: int | None = None):

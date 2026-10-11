@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 
 from backend.audio import probe_audio
 from backend import accounts, library
+from backend.runtime import ffmpeg_directory
 
 
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "downloads"
-FFMPEG_DIR = Path(r"C:\softWare\environment\ffmpeg")
+FFMPEG_DIR = ffmpeg_directory()
 router = APIRouter(prefix="/api/music/lyrics", tags=["music-lyrics"])
 MAX_LYRICS_BYTES = 512000
 fetch_lock = threading.Lock()

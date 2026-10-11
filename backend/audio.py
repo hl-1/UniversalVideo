@@ -11,6 +11,8 @@ from typing import Callable, Literal
 import requests
 from yt_dlp import YoutubeDL
 
+from backend.runtime import executable_name
+
 
 AudioFormat = Literal["m4a", "mp3"]
 Progress = Callable[[float, str], None]
@@ -22,7 +24,7 @@ class IncompleteAudioError(RuntimeError):
 
 def probe_audio(path: Path, ffmpeg_dir: Path) -> dict:
     result = subprocess.run(
-        [str(ffmpeg_dir / "ffprobe.exe"), "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
+        [str(ffmpeg_dir / executable_name("ffprobe")), "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     if result.returncode:
@@ -48,7 +50,7 @@ def export_audio(source: Path, target: Path, ffmpeg_dir: Path, expected_duration
     partial = target.with_name(f"{target.stem}.partial{target.suffix}")
     try:
         result = subprocess.run(
-            [str(ffmpeg_dir / "ffmpeg.exe"), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            [str(ffmpeg_dir / executable_name("ffmpeg")), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
              "-i", str(source), "-map", "0:a:0", "-vn", *codec, str(partial)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
         )
@@ -69,7 +71,7 @@ def download_audio(
     ffmpeg_dir: Path, options: dict, progress: Progress, direct: bool = False,
     expected_duration: float | None = None,
 ) -> Path:
-    if not all((ffmpeg_dir / name).is_file() for name in ("ffmpeg.exe", "ffprobe.exe")):
+    if not all((ffmpeg_dir / executable_name(name)).is_file() for name in ("ffmpeg", "ffprobe")):
         raise RuntimeError("音轨下载需要 ffmpeg 和 ffprobe，请检查安装目录。")
     stem = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:80] or "audio"
     target = download_dir / f"{task_id}.{stem}.{output_format}"

@@ -20,10 +20,11 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from backend import accounts, inpainting
+from backend.runtime import executable_name, ffmpeg_directory
 
 
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "downloads"
-FFMPEG_DIR = Path(r"C:\softWare\environment\ffmpeg")
+FFMPEG_DIR = ffmpeg_directory()
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v"}
 router = APIRouter(prefix="/api/watermarks", tags=["watermarks"])
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="watermark")
@@ -134,7 +135,7 @@ def _video_path(filename: str) -> Path:
 
 
 def _probe_video(source: Path) -> VideoInfo:
-    probe = FFMPEG_DIR / "ffprobe.exe"
+    probe = FFMPEG_DIR / executable_name("ffprobe")
     if not probe.is_file():
         raise HTTPException(status_code=503, detail="未找到 ffprobe，请检查 ffmpeg 安装目录。")
     try:
@@ -222,7 +223,7 @@ def _run_lama(job: WatermarkJob, partial: Path, errors, timed_out: threading.Eve
     if job.cancel.is_set() or timed_out.is_set():
         return
     _update(job, message="正在 AI 修复画面", processing_device=inpainting.device_label(), processing_started_at=time.perf_counter())
-    ffmpeg = str(FFMPEG_DIR / "ffmpeg.exe")
+    ffmpeg = str(FFMPEG_DIR / executable_name("ffmpeg"))
     dimensions = f"{job.info.width}x{job.info.height}"
     fps = str(job.info.fps)
     with jobs_lock:
@@ -287,7 +288,7 @@ def _run_watermark(job: WatermarkJob) -> None:
             job.progress = 0
         with tempfile.TemporaryFile() as errors:
             command = [
-                str(FFMPEG_DIR / "ffmpeg.exe"), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                str(FFMPEG_DIR / executable_name("ffmpeg")), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                 "-i", str(job.source), "-map", "0:v:0", "-map", "0:a?", "-vf", _filter_chain(job.info, job.regions),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(partial),
@@ -399,7 +400,7 @@ def preview_watermark(payload: WatermarkPreviewRequest) -> Response:
     filters = f"scale={info.width}:{info.height},setsar=1" if payload.method == "lama" else _filter_chain(info, payload.regions)
     try:
         result = subprocess.run([
-            str(FFMPEG_DIR / "ffmpeg.exe"), "-v", "error", "-nostdin", "-ss", str(timestamp), "-i", str(source),
+            str(FFMPEG_DIR / executable_name("ffmpeg")), "-v", "error", "-nostdin", "-ss", str(timestamp), "-i", str(source),
             "-frames:v", "1", "-vf", filters, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
         ], capture_output=True, timeout=30)
         if result.returncode or len(result.stdout) != info.width * info.height * 3:
@@ -434,7 +435,7 @@ def video_content(filename: str) -> FileResponse:
 
 @router.post("/tasks", response_model=WatermarkResponse, status_code=202)
 def create_watermark(payload: WatermarkRequest) -> WatermarkResponse:
-    if not (FFMPEG_DIR / "ffmpeg.exe").is_file():
+    if not (FFMPEG_DIR / executable_name("ffmpeg")).is_file():
         raise HTTPException(status_code=503, detail="未找到 ffmpeg，请检查安装目录。")
     source = _video_path(payload.filename)
     info = _probe_video(source)

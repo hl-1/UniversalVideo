@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--migrate-only", action="store_true", help="Migrate ownership without setting a password.")
     args = parser.parse_args()
     if not accounts.environment("VIDEODREAM_JWT_SECRET"):
-        set_key(str(ROOT / ".env"), "VIDEODREAM_JWT_SECRET", secrets.token_urlsafe(48))
+        set_key(str(accounts.LOCAL_CONFIG_PATH), "VIDEODREAM_JWT_SECRET", secrets.token_urlsafe(48))
     with library.database() as cursor:
         cursor.execute("SELECT backup_path FROM account_migrations WHERE id='accounts-v1'")
         backup = cursor.fetchone()["backup_path"]
