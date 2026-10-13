@@ -63,6 +63,21 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         self.track = {"title": "晴天", "artist": "周杰伦", "provider": "qq", "identifier": "song1",
                       "webpage_url": "https://y.qq.com/n/ryqq/songDetail/song1", "duration": 269}
 
+    def test_download_playlist_destination_and_duplicate_membership(self):
+        from fastapi import HTTPException
+        self.assertIsNone(library.download_playlist(None, None))
+        key = library.download_playlist(None, '  游戏收藏  ')
+        self.assertEqual(library.download_playlist(key, None), key)
+        for destination in ((key, 'conflict'), (None, '   '), ('missing', None)):
+            with self.assertRaises(HTTPException):
+                library.download_playlist(*destination)
+        payload = library.TrackInput.model_validate(self.track)
+        library.add_to_playlist(key, payload)
+        library.add_to_playlist(key, payload)
+        with library.database() as cursor:
+            cursor.execute('SELECT COUNT(*) AS n FROM music_playlist_tracks WHERE playlist_id=%s', (key,))
+            self.assertEqual(cursor.fetchone()['n'], 1)
+
     def favorite(self, liked=True):
         response = self.client.put("/api/library/favorites", json={"track": self.track, "liked": liked})
         self.assertEqual(response.status_code, 200, response.text)

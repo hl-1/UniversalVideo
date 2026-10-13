@@ -142,6 +142,44 @@ def run(run_id):
             heartbeat.join(timeout=2)
 
 
+def pending_tool(row, attempted):
+    """Drain discovered work without spending another model/search round."""
+    ctx = row["context"]
+    candidates = ctx.get("candidates", [])
+    def available(name, arguments):
+        return (name, arguments) if store.encode([name, arguments]) not in attempted else None
+    if not ctx.get("personal_searched") and row["request"]["parsed"]["source_mode"] != "discover":
+        call = available("search_my_music", {"offset": 0, "limit": 20})
+        if call:
+            return call
+    for name, field in (("get_track_features", "analysis"), ("validate_tracks", "validation")):
+        keys = [t["key"] for t in candidates if not t.get(field)]
+        for start in range(0, len(keys), 20):
+            call = available(name, {"keys": keys[start:start+20]})
+            if call:
+                return call
+    if len(candidates) >= ctx["limits"]["candidates"]:
+        return None
+    coverage = ctx.get("coverage", {})
+    offset = coverage.get("personal_checked_until", 0)
+    if offset < coverage.get("personal_total", 0):
+        call = available("search_my_music", {"offset": offset, "limit": 20})
+        if call:
+            return call
+    if not service.network_allowed(row) or row["request"]["parsed"]["source_mode"] == "personal_only":
+        return None
+    for playlist in ctx.get("online_playlists", []):
+        provider, pid = playlist["provider"], playlist["playlist_id"]
+        checked = coverage.get("online_playlists", {}).get(provider+":"+pid)
+        if checked and not checked.get("has_more", False):
+            continue
+        call = available("get_playlist_tracks", {"provider": provider, "playlist_id": pid,
+                                                 "offset": (checked or {}).get("checked_until", 0), "limit": 20})
+        if call:
+            return call
+    return None
+
+
 def execute_run(row, last):
     run_id = row["run_id"]
     loaded = skill.load()
@@ -161,50 +199,68 @@ def execute_run(row, last):
     messages = [{"role":"system","content":loaded["text"]},
                 {"role":"user","content":store.encode({"request":parsed,"need":row["request"]["need"]})}]
     called = False
+    drain = False
+    attempted = set()
     while True:
         last = elapsed_charge(run_id,last)
         row = service.check_active(run_id)
         client.token = auth.issue(row)
-        satisfied, _ = service.satisfied(row)
-        if satisfied:
+        if service.satisfied(row)[0]:
             break
-        if not service.network_allowed(row):
-            # Offline tasks still use MCP, but do not contact a model endpoint.
-            candidates = row["context"].get("candidates",[])
-            if not row["context"].get("personal_searched"):
-                call = ("search_my_music",{"offset":0,"limit":20})
-            elif any(not t.get("analysis") for t in candidates):
-                call = ("get_track_features",{"keys":[t["key"] for t in candidates if not t.get("analysis")][:20]})
-            elif any(not t.get("validation") for t in candidates):
-                call = ("validate_tracks",{"keys":[t["key"] for t in candidates if not t.get("validation")][:20]})
-            elif row["context"].get("coverage",{}).get("personal_checked_until",0)<row["context"].get("coverage",{}).get("personal_total",0) and len(candidates)<row["context"]["limits"]["candidates"]:
-                call = ("search_my_music",{"offset":row["context"]["coverage"]["personal_checked_until"],"limit":20})
-            else:
+        used, limits = row["context"].get("budget", {}), row["context"]["limits"]
+        exhausted_search = used.get("search_rounds", 0) >= limits["search_rounds"]
+        offline = not service.network_allowed(row)
+        if drain or offline or exhausted_search or used.get("decisions", 0) >= limits["decisions"]:
+            action = pending_tool(row, attempted)
+            if action is None:
+                reason = "已检查可用候选，目标尚有缺口"
+                if exhausted_search:
+                    reason = f"已达到搜索{limits['search_rounds']}次上限，并已检查可用候选"
+                with library.database() as cursor:
+                    current = store.get(cursor,run_id,lock=True)
+                    store.update(cursor,current,context=current["context"] | {"stop_reason":reason})
                 break
-            data = client.call(*call)
-            if (data.get("error") or {}).get("code")=="BUDGET_EXHAUSTED":
-                raise budget.BudgetExceeded(data["error"]["message"])
+            name, arguments = action
+            attempted.add(store.encode([name, arguments]))
+            data = client.call(name, arguments)
+            if (data.get("error") or {}).get("code") == "BUDGET_EXHAUSTED":
+                raise budget.BudgetExceeded(data["error"]["message"], data["error"].get("budget"))
             called = True
             continue
         messages.append({"role":"user","content":store.encode({"candidate_status":summarize_candidates(row),
-            "budget":row["context"].get("budget",{}),"limits":row["context"]["limits"],
-            "instruction":"Choose the next useful tool. Stop only when goal met, candidates exhausted, or budget exhausted."})})
-        assistant = model.complete(run_id,messages,tools,max_output=1600,decision=True)
+            "budget":used,"limits":limits,
+            "discovered_playlists":row["context"].get("online_playlists",[]),
+            "coverage":row["context"].get("coverage",{}),
+            "instruction":"Choose the next useful tool. Read discovered playlists before searching again. Stop only when goal met or usable work exhausted."})})
+        try:
+            assistant = model.complete(run_id,messages,tools,max_output=1600,decision=True)
+        except budget.BudgetExceeded as exc:
+            if exc.resource == "decisions":
+                drain = True
+                continue
+            raise
         messages.append(assistant)
         if not assistant.get("tool_calls"):
-            if not called:
-                raise RuntimeError("配置的模型未执行工具调用，请检查模型工具调用能力")
-            break
+            drain = True
+            continue
         for call in assistant["tool_calls"]:
-            service.check_active(run_id)
-            if call["function"]["name"] not in auth.READ_TOOLS:
+            row = service.check_active(run_id)
+            if service.satisfied(row)[0]:
+                break
+            name = call["function"]["name"]
+            if name not in auth.READ_TOOLS:
                 raise RuntimeError("模型请求未授权的工具")
-            data = client.call(call["function"]["name"],model.json_value(call["function"]["arguments"]))
-            if (data.get("error") or {}).get("code")=="BUDGET_EXHAUSTED":
-                raise budget.BudgetExceeded(data["error"]["message"])
+            arguments = model.json_value(call["function"]["arguments"])
+            attempted.add(store.encode([name, arguments]))
+            data = client.call(name,arguments)
+            error = data.get("error") or {}
+            if error.get("code") == "BUDGET_EXHAUSTED":
+                if error.get("budget") == "search_rounds":
+                    drain = True
+                    break
+                raise budget.BudgetExceeded(error["message"], error.get("budget"))
             called = True
             messages.append({"role":"tool","tool_call_id":call["id"],"content":store.encode(data)})
-        # Keep the task snapshot small and avoid sending stale expanded evidence repeatedly.
         if len(store.encode(messages))>35000:
             messages = messages[:2]
     finish(run_id,last,row["worker_id"])

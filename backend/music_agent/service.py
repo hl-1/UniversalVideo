@@ -176,7 +176,7 @@ def result(row):
         def rank(t):
             energy = ((t.get("analysis") or {}).get("features") or {}).get("energy")
             delta = abs(previous-energy)*.25 if previous is not None and energy is not None else 0
-            return t["match"]["score"]-artist_counts.get(t["artist"],0)*.18-delta
+            return (t["match"]["score"], -artist_counts.get(t["artist"],0), -delta)
         chosen = max(remaining, key=rank)
         remaining.remove(chosen)
         duration += chosen["validation"].get("duration") or chosen.get("duration") or 0
@@ -270,7 +270,7 @@ def execute_scoped(token, name, arguments):
                     with library.database() as cursor:
                         current = store.get(cursor,run_id,lock=True)
                         known = current["context"].get("online_playlists",[])
-                        store.update(cursor,current,context=current["context"] | {"online_playlists":(known+data["playlists"])[-40:]})
+                        store.update(cursor,current,context=current["context"] | {"online_playlists":(known+data["playlists"])[-50:]})
                 elif name == "get_playlist_tracks":
                     if not any(p["provider"]==provider and p["playlist_id"]==arguments["playlist_id"] for p in row["context"].get("online_playlists",[])):
                         raise HTTPException(422,"只能读取已经检索到的歌单")
@@ -286,12 +286,12 @@ def execute_scoped(token, name, arguments):
                     if name == "get_playlist_tracks":
                         online = dict(coverage.get("online_playlists",{}))
                         online[provider+":"+arguments["playlist_id"]] = data.get("coverage",{}) | {
-                            "name":data["playlist"]["name"], "checked_until":data["next_offset"]}
+                            "name":data["playlist"]["name"], "checked_until":data["next_offset"], "has_more":data.get("has_more",False)}
                         coverage["online_playlists"] = online
                     else:
                         coverage["searches"] = (coverage.get("searches",[])+[{
                             "provider":provider, "query":arguments["query"], "tool":name,
-                            "page":arguments.get("page",1), "count":len(data.get("tracks",data.get("playlists",[])))}])[-3:]
+                            "page":arguments.get("page",1), "count":len(data.get("tracks",data.get("playlists",[])))}])[-5:]
                     store.update(cursor,current,context=current["context"] | {"coverage":coverage})
             elif name in {"get_track_features","validate_tracks"}:
                 tracks = selected_candidates(row,arguments["keys"])
@@ -301,7 +301,7 @@ def execute_scoped(token, name, arguments):
                     check_active(run_id)
                     if name == "get_track_features":
                         value = features.analyze(run_id,track,charge,network_allowed(row),
-                            need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注"},check=lambda:check_active(run_id))
+                            need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"},check=lambda:check_active(run_id))
                         replace_candidate(run_id,track["key"],analysis=value)
                         data["tracks"].append({"key":track["key"], **value})
                     else:
@@ -311,7 +311,7 @@ def execute_scoped(token, name, arguments):
             else:
                 raise ValueError("Unknown tool")
         except budget.BudgetExceeded as exc:
-            error = {"code":"BUDGET_EXHAUSTED","message":str(exc),"retryable":False}
+            error = {"code":"BUDGET_EXHAUSTED","message":str(exc),"budget":getattr(exc,"resource",None),"retryable":False}
         except HTTPException as exc:
             if exc.status_code in {401,503} or exc.detail=="任务已停止":
                 raise

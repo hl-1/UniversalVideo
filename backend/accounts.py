@@ -160,8 +160,8 @@ DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video
                     "ai_vision_model": "", "ai_asr_model": ""}
 DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
                         music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=12,
-                        music_agent_search_rounds=3, music_agent_candidates=100, music_agent_seconds=600,
-                        music_agent_tokens=80000, music_agent_concurrency=2, music_agent_api="auto")
+                        music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
+                        music_agent_tokens=200000, music_agent_concurrency=2, music_agent_api="auto")
 
 
 def local_ai_config() -> dict[str, str]:
@@ -520,7 +520,7 @@ def check_path(path: str):
              (r"/api/music/playback/([^/]+)/content", "playback")]
     for pattern, kind in rules:
         match = re.fullmatch(pattern, path)
-        if match and path not in {"/api/music/lyrics/fetch", "/api/music/imports/text", "/api/music/imports/screenshots"}:
+        if match and path not in {"/api/music/lyrics/fetch", "/api/music/lyrics/online", "/api/music/imports/text", "/api/music/imports/screenshots"}:
             resource(kind, match[1])
             break
 

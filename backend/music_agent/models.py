@@ -10,7 +10,7 @@ from backend.library import TrackInput
 class Preferences(BaseModel):
     model_config = ConfigDict(extra="forbid")
     vocals: Literal["allowed", "instrumental"] = "allowed"
-    languages: list[str] = Field(default_factory=lambda: ["中文"], max_length=8)
+    languages: list[str] = Field(default_factory=list, max_length=8)
     exclusions: list[str] = Field(default_factory=list, max_length=20)
     target_count: int = Field(default=20, ge=1, le=50)
     target_duration_minutes: int = Field(default=60, ge=1, le=300)
@@ -46,8 +46,25 @@ class CreateRun(BaseModel):
         return value
 
 
+def normalize_scene(value):
+    aliases = {"游戏": ("游戏", "gaming", "game"), "睡眠": ("睡眠", "睡觉", "助眠"),
+               "运动": ("运动", "跑步", "健身"), "专注": ("专注", "学习", "阅读"),
+               "工作": ("工作", "办公"), "放松": ("放松", "休闲"), "情歌": ("情歌",), "励志": ("励志",)}
+    value = str(value).strip()
+    for scene, terms in aliases.items():
+        if any(term in value.casefold() for term in terms):
+            return scene
+    return value
+
+
 class ParsedNeed(Preferences):
     scene: str = Field(default="放松", max_length=80)
+
+    @field_validator("scene")
+    @classmethod
+    def canonical_scene(cls, value):
+        return normalize_scene(value)
+
     mood: str = Field(default="", max_length=80)
     effect: str = Field(default="", max_length=80)
     themes: list[str] = Field(default_factory=list, max_length=10)
@@ -112,7 +129,9 @@ class ResultMatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     qualified: bool
     reasons: list[str] = Field(default_factory=list, max_length=20)
-    score: float = Field(ge=0, le=2, allow_inf_nan=False)
+    score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    scoring_version: str = Field(default="legacy", max_length=40)
+    breakdown: dict[str, float] = Field(default_factory=dict, max_length=4)
 
 
 class ResultTrack(TrackInput):

@@ -78,6 +78,27 @@ class MusicBatchTests(unittest.TestCase):
                 self.assertEqual(archive.read(name), b"test-audio")
         self.assertEqual(list((self.directory / "_batches").glob("*.zip")), [])
 
+    def test_playlist_only_receives_successes_and_retries_without_redownload(self):
+        batch = self.create([self.track(81), self.track(82)])
+        batch['playlist_id'] = 'test-playlist'
+        def run(task):
+            if task.music_track.identifier == '81':
+                self.finish(task)
+            else:
+                main._set_task(task, status='failed', error='source unavailable')
+        with patch.object(main, '_run_audio_download', side_effect=run), patch.object(main.library, 'add_to_playlist', side_effect=RuntimeError('temporarily unavailable')) as add:
+            main._run_music_batch(batch)
+        self.assertEqual(add.call_count, 1)
+        self.assertTrue(batch['items'][0]['playlist_pending'])
+        response = self.client.post(f"/api/music/batches/{batch['batch_id']}/retry")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['playlist_id'], 'test-playlist')
+        with patch.object(main, '_run_audio_download', side_effect=self.finish) as download, patch.object(main.library, 'add_to_playlist') as add:
+            main._run_music_batch(batch)
+        self.assertEqual(download.call_count, 1)
+        self.assertEqual(add.call_count, 2)
+        self.assertFalse(batch['items'][0]['playlist_pending'])
+
     def test_cancel_allows_current_song_to_finish_and_skips_remaining(self):
         batch = self.create([self.track(4), self.track(5), self.track(6)])
         started, release = threading.Event(), threading.Event()

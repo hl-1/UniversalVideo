@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from backend import accounts, library
 from backend.music_agent import auth, mcp, runtime, skill, store
@@ -124,3 +125,27 @@ def delete_run(run_id:str,admin=False):
         store.update(cursor,row,deleted=True,status="cancelled" if row["status"] in {"pending","running",*RESUMABLE} else row["status"],
                      worker_id=None,lease_until=None)
     return {"ok":True}
+
+
+class LyricsResultRequest(BaseModel):
+    result_version: int = Field(ge=1)
+
+
+@router.post('/{run_id}/tracks/{key}/lyrics')
+def result_lyrics(run_id: str, key: str, payload: LyricsResultRequest):
+    from backend import music_lyrics
+    uid = accounts.current().id
+    def checked_track():
+        with library.database() as cursor:
+            row = store.get(cursor, run_id, uid)
+        if row['result_version'] != payload.result_version or row['status'] not in {'finished', 'partial'}:
+            raise HTTPException(409, '结果版本已变化，请刷新后重试')
+        track = next((t for t in row['result'].get('tracks', []) if t['key'] == key), None)
+        if track is None:
+            raise HTTPException(404, '歌曲不在当前结果中')
+        return row, track
+    row, track = checked_track()
+    config = accounts.settings()
+    allowed = bool(row['request']['parsed']['network_allowed'] and config['music_agent_network_enabled']
+                   and track['provider'] in config['music_agent_sources'])
+    return music_lyrics.track_lyrics_response(track, allowed, check=checked_track)

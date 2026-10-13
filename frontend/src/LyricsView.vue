@@ -4,8 +4,10 @@ import { ChevronDown, FileMusic, LoaderCircle, Music2, RefreshCw } from 'lucide-
 import { activeLyricIndex, audioFilename, type Lyrics } from './lyrics'
 
 const props = defineProps<{
-  track: { title: string; artist?: string; album?: string; thumbnail?: string | null; filename?: string | null; download_url?: string | null }
+  track: { title: string; artist?: string | null; album?: string; thumbnail?: string | null; filename?: string | null; download_url?: string | null; webpage_url?: string; token?: string }
   currentTime: number
+  lyricsEndpoint?: string
+  resultVersion?: number
 }>()
 const emit = defineEmits<{ close: []; seek: [seconds: number] }>()
 const lyrics = ref<Lyrics>({ lines: [], plain: '', source: '' })
@@ -33,12 +35,29 @@ async function loadLyrics(fetchOnline = true) {
   const current = ++generation
   const name = filename.value
   error.value = ''
-  if (!name) { loading.value = false; return }
+  if (!name && !props.lyricsEndpoint && !props.track.webpage_url) { loading.value = false; return }
   const track = { ...props.track }
   request = new AbortController()
   const signal = request.signal
   loading.value = true
   try {
+    if (props.lyricsEndpoint || !name) {
+      let endpoint = props.lyricsEndpoint || '/api/music/lyrics/online'
+      let body: Record<string, unknown> = { result_version: props.resultVersion }
+      if (!props.lyricsEndpoint) {
+        const parsed = await fetch('/api/music/parse', { method: 'POST', signal,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: track.webpage_url }) })
+        if (!parsed.ok) throw new Error(await apiError(parsed))
+        const data = await parsed.json()
+        body = { token: data.token, webpage_url: data.webpage_url }
+      }
+      const response = await fetch(endpoint, { method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!response.ok) throw new Error(await apiError(response))
+      const data = await response.json()
+      if (current === generation) { lyrics.value = data; await followCurrentLine(true) }
+      return
+    }
     const response = await fetch(`/api/music/lyrics/${encodeURIComponent(name)}`, { signal })
     if (!response.ok) throw new Error(await apiError(response))
     const local: Lyrics = await response.json()
@@ -102,7 +121,7 @@ function onKeydown(event: KeyboardEvent) {
   else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-watch(() => [filename.value, props.track.title, props.track.artist], () => {
+watch(() => [filename.value, props.track.title, props.track.artist, props.track.webpage_url, props.lyricsEndpoint, props.resultVersion], () => {
   lyrics.value = { lines: [], plain: '', source: '' }
   coverFailed.value = false
   importing.value = false
@@ -134,7 +153,7 @@ onBeforeUnmount(() => {
         <span>正在播放</span>
         <div class="lyrics-tools">
           <span v-if="lyrics.source" class="lyrics-source">{{ lyrics.source }}</span>
-          <button class="lyrics-icon" type="button" :disabled="!filename || loading || importing" title="匹配歌词" aria-label="匹配歌词" @click="loadLyrics()"><LoaderCircle v-if="loading" :size="19" class="spin" /><RefreshCw v-else :size="19" /></button>
+          <button class="lyrics-icon" type="button" :disabled="(!filename && !lyricsEndpoint && !track.webpage_url) || loading || importing" title="匹配歌词" aria-label="匹配歌词" @click="loadLyrics()"><LoaderCircle v-if="loading" :size="19" class="spin" /><RefreshCw v-else :size="19" /></button>
           <button class="lyrics-icon" type="button" :disabled="!filename || importing" title="导入 LRC 歌词" aria-label="导入 LRC 歌词" @click="importInput?.click()"><LoaderCircle v-if="importing" :size="20" class="spin" /><FileMusic v-else :size="20" /></button>
           <input ref="importInput" type="file" accept=".lrc" hidden @change="importLyrics" />
         </div>
@@ -153,6 +172,7 @@ onBeforeUnmount(() => {
             <div v-else-if="lyrics.plain" class="lyrics-plain">{{ lyrics.plain }}</div>
             <div v-else class="lyrics-empty"><LoaderCircle v-if="loading" :size="23" class="spin" /><Music2 v-else :size="27" :stroke-width="1.5" /><p>{{ loading ? '正在匹配歌词' : lyrics.message || '暂无歌词' }}</p></div>
           </div>
+          <p v-if="lyrics.message && (lyrics.lines.length || lyrics.plain)" class="lyrics-error">{{ lyrics.message }}</p>
           <p v-if="error" class="lyrics-error" role="alert">{{ error }}</p>
         </div>
       </div>

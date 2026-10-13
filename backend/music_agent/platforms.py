@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import html
 import re
 
 from backend import music
@@ -68,35 +66,5 @@ def playlist_tracks(provider, playlist_id, offset, limit, charge):
 
 
 def track_lyrics(track, charge):
-    provider, identifier = track["provider"], track["identifier"]
-    if provider == "netease":
-        data = music._json("https://music.163.com/api/song/lyric", params={"id": identifier, "lv": -1, "kv": -1, "tv": -1}, referer="https://music.163.com/")
-        text = (data.get("lrc") or {}).get("lyric") or ""
-        if text or data.get("nolyric") is True:
-            return {"text": text[:24000], "source": "网易云歌曲身份歌词", "instrumental": data.get("nolyric") is True,
-                    "document_complete": len(text) <= 24000, "identity": f"netease:{identifier}"}
-    elif provider == "qq":
-        data = music._json("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
-                           params={"songmid": identifier, "format": "json", "nobase64": 1}, referer="https://y.qq.com/")
-        text = data.get("lyric") or ""
-        if data.get("code") == 0 and text:
-            if not text.startswith("[") and "&#" not in text:
-                try:
-                    text = base64.b64decode(text, validate=True).decode("utf-8")
-                except (ValueError, UnicodeError):
-                    pass
-            text = html.unescape(text)
-            return {"text": text[:24000], "source": "QQ 音乐歌曲身份歌词", "instrumental": None,
-                    "document_complete": len(text) <= 24000, "identity": f"qq:{identifier}"}
-    if not track.get("artist") or not track.get("duration"):
-        return {"text": "", "instrumental": None, "source": "", "document_complete": False}
-    data = music._json("https://lrclib.net/api/get", params={"track_name": track["title"], "artist_name": track["artist"], "duration": round(track["duration"])})
-    def normalized(value):
-        return re.sub(r"[\W_]+", "", str(value).casefold())
-    if (normalized(data.get("trackName")) != normalized(track["title"])
-            or normalized(data.get("artistName")) != normalized(track["artist"])
-            or abs(float(data.get("duration") or 0)-track["duration"]) > max(3, track["duration"]*.03)):
-        raise ValueError("歌词歌曲身份不匹配")
-    text = data.get("syncedLyrics") or data.get("plainLyrics") or ""
-    return {"text": text[:24000], "source": "LRCLIB 身份匹配", "instrumental": data.get("instrumental"),
-            "document_complete": len(text) <= 24000, "identity": f"{provider}:{identifier}"}
+    from backend.lyric_lookup import lookup
+    return lookup(track)

@@ -35,10 +35,10 @@ class SettingsUpdate(BaseModel):
     music_agent_network_enabled: bool = True
     music_agent_sources: list[Literal["netease", "qq", "kugou"]] = Field(default_factory=lambda: ["netease", "qq", "kugou"])
     music_agent_decisions: int = Field(default=12, ge=2, le=12)
-    music_agent_search_rounds: int = Field(default=3, ge=0, le=3)
+    music_agent_search_rounds: int = Field(default=5, ge=0, le=5)
     music_agent_candidates: int = Field(default=100, ge=1, le=100)
     music_agent_seconds: int = Field(default=600, ge=30, le=600)
-    music_agent_tokens: int = Field(default=80000, ge=2000, le=80000)
+    music_agent_tokens: int = Field(default=200000, ge=2000, le=200000)
     music_agent_concurrency: int = Field(default=2, ge=1, le=8)
     music_agent_api: Literal["auto", "chat", "responses"] = "auto"
     registration_enabled: bool

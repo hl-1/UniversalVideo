@@ -6,10 +6,39 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from backend import music_lyrics as lyrics
+from backend import accounts, music, music_lyrics as lyrics, lyric_lookup
 
 
 class LyricsTests(unittest.TestCase):
+    def test_online_route_passes_auth_middleware_without_local_file_lookup(self):
+        app = FastAPI()
+        app.include_router(lyrics.router)
+        app.add_middleware(accounts.AuthenticationMiddleware)
+        user = accounts.Principal(1, 'lyrics-test', 'user')
+        track = music.Track(title='Test', artist='Artist', provider='netease',
+                            identifier='123', webpage_url='https://music.163.com/song?id=123')
+        track = music._register(track)
+        self.addCleanup(music.sessions.pop, track.token, None)
+        with TestClient(app) as client, \
+             patch.object(accounts, 'authenticate', return_value=user), \
+             patch.object(accounts, 'settings', return_value=dict(accounts.DEFAULT_SETTINGS)), \
+             patch.object(accounts, 'resource', side_effect=HTTPException(404, '资源不存在。')) as resource, \
+             patch.object(lyrics, 'track_lyrics_response', return_value={'plain': 'test lyrics'}) as lookup:
+            payload = {'token': track.token, 'webpage_url': track.webpage_url}
+            self.assertEqual(client.post('/api/music/lyrics/online', json=payload).status_code, 401)
+            client.headers['Authorization'] = 'Bearer test'
+            result = client.post('/api/music/lyrics/online', json=payload)
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['plain'], 'test lyrics')
+            lookup.assert_called_once()
+            resource.assert_not_called()
+            invalid = client.post('/api/music/lyrics/online', json=payload | {'token': 'invalid'})
+            self.assertEqual(invalid.status_code, 410)
+            mismatch = client.post('/api/music/lyrics/online', json=payload | {'webpage_url': 'https://music.163.com/song?id=456'})
+            self.assertEqual(mismatch.status_code, 422)
+            self.assertEqual(client.get('/api/music/lyrics/missing.m4a').status_code, 404)
+            resource.assert_called_once_with('file', 'missing.m4a')
+
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
@@ -25,6 +54,7 @@ class LyricsTests(unittest.TestCase):
         self.storage_read.start()
         self.storage_write.start()
         lyrics.next_request_at = 0
+        lyric_lookup._next_remote_at = 0
         app = FastAPI()
         app.include_router(lyrics.router)
         self.client = TestClient(app)
@@ -70,7 +100,7 @@ class LyricsTests(unittest.TestCase):
 
     def test_automatic_lookup_uses_actual_audio_duration_and_caches_result(self):
         upstream = Mock(status_code=200)
-        upstream.json.return_value = {"syncedLyrics": "[00:00.00]found"}
+        upstream.json.return_value = {"trackName":"song", "artistName":"artist", "duration":123.4, "syncedLyrics": "[00:00.00]found"}
         with patch.object(lyrics, "probe_audio", return_value={"duration": 123.4}), patch.object(lyrics.requests, "get", return_value=upstream) as get:
             first = self.request_lyrics()
             second = self.request_lyrics()
@@ -86,6 +116,7 @@ class LyricsTests(unittest.TestCase):
             self.assertEqual(get.call_count, 1)
         self.saved.clear()
         lyrics.next_request_at = 0
+        lyric_lookup._next_remote_at = 0
         upstream = Mock(status_code=429, headers={"Retry-After": "30"})
         with patch.object(lyrics, "probe_audio", return_value={"duration": 123}), patch.object(lyrics.requests, "get", return_value=upstream) as get:
             self.assertEqual(self.request_lyrics().status_code, 503)
@@ -94,7 +125,7 @@ class LyricsTests(unittest.TestCase):
 
     def test_import_during_online_lookup_is_preserved(self):
         upstream = Mock(status_code=200)
-        upstream.json.return_value = {"syncedLyrics": "[00:01]online"}
+        upstream.json.return_value = {"trackName":"song", "artistName":"artist", "duration":123, "syncedLyrics": "[00:01]online"}
         def remote(*args, **kwargs):
             lyrics.save_cached("song.m4a", "[00:01]imported", "本地 LRC")
             return upstream

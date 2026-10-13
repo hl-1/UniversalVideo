@@ -16,23 +16,53 @@ from types import SimpleNamespace
 import pymysql
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from backend import accounts, library, main
+from backend import accounts, administration, library, main
 from backend.music_agent import auth, budget, features, mcp, model, runtime, service, skill, store, validation
+
+
+class SettingsTests(unittest.TestCase):
+    def test_token_budget_range_and_default(self):
+        payload = dict(accounts.DEFAULT_SETTINGS)
+        payload.pop("music_agent_tokens")
+        self.assertEqual(administration.SettingsUpdate.model_validate(payload).music_agent_tokens,200000)
+        for tokens in (2000,80000,200000):
+            with self.subTest(tokens=tokens):
+                settings = administration.SettingsUpdate.model_validate(payload | {"music_agent_tokens":tokens})
+                self.assertEqual(settings.music_agent_tokens,tokens)
+        for tokens in (1999,200001):
+            with self.subTest(tokens=tokens), self.assertRaises(ValidationError):
+                administration.SettingsUpdate.model_validate(payload | {"music_agent_tokens":tokens})
+
+    def test_search_round_budget_default_and_maximum(self):
+        payload = dict(accounts.DEFAULT_SETTINGS)
+        payload.pop('music_agent_search_rounds')
+        self.assertEqual(administration.SettingsUpdate.model_validate(payload).music_agent_search_rounds,5)
+        for count in (0,3,5):
+            self.assertEqual(administration.SettingsUpdate.model_validate(payload | {'music_agent_search_rounds':count}).music_agent_search_rounds,count)
+        with self.assertRaises(ValidationError):
+            administration.SettingsUpdate.model_validate(payload | {'music_agent_search_rounds':6})
 
 
 class MatchTests(unittest.TestCase):
     def candidate(self, vocals=False, language=None):
         return {"key":"k", "title":"Track", "artist":"Artist", "duration":180, "source":{"kind":"personal"},
-                "analysis":{"features":{"vocals":vocals,"language":language,"themes":[],"scene_scores":{}},
-                            "evidence":{"fields":{"vocals":{"confidence":.9},"language":{"confidence":.9}}}},
+                "analysis":{"features":{"vocals":vocals,"language":language,"themes":[],"scene_scores":{"游戏":.8,"放松":.8}},
+                            "evidence":{"fields":{"vocals":{"confidence":.9},"language":{"confidence":.9},"scene_scores":{"confidence":.9}}}},
                 "validation":{"identity":True,"playable":True,"full":True}}
 
     def test_instrumental_ignores_language_but_unknown_vocals_fails(self):
         parsed = model.offline_parse("纯音乐",{})
         self.assertTrue(features.match(self.candidate(),parsed)["qualified"])
         self.assertFalse(features.match(self.candidate(None),parsed)["qualified"])
-        self.assertFalse(features.match(self.candidate(True,"英文"),model.offline_parse("工作",{}))["qualified"])
+        self.assertFalse(features.match(self.candidate(True,"英文"),model.offline_parse("工作，中文歌",{}))["qualified"])
+
+    def test_default_language_is_unrestricted(self):
+        parsed = model.offline_parse("打游戏的音乐",{})
+        self.assertEqual(parsed["languages"],[])
+        self.assertTrue(features.match(self.candidate(True,"英文"),parsed)["qualified"])
+        self.assertTrue(features.match(self.candidate(True),parsed)["qualified"])
 
     def test_partial_audio_does_not_prove_sleep_and_theme_exclusion_needs_lyrics(self):
         track = self.candidate()
@@ -44,6 +74,8 @@ class MatchTests(unittest.TestCase):
     def test_explicit_preferences_and_duration_goal(self):
         parsed = model.offline_parse("打游戏，英文歌，30首，凑够一小时",{"languages":["中文"],"target_count":5})
         self.assertEqual((parsed["languages"],parsed["target_count"],parsed["goal"]),(["中文"],5,"duration"))
+        self.assertEqual(model.offline_parse("工作，英文歌",{})["languages"],["英文"])
+        self.assertEqual(model.offline_parse("工作，中文歌",{"languages":[]})["languages"],[])
         self.assertFalse(model.offline_parse("只用我的歌单，不要联网",{})["network_allowed"])
 
     def test_versions_are_not_merged_by_song_name(self):
@@ -196,7 +228,7 @@ class AgentIntegrationTests(unittest.TestCase):
         row = self.running()
         token = auth.issue(row)
         with self.assertRaises(budget.BudgetExceeded):
-            budget.charge(row["run_id"],tokens=80001)
+            budget.charge(row["run_id"],tokens=200001)
         with library.database() as cursor:
             row = store.get(cursor,row["run_id"],lock=True)
             store.update(cursor,row,lease_until=time.time()-1)
@@ -436,7 +468,7 @@ class AgentIntegrationTests(unittest.TestCase):
             else: name,args="validate_tracks",{"keys":[key]}
             return {"role":"assistant","content":"","tool_calls":[{"id":secrets.token_hex(6),"type":"function","function":{"name":name,"arguments":json.dumps(args)}}]}
         analysis = {"features":{"vocals":True,"language":"中文","themes":["治愈"],"scene_scores":{"放松":.9}},
-                    "evidence":{"fields":{"vocals":{"confidence":.9},"language":{"confidence":.9}}}}
+                    "evidence":{"fields":{"vocals":{"confidence":.9},"language":{"confidence":.9},"scene_scores":{"confidence":.9}}}}
         with patch.object(model,"parse",return_value=model.offline_parse("放松",{"target_count":1})),\
              patch.object(model,"complete",side_effect=decision),patch.object(mcp,"LocalClient",InProcessClient),\
              patch.object(features,"analyze",return_value=analysis),\
@@ -446,6 +478,91 @@ class AgentIntegrationTests(unittest.TestCase):
             finished = store.get(cursor,row["run_id"])
         self.assertEqual(finished["status"],"finished")
         self.assertEqual([s["tool"] for s in finished["steps"]],["search_my_music","get_track_features","validate_tracks"])
+
+    def test_fifth_search_allowed_sixth_blocked_but_discovered_playlist_drains(self):
+        row = self.running({"target_count":1})
+        track = {"provider":"netease","identifier":"456","title":"歌曲","artist":"歌手","duration":180,
+                 "webpage_url":"https://music.163.com/song?id=456"}
+        with library.database() as cursor:
+            row = store.update(cursor,row,context=row["context"] | {"personal_searched":True,"budget":{"search_rounds":4},
+                "online_playlists":[{"provider":"netease","playlist_id":"789"}]})
+        budget.charge(row['run_id'],search_rounds=1)
+        with self.assertRaises(budget.BudgetExceeded) as exc:
+            budget.charge(row['run_id'],search_rounds=1)
+        self.assertEqual(exc.exception.resource,'search_rounds')
+        class InProcessClient:
+            def __init__(self, token): self.token=token
+            def tools(self): return []
+            def call(self,name,args): return service.execute(self.token,name,args)
+        analysis = {"features":{"vocals":True,"vocal_role":"lead","language":"中文","scene_scores":{"放松":.9}},
+                    "evidence":{"fields":{k:{"confidence":.9} for k in ('vocals','vocal_role','language','scene_scores')}}}
+        playlist = {"playlist":{"name":"new"},"tracks":[track],"next_offset":1,"has_more":False,"coverage":{}}
+        with patch.object(mcp,'LocalClient',InProcessClient), patch.object(model,'complete',side_effect=AssertionError('search budget exhausted')), \
+             patch.object(platforms_for_test(),'playlist_tracks',return_value=playlist), patch.object(features,'analyze',return_value=analysis), \
+             patch.object(validation,'validate',return_value={"checked_at":time.time(),"identity":True,"playable":True,"full":True,"duration":180}):
+            runtime.execute_run(row,time.monotonic())
+        result=service.current_run(row['run_id'])
+        self.assertEqual(result['status'],'finished')
+        self.assertEqual([s['tool'] for s in result['steps']],['get_playlist_tracks','get_track_features','validate_tracks'])
+        self.assertEqual(result['context']['budget']['search_rounds'],5)
+
+    def test_result_lyrics_version_owner_and_manual_cache(self):
+        from backend import lyric_lookup
+        row=self.running()
+        track={"provider":"netease","identifier":"999","title":"歌曲","artist":"歌手","duration":180,
+               "webpage_url":"https://music.163.com/song?id=999"}
+        with library.database() as cursor:
+            key=library.save_track(cursor,library.TrackInput.model_validate(track))
+            library.write_lyrics(cursor,key,{"text":"[00:01]手动歌词","source":"本地 LRC"})
+            store.update(cursor,row,status='partial',result_version=1,result={"tracks":[track | {"key":key}]})
+        url=f"/api/music/recommendations/{row['run_id']}/tracks/{key}/lyrics"
+        with patch.object(lyric_lookup,'remote',side_effect=AssertionError('manual cache must win')):
+            result=self.client.post(url,json={'result_version':1})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()['lines'][0]['text'],'手动歌词')
+        self.assertEqual(self.client.post(url,json={'result_version':2}).status_code,409)
+        self.assertEqual(self.client.post(url.replace(key,'unknown'),json={'result_version':1}).status_code,404)
+        with library.database() as cursor:
+            cursor.execute('UPDATE music_recommendation_runs SET user_id=1 WHERE run_id=%s',(row['run_id'],))
+        self.assertEqual(self.client.post(url,json={'result_version':1}).status_code,404)
+
+    def test_credit_only_analysis_does_not_call_model_or_infer_vocals(self):
+        row=self.running()
+        track={"provider":"netease","identifier":"1963232440","title":"The Runner","artist":"Yubik","duration":396,
+               "webpage_url":"https://music.163.com/song?id=1963232440"}
+        with library.database() as cursor:
+            key=library.save_track(cursor,library.TrackInput.model_validate(track))
+            library.write_lyrics(cursor,key,{"text":"[00:00]作词：Maximilian Hacker\n[00:00]作曲：Maximilian Hacker","source":"本地 LRC"})
+        with patch.object(model,'complete',side_effect=AssertionError('credits cannot be lyrics')):
+            result=features.analyze(row['run_id'],track | {'key':key,'user_id':self.user_id},lambda **_:None,True)
+        self.assertIsNone(result['features']['vocals'])
+        self.assertIsNone(result['features']['language'])
+        self.assertEqual(result['features']['vocal_role'],'unknown')
+
+
+    def test_shared_lyrics_cache_preserves_platform_declaration_and_invalidates_features(self):
+        from backend import lyric_lookup
+        row=self.running()
+        track={"provider":"netease","identifier":"111222","title":"器乐","artist":"作者","duration":180,
+               "webpage_url":"https://music.163.com/song?id=111222"}
+        with patch.object(lyric_lookup,'remote',return_value={'text':'','source':'平台','instrumental':True,'document_complete':True}) as remote:
+            first=lyric_lookup.lookup(track)
+            second=lyric_lookup.lookup(track)
+        remote.assert_called_once()
+        self.assertTrue(first['instrumental'])
+        self.assertTrue(second['instrumental'])
+        with library.database() as cursor:
+            key=library.track_id(library.TrackInput.model_validate(track))
+        item=track | {'key':key,'user_id':self.user_id}
+        analysis=features.analyze(row['run_id'],item,lambda **_:None,True)
+        self.assertEqual(analysis['features']['vocal_role'],'instrumental')
+        with library.database() as cursor:
+            library.write_lyrics(cursor,key,{'text':'[00:01]人工歌词','source':'本地 LRC'})
+            cursor.execute('SELECT expires_at FROM music_track_features WHERE user_id=%s AND track_key=%s',(self.user_id,key))
+            self.assertEqual(cursor.fetchone()['expires_at'],0)
+        with patch.object(lyric_lookup,'remote',side_effect=AssertionError('manual data must win')):
+            self.assertIn('人工歌词',lyric_lookup.lookup(track)['text'])
+
 
 
 def platforms_for_test():

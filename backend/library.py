@@ -303,6 +303,10 @@ def write_lyrics(cursor, key: str, data: dict) -> None:
         (key, text, data.get("source", ""), "lrc" if re.search(r"\[\d+:\d+", text) else "plain",
          data.get("signature", ""), data.get("checked_at", time.time()), manual, data.get("updated_at", time.time()), accounts.owner_id()))
 
+    cursor.execute("SHOW TABLES LIKE 'music_track_features'")
+    if cursor.fetchone():
+        cursor.execute("UPDATE music_track_features SET expires_at=0 WHERE user_id=%s AND track_key=%s", (accounts.owner_id(), key))
+
 
 def read_lyrics(filename: str) -> dict | None:
     accounts.resource("file", filename)
@@ -687,3 +691,17 @@ def import_audio(file: UploadFile) -> dict:
     finally:
         file.file.close()
     return {"filename": destination.name, "track": metadata}
+
+
+def download_playlist(key: str | None, name: str | None) -> str | None:
+    """Resolve a download destination only when a batch is submitted."""
+    if key and name is not None:
+        raise HTTPException(422, "已有歌单和新歌单只能选择一个。")
+    if name is not None:
+        if not name.strip():
+            raise HTTPException(422, "请输入歌单名称。")
+        return create_playlist(PlaylistRequest(name=name.strip()))["id"]
+    if key:
+        with database() as cursor:
+            require_playlist(cursor, key)
+    return key

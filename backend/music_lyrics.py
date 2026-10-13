@@ -83,7 +83,7 @@ def save_cached(filename: str, text: str, source: str, signature: str = "") -> d
 
 def local_lyrics(path: Path) -> dict | None:
     cached = read_cached(path.name)
-    if cached and cached["text"]:
+    if cached and cached["text"] and (cached.get("manual") or cached.get("source") == "本地 LRC" or time.time()-cached.get("checked_at", 0) < 604800):
         return response_data(cached["text"], cached["source"])
     sidecar = path.with_suffix(".lrc")
     if sidecar.is_file() and sidecar.stat().st_size <= MAX_LYRICS_BYTES:
@@ -147,27 +147,14 @@ def fetch_lyrics(payload: LyricsRequest):
             return response_data(message="暂不支持匹配这段音频的歌词。")
         next_request_at = time.monotonic() + 0.5
         try:
-            response = requests.get("https://lrclib.net/api/get", params={
-                "track_name": payload.title, "artist_name": payload.artist,
-                "album_name": payload.album, "duration": round(duration),
-            }, headers={"User-Agent": "VideoDream/1.0 (https://github.com/hl-1/UniversalVideo)"}, timeout=(4, 10))
-            if response.status_code in (429, 503):
-                try:
-                    delay = min(3600, max(1, float(response.headers.get("Retry-After", "60"))))
-                except ValueError:
-                    delay = 60
-                next_request_at = time.monotonic() + delay
-                raise HTTPException(503, "在线歌词服务暂时繁忙。")
-            if response.status_code == 404:
-                text = ""
-            else:
-                response.raise_for_status()
-                data = response.json()
-                if not isinstance(data, dict):
-                    raise ValueError("Invalid lyrics response")
-                text = data.get("syncedLyrics") or data.get("plainLyrics") or ""
-                if not isinstance(text, str) or len(text.encode()) > MAX_LYRICS_BYTES:
-                    raise ValueError("Invalid lyrics response")
+            from backend.lyric_lookup import lrclib
+            found = lrclib(payload.title, payload.artist, duration, payload.album)
+            text = found['text']
+        except HTTPException as exc:
+            if exc.status_code == 503:
+                from backend import lyric_lookup
+                next_request_at = lyric_lookup._next_remote_at
+            raise
         except (requests.RequestException, ValueError) as exc:
             raise HTTPException(502, "在线歌词暂时不可用，可导入本地 LRC。") from exc
         # Preserve an LRC imported while the remote request was in flight.
@@ -195,3 +182,33 @@ def read_cached_unlocked(filename: str) -> dict | None:
 def save_cached_unlocked(filename: str, text: str, source: str, signature: str) -> dict:
     stored = library.store_lyrics(filename, {"text": text, "source": source, "signature": signature, "checked_at": time.time()})
     return response_data(stored["text"], stored["source"])
+
+
+class OnlineLyricsRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    webpage_url: str = Field(min_length=1, max_length=2048)
+
+
+def track_lyrics_response(track: dict, allow_network: bool = True, check=None):
+    from backend import lyric_lookup
+    try:
+        value = lyric_lookup.lookup(track, allow_network, check)
+    except (requests.RequestException, ValueError) as exc:
+        raise HTTPException(502, '在线歌词暂时不可用，请稍后重试。') from exc
+    result = response_data(value['text'], value['source'])
+    classified = lyric_lookup.classify_lines(value['text'])
+    if not value['text']:
+        result['message'] = '平台标记为纯音乐' if value.get('instrumental') else '未找到匹配歌词；人声类型未知'
+    elif not classified['body'] and classified['credits']:
+        result['message'] = '仅有制作信息，不能据此判断有人声'
+    return result | {'classification': {key: len(lines) for key, lines in classified.items()},
+                     'instrumental': value.get('instrumental'), 'checked_at': value.get('checked_at')}
+
+
+@router.post('/online')
+def online_lyrics(payload: OnlineLyricsRequest):
+    from backend import music
+    track = music.get_track(payload.token, payload.webpage_url)
+    config = accounts.settings()
+    allowed = bool(config['music_agent_network_enabled'] and track.provider in config['music_agent_sources'])
+    return track_lyrics_response(track.model_dump(), allowed)

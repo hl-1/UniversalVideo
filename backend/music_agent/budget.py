@@ -11,6 +11,10 @@ from backend.music_agent import store
 class BudgetExceeded(RuntimeError):
     agent_policy_error = True
 
+    def __init__(self, message, resource=None):
+        super().__init__(message)
+        self.resource = resource
+
 
 def charge(run_id, **costs):
     with library.database() as cursor:
@@ -24,7 +28,7 @@ def charge(run_id, **costs):
             if cost < 0:
                 raise ValueError("Budget cannot be refunded")
             if used.get(key, 0)+cost > limits.get(key, 0):
-                raise BudgetExceeded(f"已达到{key}预算上限")
+                raise BudgetExceeded(f"已达到{key}预算上限", key)
         for key, cost in costs.items():
             used[key] = used.get(key, 0)+cost
         store.update(cursor, row, context=context | {"budget": used})

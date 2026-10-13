@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { createMusicBatch } from './musicBatch'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account } from './auth'
 import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileArchive, Heart, LoaderCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Search, Square, X } from 'lucide-vue-next'
@@ -33,7 +34,7 @@ const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean; q
 const emit = defineEmits<{ 'track-menu': [track: MusicTrack, event: MouseEvent] }>()
 const input = ref('')
 const source = ref('video')
-const audioFormat = ref('m4a')
+const audioFormat = ref<'m4a' | 'mp3'>('m4a')
 const busy = ref(false)
 const downloading = ref(false)
 const saving = ref(false)
@@ -205,10 +206,10 @@ async function startBatch() {
   stopBatchPolling()
   const revision = ++batchGeneration
   try {
-    const response = await fetch('/api/music/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tracks: checkedTracks.value.map(track => ({ token: track.token, webpage_url: track.webpage_url })), audio_format: audioFormat.value }) })
+    const created = await createMusicBatch(checkedTracks.value, audioFormat.value)
+    const response = await fetch(`/api/music/batches/${created.batch_id}`)
     if (!response.ok) throw new Error(await apiError(response))
-    const data: Batch = await response.json()
+    const data = await response.json()
     if (disposed) return
     batch.value = data
     rememberBatch(data.batch_id)

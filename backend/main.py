@@ -123,6 +123,8 @@ class BatchTrackRequest(BaseModel):
 
 
 class MusicBatchRequest(BaseModel):
+    playlist_id: str | None = Field(default=None, min_length=1, max_length=24)
+    playlist_name: str | None = Field(default=None, min_length=1, max_length=80)
     tracks: list[BatchTrackRequest] = Field(min_length=1, max_length=100)
     audio_format: Literal["m4a", "mp3"] = "m4a"
 
@@ -3153,6 +3155,7 @@ def _music_batch_response(batch: dict[str, Any]) -> dict[str, Any]:
         if entry["cancelled"]:
             result.update(status="cancelled", progress=0, message="已取消")
         track = entry["track"]
+        result["playlist_pending"] = entry.get("playlist_pending", False)
         result.update(title=track.title, artist=track.artist, provider=track.provider, identifier=track.identifier, webpage_url=track.webpage_url)
         items.append(result)
     counts = {status: sum(item["status"] == status for item in items)
@@ -3160,6 +3163,7 @@ def _music_batch_response(batch: dict[str, Any]) -> dict[str, Any]:
     progress = sum(100 if item["status"] in counts else item["progress"] for item in items) / len(items)
     terminal = batch["status"] in {"finished", "failed", "cancelled"}
     return {"batch_id": batch["batch_id"], "status": batch["status"], "audio_format": batch["audio_format"],
+            "playlist_id": batch.get("playlist_id"),
             "progress": round(progress, 2), "total": len(items), **counts, "items": items,
             "download_url": f"/api/music/batches/{batch['batch_id']}/archive" if terminal and counts["finished"] else None}
 
@@ -3177,9 +3181,9 @@ def _get_music_batch(batch_id: str) -> dict[str, Any]:
             task.user_id, task.music_track = stored["user_id"], track
             for field in ("status", "progress", "message", "filename", "error"):
                 setattr(task, field, item.get(field))
-            entries.append({"track": track, "task": task, "cancelled": item["status"] == "cancelled"})
+            entries.append({"track": track, "task": task, "cancelled": item["status"] == "cancelled", "playlist_pending": item.get("playlist_pending", False)})
         batch = {"batch_id": batch_id, "user_id": stored["user_id"], "audio_format": data["audio_format"],
-                 "status": data["status"], "stop": threading.Event(), "items": entries}
+                 "status": data["status"], "playlist_id": data.get("playlist_id"), "stop": threading.Event(), "items": entries}
         music_batches[batch_id] = batch
     if not batch:
         raise HTTPException(404, "批量任务不存在或服务已重启。")
@@ -3214,7 +3218,17 @@ def _run_music_batch(batch: dict[str, Any]) -> None:
             _set_task(entry["task"], status="running", message="正在解析音轨")
         attempted = True
         try:
-            _run_audio_download(entry["task"])
+            if entry.get("playlist_pending") and entry["task"].filename and (DOWNLOAD_DIR / entry["task"].filename).is_file():
+                _set_task(entry["task"], status="finished", progress=100, error=None)
+            else:
+                _run_audio_download(entry["task"])
+            if entry["task"].status == "finished" and batch.get("playlist_id"):
+                try:
+                    library.add_to_playlist(batch["playlist_id"], library.TrackInput.model_validate(entry["track"].model_dump()))
+                    entry["playlist_pending"] = False
+                except Exception as exc:
+                    entry["playlist_pending"] = True
+                    _set_task(entry["task"], status="failed", message="文件已保存，但加入歌单失败，请重试", error=str(exc))
         except Exception as exc:
             _set_task(entry["task"], status="failed", message="音轨下载失败", error=str(exc))
     with music_batches_lock:
@@ -3235,8 +3249,9 @@ def create_music_batch(payload: MusicBatchRequest) -> dict[str, Any]:
     with music_batches_lock:
         if any(batch["status"] in {"pending", "running", "cancelling"} and batch.get("user_id") == (accounts.owner_id() if accounts.principal.get() else 0) for batch in music_batches.values()):
             raise HTTPException(409, "已有批量任务正在处理，请等待完成或停止后再添加。")
+        playlist_id = library.download_playlist(payload.playlist_id, payload.playlist_name)
         batch_id = uuid.uuid4().hex[:12]
-        batch = {"batch_id": batch_id, "status": "pending", "audio_format": payload.audio_format,
+        batch = {"batch_id": batch_id, "status": "pending", "audio_format": payload.audio_format, "playlist_id": playlist_id,
                  "user_id": accounts.owner_id() if accounts.principal.get() else 0,
                  "stop": threading.Event(), "items": [_new_batch_entry(track, payload.audio_format) for track in tracks]}
         music_batches[batch_id] = batch
@@ -3286,7 +3301,10 @@ def retry_music_batch(batch_id: str) -> dict[str, Any]:
         owner_marker = accounts.data_owner.set(batch.get("user_id") or None)
         try:
             for entry in failed:
-                entry.update(_new_batch_entry(entry["track"], batch["audio_format"]))
+                if entry.get("playlist_pending"):
+                    _set_task(entry["task"], status="pending", error=None)
+                else:
+                    entry.update(_new_batch_entry(entry["track"], batch["audio_format"]))
             batch["stop"].clear()
             batch["status"] = "pending"
             response = _music_batch_response(batch)

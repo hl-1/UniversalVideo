@@ -71,7 +71,7 @@
 | 属性名 | 备注 |
 |---|---|
 | `vocals`：人声偏好 | 默认**允许人声**；可选择纯音乐 |
-| `languages`：语言 | 默认**中文**；可选择其他语言或不限 |
+| `languages`：语言 | 默认**不限**，用空列表 `[]` 表示；可显式选择中文、英文、日文、韩文等语言 |
 | `exclusions`：排除条件 | 默认**无排除条件**；可选填歌曲、歌手或主题 |
 | `target_count`：歌曲数量 | 默认 **20 首**；可调整 |
 | `target_duration_minutes`：目标时长 | 默认 **60 分钟**；可调整 |
@@ -88,7 +88,7 @@
 | 情绪推断 | “心情低落”默认推荐舒缓、陪伴方向；明确要求伤感时按伤感方向推荐 |
 | 推荐方向 | 用户明确提出的期望效果优先于当前情绪 |
 | 人声含义 | “允许人声”同时允许有人声歌曲和纯音乐 |
-| 语言适用范围 | 中文要求用于有人声歌曲；纯音乐不因没有语言被排除 |
+| 语言适用范围 | 仅在显式指定语言时筛选有人声歌曲；默认不限，不因外语或语言未知被排除；纯音乐不因没有语言被排除 |
 | 数量与时长 | 默认以 **20 首为主要目标、60 分钟为参考目标**，展示实际时长 |
 | 时长优先 | 用户明确说“凑够一小时”时，自动将时长作为主要目标 |
 | 追问条件 | 仅在条件矛盾或无法形成可执行需求时追问；普通输入直接生成 |
@@ -116,7 +116,7 @@ flowchart TD
 
 | 用户输入 | 系统执行 |
 |---|---|
-| “工作时听” | 推荐适合专注的歌曲；采用中文、允许人声、20 首等默认设置 |
+| “工作时听” | 推荐适合专注的歌曲；采用语言不限、允许人声、20 首等默认设置 |
 | “睡觉，纯音乐” | 选择低刺激纯音乐；不应用人声歌曲的语言限制 |
 | “打游戏，英文歌，30 首” | 覆盖语言和数量默认值，优先个人库，不足时联网补充 |
 | “只用我的歌单，不要联网” | 限定个人库并关闭新增网络请求；不足时展示缺口 |
@@ -302,12 +302,12 @@ flowchart LR
 | 属性名 | 备注 |
 |---|---|
 | 决策次数 | 最多 12 次模型决策 |
-| 联网搜索 | 最多 3 轮；请求重试也计入调用预算 |
+| 联网搜索 | 最多 5 轮；请求重试也计入调用预算 |
 | 候选数量 | 最多 100 首进入深入分析和校验 |
 | 输出数量 | 默认 20 首，最多 50 首 |
 | 工具批量 | 每批最多 20 首 |
 | 执行时长 | 累计运行最多 600 秒 |
-| 模型用量 | 总计最多 80,000 tokens，包含歌词分类；调用前预留输入输出预算 |
+| 模型用量 | 总计最多 200,000 tokens，包含歌词分类；调用前预留输入输出预算 |
 | 并发 | 默认每用户最多 1 个执行任务；全局上限可配置 |
 | 快照大小 | 单任务持久化 JSON 总计不超过 512 KiB，步骤最多 200 条；结束时移除临时候选，结果仅保留已验证曲目 |
 | 其他调用上限 | 每任务最多 60 次工具调用、160 次平台网络请求、100 次语义分析；模型请求单独按决策和 tokens 预算计费 |
@@ -470,7 +470,7 @@ flowchart LR
 
 | 验收场景 | 预期结果 |
 |---|---|
-| 仅输入一句听歌需求 | 无需展开偏好即可生成；默认允许人声、中文、无排除条件、20 首、参考 60 分钟、个人库优先、允许新增网络请求 |
+| 仅输入一句听歌需求 | 无需展开偏好即可生成；默认允许人声、语言不限、无排除条件、20 首、参考 60 分钟、个人库优先、允许新增网络请求 |
 | 自然语言指定偏好 | 正确覆盖默认值；纯音乐不受人声语言要求影响 |
 | 同时存在数量和时长 | 默认数量优先；明确要求凑够时长时以时长为主，展示实际结果 |
 | 个人库合格曲目足够 | 不触发新歌曲搜索 |
@@ -525,6 +525,10 @@ flowchart LR
 
 本次 MySQL 表结构以第 7 节为准：新增 `music_recommendation_runs`、`music_track_features`，仅为 `music_playlist_tracks` 增加 `position` 和 `playlist_position`；其他表结构不变。未新增分类表，因为分类映射保存在项目 Skill 的版本化 JSON 中。Redis 无结构或 TTL 变更，理由及已有会话 key 的一致性规则见第 7.5 节。
 
+语言默认值调整为不限：前端初始选项、后端 `Preferences`/`ParsedNeed` 默认值及 Skill 提示词一致使用 `languages: []`；用户在需求中指定语言或显式修改偏好时仍应用该条件。空列表已由现有 JSON 字段和匹配逻辑支持，本次调整无需新增或修改 MySQL 表、字段、索引及关系，也无需修改 Redis key、类型、值结构、TTL、读写或失效规则。历史任务保留原语言条件；Skill 内容与 Schema 的版本哈希会变化，旧版本未完成任务需重新生成。无需数据迁移；回滚时恢复前后端默认值和 Skill 提示词即可，已有空列表仍兼容，无需数据回滚。
+
+Token 预算的默认值和可配置上限调整为 `200000`，允许范围为 `2000..200000`。当前环境只更新现有 `system_settings` 表中 `id=1` 的 `config.music_agent_tokens`，其他配置项保持原值。该表完整结构为 `id INT NOT NULL PRIMARY KEY`、`config MEDIUMTEXT NOT NULL`，除主键外无其他索引、无外键关系；本次无需表结构迁移。新任务将创建时的配置写入 `context.limits.tokens`，历史任务预算快照保持原值。Redis 无 key、结构、TTL、读写或失效规则变更，因为预算配置及任务预算均由 MySQL 管理。回滚时先恢复该配置项的调整前值，再恢复代码默认值及校验范围，无需更改历史任务数据。
+
 | JSON 字段 | 实际结构 |
 |---|---|
 | 任务 `request` | `{need, preferences, parsed?}`；仅显式修改的偏好覆盖自然语言解析；解析后包含场景、情绪、效果、语言、人声、排除主题、主要目标和网络/来源限制 |
@@ -543,10 +547,10 @@ flowchart LR
 | `music_agent_network_enabled` | `true`；全局关闭后禁止新增平台和模型网络请求 |
 | `music_agent_sources` | `[netease, qq, kugou]`；可选来源；歌单能力由适配器分别声明 |
 | `music_agent_decisions` | `12`；范围 `2..12`，包含联网需求解析 |
-| `music_agent_search_rounds` | `3`；范围 `0..3`，歌单/单曲搜索共享预算 |
+| `music_agent_search_rounds` | `5`；范围 `0..5`，歌单/单曲搜索共享预算 |
 | `music_agent_candidates` | `100`；范围 `1..100` |
 | `music_agent_seconds` | `600`；范围 `30..600`，等待期间不累计 |
-| `music_agent_tokens` | `80000`；范围 `2000..80000`；记录保守预留量，实际用量另记 |
+| `music_agent_tokens` | `200000`；范围 `2000..200000`；记录保守预留量，实际用量另记 |
 | `music_agent_concurrency` | `2`；范围 `1..8`；每用户固定最多一个 pending/running 任务 |
 | `music_agent_api` | `auto`；可选择 `chat` 或 `responses`；自动模式对 `gpt-6`/`gpt-5.6` 使用 Responses，其他模型使用 Chat |
 
@@ -575,3 +579,132 @@ flowchart LR
 | 当前模型服务 | 项目已有 DeepSeek `deepseek-v4-flash` 返回 HTTP `402 Insufficient Balance`；工具调度已用可控模型响应测试，真实在线模型完整生成仍需充值或更换可用 AI 配置 |
 | 默认入口 | 遵循默认关闭 Agent 的设计；管理后台“系统配置”可启用；关闭新增网络请求后，可从有充分本地证据的个人歌曲生成，未知特征或无本地音频会显示缺口 |
 | 固定服务地址 | 前端 `5174`、后端/MCP `8001`；统一访问 `http://127.0.0.1:5174/` |
+
+## 13. 歌单下载、歌词复用与评分 v2（2026-10-13）
+
+本节是已确认预览的实施版本；与前文冲突时以本节为准。用户授权保存 Markdown、直接开发并在 8001/5174 重启验证。
+
+### 13.1 目标与界面
+
+搜索结果支持全选/取消、下载选中/全部、MP3/M4A、逐曲歌词与评分明细。未保存及部分完成的结果均可操作。下载由用户点击触发，复用 `/api/music/parse` 获取有效凭据，再提交 `/api/music/batches`；复用原进度、取消、重试失败项和 ZIP 面板。同账号已有活动下载时阻止重复创建。歌曲按平台与 ID 去重；本地文件直接使用已有文件，不重复在线下载。
+
+### 13.2 公共歌词服务
+
+本地歌词与在线结果共用查询、身份匹配、LRC 解析和缓存逻辑。顺序：当前用户已有/手动歌词 → 原平台歌词 → LRCLIB。平台按歌曲 ID；LRCLIB 校验歌名、歌手、时长，避免错版本。在线歌曲无需先下载。现有本地导入与滚动歌词保留，自动查询不覆盖手动内容。
+
+新增 `POST /api/music/recommendations/{run_id}/tracks/{key}/lyrics`，请求携带 `result_version`；验证用户、版本及结果内歌曲身份，返回现有 `lines/plain/source/message` 格式。公共歌词页面也支持在线歌曲身份查询。生成任务中的查询计入网络预算；手动查询独立执行，仍遵守全局网络开关与来源限制。手动刷新供重新生成使用，不自动修改历史评分快照。
+
+自动歌词缓存 7 天，未找到缓存 24 小时；来源错误不当作空歌词缓存。手动歌词不自动过期。正文、人工导入或分析器版本改变后重新分析；所有缓存按当前用户隔离。
+
+### 13.3 歌词与人声分类
+
+保留原始文档，将行标记为制作信息、歌词正文、纯音乐声明；作词/作曲/编曲/制作/版权/上传信息不进入语义分析。只有署名或没有歌词时为未知。明确纯音乐声明与正文冲突时为未知。模型依据正文、段落、重复结构判断主唱/说唱、背景采样或未知，不能只因短歌词就认定纯音乐，时间戳不等于人声时长。
+
+`vocal_role`：`lead` 明确演唱、`background` 器乐为主少量背景人声、`instrumental` 纯音乐、`unknown` 未知。标签注明“依据歌词判断”，不宣称通过音频验证了人声。背景采样的英语不算主要英文演唱。
+
+### 13.4 评分与场景
+
+总分 0–100（排序分，非概率）= 场景适配 0–60 + 明确演唱 20 + 语言 0–15 + 个人库 5。语言加分**仅用于游戏场景**：主要英语演唱 +15、韩语 +10、日文 +7、中文 +5，其他语言/多语言无法确定主语言/背景采样/纯音乐/未知 +0。明确演唱加分适用于允许人声的场景；显式纯音乐条件优先。演唱及语言加分证据置信度至少 0.7。其他场景所有语言加分均为 0。
+
+示例：游戏场景分同为48、在线明确演唱歌曲，英/韩/日/中分别83/78/75/73分；少量英语采样为48分。语言不限仍是默认值，其他语言不被排除。
+
+场景标准化“打游戏→游戏”，保留原始请求。歌词语义采用0、0.25、0.5、0.75、1锚点及证据；游戏/运动优先使用完整音频的节拍、能量与稳定性，工作/专注/放松使用能量和变化，睡眠继续严格整曲校验；无适用音频证据时使用可信场景语义。期望效果对适用音频分作调整。无证据为未知，不再用0.3兜底；证据不足或场景适配低于0.15不计合格。播放、语言、人声、主题排除仍是硬条件，语言加分不可抵消。歌手分散与相邻能量只处理同分歌曲的编排，不改显示分。
+
+### 13.5 搜索与结束
+
+搜索默认和配置上限从3改为5，歌单与单曲共享，每次调用包括空结果均计数。游戏搜索覆盖英文演唱、韩语节奏、日语摇滚、华语燃歌及器乐等方向，不设语言数量配额。Token上限200000。
+
+目标达到即完成；搜索5次耗尽只阻止新搜索，继续读取已发现歌单并分析/校验候选。模型无工具输出或决策次数耗尽时，后端继续处理可用候选；无可执行候选才结束。总时间、工具、网络、token等必要预算耗尽返回部分结果和明确原因；来源失败按来源/页记录，避免死循环。输出仍默认20首主目标、60分钟参考。
+
+### 13.6 数据结构、兼容与回滚
+
+无新增表/列/索引。`music_lyrics`复用原文存储，signature包含歌曲身份及平台声明；`music_track_features.features/evidence`扩展角色、分类证据；`music_recommendation_runs.result`扩展`match.scoring_version/score/breakdown`；`system_settings.config.music_agent_search_rounds`当前环境设5。资源、曲目、下载仍用既有写入流程，无结构变化。
+
+```json
+{"features":{"vocal_role":"lead","language":"英文"},"match":{"scoring_version":"scene-score-v2","score":83,"breakdown":{"scene":48,"vocals":20,"language":15,"personal":0}}}
+```
+
+涉及表完整结构如下（全部 InnoDB、utf8mb4，沿用当前表排序规则）：
+
+```sql
+CREATE TABLE music_lyrics (
+ track_id CHAR(64) NOT NULL PRIMARY KEY, text MEDIUMTEXT NOT NULL,
+ source VARCHAR(80) NOT NULL, format VARCHAR(8) NOT NULL, signature TEXT NOT NULL,
+ checked_at DOUBLE NOT NULL, manual BOOLEAN NOT NULL DEFAULT FALSE,
+ updated_at DOUBLE NOT NULL, user_id BIGINT NOT NULL DEFAULT 1,
+ KEY music_lyrics_owner(user_id),
+ FOREIGN KEY(track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
+);
+CREATE TABLE music_track_features (
+ user_id BIGINT NOT NULL, track_key CHAR(64) NOT NULL, track_snapshot JSON NOT NULL,
+ features JSON NOT NULL, evidence JSON NOT NULL, content_signature CHAR(64) NOT NULL,
+ analyzer_version VARCHAR(40) NOT NULL, checked_at DOUBLE NOT NULL, expires_at DOUBLE NOT NULL,
+ PRIMARY KEY(user_id,track_key), KEY feature_expiry(expires_at),
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE music_recommendation_runs (
+ run_id CHAR(32) NOT NULL PRIMARY KEY, user_id BIGINT NOT NULL, parent_run_id CHAR(32) DEFAULT NULL,
+ status VARCHAR(24) NOT NULL DEFAULT 'pending', request JSON NOT NULL, context JSON NOT NULL,
+ steps JSON NOT NULL, result JSON NOT NULL, policy_version VARCHAR(40) NOT NULL,
+ skill_version VARCHAR(64) NOT NULL, idempotency_key CHAR(64) NOT NULL,
+ revision INT UNSIGNED NOT NULL DEFAULT 0, result_version INT UNSIGNED NOT NULL DEFAULT 0,
+ saved_playlist_id CHAR(24) DEFAULT NULL, saved_at DOUBLE DEFAULT NULL, worker_id VARCHAR(64) DEFAULT NULL,
+ lease_until DOUBLE DEFAULT NULL, created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL,
+ deleted BOOLEAN NOT NULL DEFAULT FALSE,
+ UNIQUE KEY rec_request(user_id,idempotency_key), KEY rec_owner(user_id,deleted,created_at),
+ KEY rec_worker(deleted,status,lease_until), KEY parent_run_id(parent_run_id),
+ KEY saved_playlist_id(saved_playlist_id),
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+ FOREIGN KEY(parent_run_id) REFERENCES music_recommendation_runs(run_id) ON DELETE SET NULL,
+ FOREIGN KEY(saved_playlist_id) REFERENCES music_playlists(id) ON DELETE SET NULL
+);
+CREATE TABLE system_settings (id INT NOT NULL PRIMARY KEY, config MEDIUMTEXT NOT NULL);
+```
+
+无需DDL迁移；新字段向后兼容，旧结果显示旧版评分。升级分析器版本，拒绝复用旧错误分类。运行中任务遇到Skill版本变化按既有规则重新生成。保存当前搜索配置及数据快照；回滚恢复代码与配置旧值，新版缓存通过分析器版本隔离，必要时恢复任务快照。原歌词、文件、已保存歌单保留。
+
+Redis无新增或修改key，因此key模板、类型、值结构、TTL、读写、失效与一致性规则均不变；歌词/特征缓存位于MySQL，下载沿用现有任务持久化。MySQL更新歌词时事务写入并失效对应特征缓存；查询完成时再次检查手动内容，避免覆盖并发导入。
+
+### 13.7 验收
+
+- 署名不产生演唱/语言加分；少量英语采样不产生英文演唱加分；无歌词为未知。
+- 同场景分英/韩/日/中游戏歌依次递减，其他场景语言加分为0；明确纯音乐偏好优先。
+- “打游戏”正确归一，缺证据不再统一0.3；低适配歌曲不被偏好加分挽救。
+- 第5次搜索可执行，第6次不能执行；预算用尽后仍可读取已发现歌单。
+- 未保存在线结果可查歌词和批量下载；错误版本与跨用户访问被拒绝。
+- 批量部分成功可打包，失败可重试；复用现有播放器歌词和下载面板。
+- 验证旧数据、离线、网络开关、人工歌词保护以及缓存失效。
+
+### 13.8 实施记录与验证
+
+已实施语言顺序：仅游戏场景，英文 +15、韩文 +10、日文 +7、中文 +5；明确演唱 +20，背景采样无演唱及语言加分。
+
+场景分的具体计算：游戏/运动的节拍指标为 `clamp((BPM-60)/100,0,1)`，与能量均值作为基础；存在完整节奏稳定性证据时，基础占80%、稳定性占20%。工作/专注/放松/睡眠为 `0.65*(1-energy)+0.35*(1-min(variation,1))`。刺激类效果按原场景分70%、能量30%调整，平静类效果按原场景分70%、低能量30%调整。上述音频字段要求置信度≥0.7且整曲覆盖；否则回退到置信度≥0.7的歌词场景分，无证据不合格。最终乘60进入分项。该指标是工程排序规则，需根据实际听感继续校准。
+
+在线结果复用公共下载创建函数 `frontend/src/musicBatch.ts` 和原 `MusicWorkspace` 面板；本地歌曲显示已有文件入口。共享歌词查询位于 `backend/lyric_lookup.py`，旧本地接口复用其 LRCLIB 身份核对和传输逻辑，平台歌词与在线结果复用其缓存服务。制作信息与歌词原文仍可查看，制作信息不参与模型分类。
+
+验证：66项后端单元/独立临时MySQL集成测试通过；前端类型检查与生产构建通过；浏览器固定测试数据验证评分明细、在线歌词、选中下载、原ZIP面板与390px手机布局，无页面异常及横向溢出。后端8001与前端5174重启，认证状态、OpenAPI、首页均返回200。未重新运行真实平台的完整20首生成和批量下载，外部来源可用性与歌曲听感仍取决于运行时数据。
+
+当前环境配置只将 `system_settings.config.music_agent_search_rounds` 从3更新为5。回滚快照：`.run/scene-v2-verification/data-before-upgrade.json`（权限0600，含旧搜索配置以及任务/特征/歌词表数据，不含系统密钥）。恢复旧搜索值时仅更新该JSON路径；如需恢复任务数据，先停服务，按主键恢复对应快照，避免覆盖之后的新任务。无DDL及Redis变更。
+
+### 13.9 在线播放器歌词路由修复
+
+在线播放器打开歌词面板或切换歌曲时，先解析歌曲取得令牌，再请求 `POST /api/music/lyrics/online`。该固定路由必须排除在本地歌词文件名的资源匹配规则之外，否则会将 `online` 当作文件名并提前返回404“资源不存在”。仍执行登录认证、功能开关、歌曲令牌及链接一致性校验；本地歌词文件接口仍检查资源权限。
+
+歌词获取时机：场景歌单候选分析阶段可预先查询并缓存；打开歌词面板、切歌或点击“匹配歌词”时再次查询。在线查询优先使用当前用户缓存（人工歌词优先），再按来源查询网易云或QQ，最后回退到按标题、歌手和时长匹配的LRCLIB。有效歌词缓存7天，空结果或仅制作信息缓存24小时；匹配按钮不强制绕过有效缓存。本地歌曲先读本地歌词，再按需联网匹配。
+
+验证：8项歌词测试通过，新增经过真实认证中间件的路由回归测试（认证服务与歌词内容使用测试替身），覆盖未登录、有效令牌、失效令牌、链接不一致及本地文件权限检查。Royalty数据库已有网易云歌词，此次404发生在歌词查询之前。
+
+本次仅修复路由权限分类，无MySQL表、字段、索引、关系或Redis key变更；无需数据迁移。回滚仅恢复本次代码修改并重启后端，已有歌词缓存不受影响。
+
+### 13.10 下载时选择歌单（2026-10-14）
+
+场景结果的“下载选中”和“下载全部在线歌曲”先展开目标面板，每次默认“本地和下载”。支持选择已有歌单或“＋新建歌单”并输入自定义名称（去除首尾空白，1–80字符）。格式沿用MP3/M4A选择。只有点击“开始下载”才创建任务和新歌单；取消不产生写入。确认期间禁止重复提交，切换场景任务关闭面板。
+
+音频仍存入项目下载目录并进入“本地和下载”。选择歌单后逐首在成功下载时加入歌单，沿用歌曲身份及歌单成员唯一键去重；下载失败不加入。新建歌单即使全部下载失败也保留，可用于后续重试。加入歌单失败明确显示“文件已保存，但加入歌单失败”，保留本地文件，重试优先复用已有文件，只补加歌单；文件已丢失时重新下载。歌单被删除时不自动创建替代歌单，返回错误，已保存文件保留。
+
+批量接口增加可选的 `playlist_id` 与 `playlist_name`（互斥），省略时兼容原下载行为。先校验歌曲令牌和批量并发限制，再校验歌单权限或创建歌单；复用现有认证及后台任务用户上下文。任务响应及持久化内容增加 `playlist_id`，歌曲任务增加 `playlist_pending` 标记，用于服务重启后恢复目标与补加歌单。原进度、取消、重试、ZIP下载入口复用。
+
+MySQL无新增表或DDL：复用 `music_playlists` 保存新歌单、`music_playlist_tracks` 保存歌曲关系、`music_tracks` 保存歌曲身份、`music_downloads` 保存下载记录。完整表结构、主外键、索引及关系沿用现有定义，未修改；`resources.payload` 的现有批量任务JSON新增可选 `playlist_id` 与 `items[].playlist_pending`，不修改该列结构。旧任务缺省为无目标歌单且无待补加状态。无需数据库迁移；回滚代码前等待批次完成，回滚保留新建歌单、成员关系及本地文件，旧代码忽略新增JSON字段。Redis无新增或修改key，类型、值、TTL及一致性规则均沿用；目标与歌曲成员信息通过现有MySQL事务保存，前端复用音乐库刷新。
+
+验证：29项音乐库及批量下载测试通过（独立临时MySQL），覆盖目标校验、新建歌单、成员去重、下载失败和加入歌单失败后复用文件重试；前端类型检查与生产构建通过。浏览器使用模拟接口验证默认目标、取消不提交、选择已有歌单、新建歌单以及批量范围；真实外部音源下载未重新执行。
