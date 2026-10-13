@@ -32,6 +32,9 @@ def resources(kind: ResourceKind = "file", page: int = Query(default=1, ge=1), q
 
 @router.delete("/resources/{kind}/{key}")
 def remove(kind: ResourceKind, key: str):
+    if kind == "music_recommendation":
+        from backend.music_agent.api import remove_run
+        return remove_run(key)
     if kind == "video_parse":
         from backend.video_history import delete_record
         return delete_record(key)

@@ -68,6 +68,8 @@ search_cache: dict[tuple[str, str, int], tuple[float, list[Track]]] = {}
 
 
 def _json(url: str, *, params: dict | None = None, data: dict | None = None, payload: dict | None = None, referer: str | None = None):
+    from backend.network import charge_request
+    charge_request()
     headers = {**HEADERS, "Referer": referer or HEADERS["Referer"]}
     response = requests.post(url, data=data, json=payload, headers=headers, timeout=(5, 15)) if data is not None or payload is not None else requests.get(url, params=params, headers=headers, timeout=(5, 15))
     response.raise_for_status()
@@ -203,6 +205,8 @@ def parse_url(url: str) -> Track:
     except HTTPException:
         raise
     except Exception as exc:
+        from backend.network import raise_if_guarded
+        raise_if_guarded(exc)
         raise HTTPException(422, "平台未返回单曲信息，可能要求登录或当前接口不可用。") from exc
 
 
@@ -262,6 +266,8 @@ def _at38_url(track: Track) -> str:
               "filename": f"{track.artist} - {track.title}"}
     with requests.Session() as session:
         for attempt in range(2):
+            from backend.network import charge_request
+            charge_request()
             response = session.get(AT38_URL, params=params, headers={**HEADERS, "Referer": AT38_URL}, timeout=(5, 15))
             response.raise_for_status()
             try:
@@ -299,7 +305,9 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
             if formats:
                 best = max(formats, key=lambda item: item.get("abr") or item.get("tbr") or 0)
                 return best["url"], {**options, "http_headers": {**options["http_headers"], **best.get("http_headers", {})}}, "原平台"
-    except Exception:
+    except Exception as exc:
+        from backend.network import raise_if_guarded
+        raise_if_guarded(exc)
         pass
     # Public parsing services can disappear; their output still goes through audio and duration checks.
     try:
@@ -315,13 +323,17 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
             source = "LZM 音乐 · music.lzmhhh.com"
         if isinstance(media_url, str) and urlparse(media_url).scheme in ("http", "https"):
             return media_url, options, source
-    except Exception:
+    except Exception as exc:
+        from backend.network import raise_if_guarded
+        raise_if_guarded(exc)
         pass
     if track.provider in {"qq", "netease"}:
         try:
             media_url = _at38_url(track)
             return media_url, {**options, "http_headers": {**options["http_headers"], "Referer": AT38_URL}}, "51ape音乐 · at38.cn"
-        except Exception:
+        except Exception as exc:
+            from backend.network import raise_if_guarded
+            raise_if_guarded(exc)
             pass
     if track.provider == "kugou":
         raise RuntimeError("酷狗音乐未返回完整音源，当前歌曲可能需要付费或平台接口要求登录。")

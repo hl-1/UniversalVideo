@@ -158,6 +158,10 @@ DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video
                     "summary_enabled": True, "watermark_enabled": True,
                     "ai_base_url": "https://api.openai.com/v1", "ai_model": "gpt-4.1-mini", "ai_api_key": "",
                     "ai_vision_model": "", "ai_asr_model": ""}
+DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
+                        music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=12,
+                        music_agent_search_rounds=3, music_agent_candidates=100, music_agent_seconds=600,
+                        music_agent_tokens=80000, music_agent_concurrency=2, music_agent_api="auto")
 
 
 def local_ai_config() -> dict[str, str]:
@@ -534,7 +538,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             header = request.headers.get("authorization", "")
             if not header.startswith("Bearer "):
                 raise HTTPException(401, "请先登录。")
-            user = await run_in_threadpool(authenticate, header[7:])
+            if path.rstrip("/") == "/api/music/mcp":
+                from backend.music_agent.auth import authenticate_task
+                user = await run_in_threadpool(authenticate_task, header[7:])
+            else:
+                user = await run_in_threadpool(authenticate, header[7:])
             marker = principal.set(user)
             if user.must_change_password and path not in {"/api/auth/me", "/api/auth/password"}:
                 raise HTTPException(403, "请先修改临时密码。")

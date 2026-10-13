@@ -32,6 +32,7 @@ const replaceKey = ref(false)
 const stats = ref<any>(null)
 const kinds: Record<string, string> = { file: '文件', image: '图片', thumbnail: '封面', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量任务', music_import: '批量找歌', favorites: '收藏', history: '历史', playlists: '歌单', tracks: '歌曲', downloads: '音乐下载', video_parse: '视频解析', video_search: '视频搜索记录', video_view: '视频预览状态' }
 const pages = computed(() => Math.max(1, Math.ceil(total.value / 20)))
+kinds.music_recommendation = '场景歌单任务'
 let revision = 0
 function fail(failure: unknown) { error.value = failure instanceof Error ? failure.message : '操作失败。' }
 async function load() {
@@ -128,6 +129,17 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
           <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>结果</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td>{{ new Date(row.created_at * 1000).toLocaleString() }}</td><td>{{ users.find(user => user.id === row.actor_id)?.username || row.actor_id || '访客' }}</td><td>{{ row.action }}</td><td class="admin-name">{{ row.target }}</td><td>{{ row.result }}</td></tr><tr v-if="!rows.length"><td colspan="5">暂无日志</td></tr></tbody></table></div>
         </template>
         <form v-else-if="view === 'settings' && settings" class="admin-settings" @submit.prevent="saveSettings">
+          <h2>场景歌单 Agent</h2>
+          <label class="admin-toggle"><span>启用场景歌单</span><input v-model="settings.music_agent_enabled" type="checkbox" /></label>
+          <label class="admin-toggle"><span>允许网络检索与分析</span><input v-model="settings.music_agent_network_enabled" type="checkbox" /></label>
+          <label>允许来源<select v-model="settings.music_agent_sources" multiple aria-label="场景歌单允许来源"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option><option value="kugou">酷狗音乐</option></select></label>
+          <label>模型接口<select v-model="settings.music_agent_api"><option value="auto">自动</option><option value="chat">Chat Completions</option><option value="responses">Responses</option></select></label>
+          <label>模型决策次数<input v-model.number="settings.music_agent_decisions" type="number" min="2" max="12" required /></label>
+          <label>联网搜索轮数<input v-model.number="settings.music_agent_search_rounds" type="number" min="0" max="3" required /></label>
+          <label>候选歌曲上限<input v-model.number="settings.music_agent_candidates" type="number" min="1" max="100" required /></label>
+          <label>累计执行秒数<input v-model.number="settings.music_agent_seconds" type="number" min="30" max="600" required /></label>
+          <label>模型 Token 上限<input v-model.number="settings.music_agent_tokens" type="number" min="2000" max="80000" required /></label>
+          <label>全局并发数<input v-model.number="settings.music_agent_concurrency" type="number" min="1" max="8" required /></label>
           <h2>账号与业务</h2><label v-for="(label, key) in { registration_enabled: '公开注册', music_enabled: '音乐功能', video_enabled: '视频下载', summary_enabled: 'AI 总结与思维导图', watermark_enabled: '视频去水印' }" :key="key" class="admin-toggle"><span>{{ label }}</span><input v-model="settings[key]" type="checkbox" :aria-label="label" /></label>
           <h2>AI 服务</h2><label>服务地址<input v-model="settings.ai_base_url" type="url" required maxlength="2048" /></label><label>文字处理模型<input v-model="settings.ai_model" required maxlength="100" /></label><label>截图识别模型<input v-model="settings.ai_vision_model" maxlength="100" /></label><label>语音转写模型<input v-model="settings.ai_asr_model" maxlength="100" /></label><label class="admin-toggle"><span>替换服务密钥 <small>{{ settings.ai_api_key_masked || '未配置' }}</small></span><input v-model="replaceKey" type="checkbox" /></label><label v-if="replaceKey">新密钥<input v-model="serviceKey" type="password" autocomplete="off" maxlength="4096" /></label><button class="account-primary" :disabled="busy"><LoaderCircle v-if="busy" class="spin" :size="17" /><Save v-else :size="17" />保存配置</button>
         </form>

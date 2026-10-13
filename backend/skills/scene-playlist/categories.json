@@ -1,0 +1,19 @@
+{
+  "version": "scene-playlist-v1",
+  "scenes": {
+    "工作": ["工作", "专注", "学习", "lofi"],
+    "专注": ["专注", "学习", "阅读", "工作"],
+    "睡眠": ["睡眠", "助眠", "轻音乐", "纯音乐"],
+    "游戏": ["游戏", "节奏", "电子", "燃"],
+    "运动": ["运动", "跑步", "节奏", "励志"],
+    "放松": ["放松", "治愈", "轻音乐", "陪伴"],
+    "情歌": ["情歌", "爱情", "甜蜜", "思念"],
+    "励志": ["励志", "成长", "坚持", "奋斗"]
+  },
+  "evidence": {
+    "metadata": "Identity only; playlist labels are not individual track features.",
+    "lyrics": "Provider ID or exact title/artist/duration match; retain source and text coverage.",
+    "audio": "librosa rhythm/RMS on bounded full audio; never infer no vocals from spectrum.",
+    "unknown": "Unknown hard conditions fail qualification. Do not relax without user consent."
+  }
+}

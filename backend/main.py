@@ -296,7 +296,9 @@ class MindMapTask:
         )
 
 
-app = FastAPI(title="VideoDream API", version="1.0.0")
+from backend.music_agent import api as music_agent_api, mcp as music_agent_mcp, runtime as music_agent_runtime
+
+app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan)
 
 
 @app.exception_handler(RequestValidationError)
@@ -314,6 +316,8 @@ async def validation_error_response(request, exc):
 
 app.include_router(watermark_router)
 app.include_router(music.router)
+app.include_router(music_agent_api.router)
+app.router.routes.extend(music_agent_mcp.http_app.routes)
 app.include_router(music_imports.router)
 app.include_router(music_lyrics_router)
 app.include_router(music_library_media_router)
@@ -3537,6 +3541,7 @@ def cancel_user_tasks(uid: int, key: str | None = None):
 
 accounts.cancel_callbacks.append(cancel_user_tasks)
 accounts.cancel_callbacks.append(browser_sessions.cancel_user)
+accounts.cancel_callbacks.append(music_agent_runtime.cancel_user)
 
 
 @app.on_event("shutdown")

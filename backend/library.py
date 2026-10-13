@@ -231,6 +231,8 @@ def database():
                     accounts.migrate(cursor)
                     from backend import video_store
                     video_store.migrate(cursor)
+                    from backend.music_agent import store as agent_store
+                    agent_store.migrate(cursor)
                 connection.commit()
                 schema_ready = True
         with connection.cursor() as cursor:
@@ -342,9 +344,10 @@ def merge_tracks(cursor, first: str, second: str) -> str:
         SELECT %s,src.played_at,src.play_count,src.preview,src.user_id FROM music_history AS src WHERE src.track_id=%s
         ON DUPLICATE KEY UPDATE preview=IF(VALUES(played_at)>music_history.played_at,VALUES(preview),music_history.preview),
         played_at=GREATEST(music_history.played_at,VALUES(played_at)),play_count=music_history.play_count+VALUES(play_count)""", (key, previous))
-    cursor.execute("""INSERT INTO music_playlist_tracks (playlist_id,track_id,added_at)
-        SELECT src.playlist_id,%s,src.added_at FROM music_playlist_tracks AS src WHERE src.track_id=%s
-        ON DUPLICATE KEY UPDATE added_at=LEAST(music_playlist_tracks.added_at,VALUES(added_at))""", (key, previous))
+    cursor.execute("""INSERT INTO music_playlist_tracks (playlist_id,track_id,added_at,position)
+        SELECT src.playlist_id,%s,src.added_at,src.position FROM music_playlist_tracks AS src WHERE src.track_id=%s
+        ON DUPLICATE KEY UPDATE added_at=LEAST(music_playlist_tracks.added_at,VALUES(added_at)),
+        position=COALESCE(LEAST(music_playlist_tracks.position,VALUES(position)),music_playlist_tracks.position,VALUES(position))""", (key, previous))
     cursor.execute("SELECT * FROM music_lyrics WHERE track_id IN (%s,%s)", (key, previous))
     lyrics = cursor.fetchall()
     if lyrics:
@@ -352,6 +355,7 @@ def merge_tracks(cursor, first: str, second: str) -> str:
         write_lyrics(cursor, key, selected)
     cursor.execute("UPDATE music_downloads SET track_id=%s WHERE track_id=%s", (key, previous))
     cursor.execute("UPDATE music_track_aliases SET track_id=%s WHERE track_id=%s", (key, previous))
+    cursor.execute("DELETE FROM music_track_features WHERE track_key IN (%s,%s)", (key, previous))
     cursor.execute("INSERT INTO music_track_aliases VALUES (%s,%s) ON DUPLICATE KEY UPDATE track_id=VALUES(track_id)", (previous, key))
     cursor.execute("DELETE FROM music_tracks WHERE id=%s", (previous,))
     return key
@@ -550,7 +554,7 @@ def tracks(view: Literal["all", "favorites", "history", "downloads", "trials", "
             query = TRACK_SELECT + "WHERE t.user_id=%s AND d.id IS NOT NULL ORDER BY d.created_at DESC"
         else:
             require_playlist(cursor, playlist_id)
-            query = TRACK_SELECT + "JOIN music_playlist_tracks pt ON pt.track_id=t.id WHERE t.user_id=%s AND pt.playlist_id=%s ORDER BY pt.added_at"
+            query = TRACK_SELECT + "JOIN music_playlist_tracks pt ON pt.track_id=t.id WHERE t.user_id=%s AND pt.playlist_id=%s ORDER BY pt.position IS NULL,pt.position,pt.added_at,pt.track_id"
             parameters = (playlist_id,)
         cursor.execute(query + " LIMIT 1000", (accounts.owner_id(),) + parameters)
         result = [serialize_track(row) for row in cursor.fetchall()]
@@ -629,7 +633,10 @@ def add_to_playlist(key: str, payload: TrackInput) -> dict:
     with database() as cursor:
         require_playlist(cursor, key)
         track_key = save_track(cursor, payload)
-        cursor.execute("INSERT IGNORE INTO music_playlist_tracks VALUES (%s,%s,%s)", (key, track_key, time.time()))
+        cursor.execute("SELECT MAX(position) AS last_position FROM music_playlist_tracks WHERE playlist_id=%s", (key,))
+        last = cursor.fetchone()["last_position"]
+        cursor.execute("INSERT IGNORE INTO music_playlist_tracks (playlist_id,track_id,added_at,position) VALUES (%s,%s,%s,%s)",
+                       (key, track_key, time.time(), last + 1 if last is not None else None))
     return {"id": track_key}
 
 

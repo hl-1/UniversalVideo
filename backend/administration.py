@@ -31,6 +31,16 @@ class PasswordReset(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
+    music_agent_enabled: bool = False
+    music_agent_network_enabled: bool = True
+    music_agent_sources: list[Literal["netease", "qq", "kugou"]] = Field(default_factory=lambda: ["netease", "qq", "kugou"])
+    music_agent_decisions: int = Field(default=12, ge=2, le=12)
+    music_agent_search_rounds: int = Field(default=3, ge=0, le=3)
+    music_agent_candidates: int = Field(default=100, ge=1, le=100)
+    music_agent_seconds: int = Field(default=600, ge=30, le=600)
+    music_agent_tokens: int = Field(default=80000, ge=2000, le=80000)
+    music_agent_concurrency: int = Field(default=2, ge=1, le=8)
+    music_agent_api: Literal["auto", "chat", "responses"] = "auto"
     registration_enabled: bool
     music_enabled: bool
     video_enabled: bool
@@ -136,7 +146,7 @@ def delete_user(uid: int):
         from backend import video_store
         for table in ("video_recent_links", *(item[0] for item in video_store.TABLES.values())):
             cursor.execute(f"DELETE FROM {table} WHERE user_id=%s", (uid,))
-        for table in ("music_playlists", "music_favorites", "music_history", "music_downloads", "music_lyrics", "music_tracks", "music_theme", "music_profile", "resources"):
+        for table in ("music_recommendation_runs", "music_track_features", "music_playlists", "music_favorites", "music_history", "music_downloads", "music_lyrics", "music_tracks", "music_theme", "music_profile", "resources"):
             cursor.execute(f"DELETE FROM {table} WHERE user_id=%s", (uid,))
         cursor.execute("DELETE FROM users WHERE id=%s", (uid,))
     for callback in accounts.cancel_callbacks:
@@ -150,8 +160,8 @@ def delete_user(uid: int):
 
 DATA_TABLES = {"favorites": ("music_favorites", "track_id"), "history": ("music_history", "track_id"),
                "playlists": ("music_playlists", "id"), "tracks": ("music_tracks", "id"), "downloads": ("music_downloads", "id")}
-ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "video_search", "video_parse", "video_view"]
-DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "video_search", "video_parse", "video_view"]
+ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
+DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
 
 
 @router.get("/data")
@@ -221,6 +231,9 @@ def ROOT_DOWNLOADS():
 @router.delete("/data/{kind}/{key}")
 def delete_data(kind: DataKind, key: str):
     accounts.admin()
+    if kind == "music_recommendation":
+        from backend.music_agent.api import delete_run
+        return delete_run(key, admin=True)
     if kind == "video_parse":
         from backend.video_history import delete_record
         return delete_record(key)
