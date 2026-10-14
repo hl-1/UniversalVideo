@@ -12,6 +12,7 @@ class Preferences(BaseModel):
     vocals: Literal["allowed", "instrumental"] = "allowed"
     languages: list[str] = Field(default_factory=list, max_length=8)
     exclusions: list[str] = Field(default_factory=list, max_length=20)
+    preferred_artists: list[str] = Field(default_factory=list, max_length=10)
     target_count: int = Field(default=20, ge=1, le=50)
     target_duration_minutes: int = Field(default=60, ge=1, le=300)
     source_mode: Literal["personal_first", "personal_only", "discover"] = "personal_first"
@@ -19,7 +20,7 @@ class Preferences(BaseModel):
     goal: Literal["count", "duration"] = "count"
     full_playback_required: bool = True
 
-    @field_validator("languages", "exclusions")
+    @field_validator("languages", "exclusions", "preferred_artists")
     @classmethod
     def clean_terms(cls, values):
         if any(not isinstance(v, str) or len(v) > 100 for v in values):
@@ -131,7 +132,10 @@ class ResultMatch(BaseModel):
     reasons: list[str] = Field(default_factory=list, max_length=20)
     score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     scoring_version: str = Field(default="legacy", max_length=40)
-    breakdown: dict[str, float] = Field(default_factory=dict, max_length=4)
+    breakdown: dict[str, float] = Field(default_factory=dict, max_length=5)
+    base_score: float | None = Field(default=None, ge=0, le=100)
+    base_weight: float = Field(default=1, ge=0, le=1)
+    matched_artists: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ResultTrack(TrackInput):

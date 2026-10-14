@@ -204,6 +204,22 @@ def analyze(run_id, track, charge, allow_network, need_audio=False, check=None):
     return {"features": features, "evidence": evidence, "checked_at": now, "cached": False}
 
 
+def artist_identity(value):
+    # Only established aliases; preserve punctuation and subgroup distinctions.
+    import unicodedata
+    name = " ".join(unicodedata.normalize("NFKC", str(value)).casefold().split())
+    return {"빅뱅": "bigbang", "엑소": "exo", "周杰倫": "周杰伦",
+            "jay chou": "周杰伦"}.get(name, name)
+
+
+def matched_artists(track, preferred):
+    credit = track.get("artist") or ""
+    identities = {artist_identity(credit)}
+    # Slash is the provider's collaborator separator. Do not split AC/DC or G.E.M.
+    identities.update(artist_identity(part) for part in re.split(r"\s+/\s+|\s*[、;；]\s*|\s+(?:feat\.?|ft\.?)\s+", credit, flags=re.I))
+    return list(dict.fromkeys(a for a in preferred if artist_identity(a) in identities))
+
+
 def match(track, parsed):
     parsed = parsed | {"scene": normalize_scene(parsed["scene"])}
     data = track.get("analysis") or {}
@@ -255,8 +271,17 @@ def match(track, parsed):
                           "中文": 5, "汉语": 5, "chinese": 5, "zh": 5}.get(str(f.get("language", "")).casefold(), 0)
     breakdown = {"scene": round((scene_score or 0)*60, 2), "vocals": 20 if lead else 0,
                  "language": language_bonus, "personal": 5 if track.get("source", {}).get("kind") == "personal" else 0}
-    return {"qualified": not reasons, "reasons": reasons, "score": round(sum(breakdown.values()), 2) if scene_score is not None else None,
-            "scoring_version": "scene-score-v2", "breakdown": breakdown}
+    base_score = round(sum(breakdown.values()), 2) if scene_score is not None else None
+    preferred = parsed.get("preferred_artists", [])
+    matches = matched_artists(track, preferred)
+    if preferred:
+        # Qualification above and scene_relevance below are independent of preference.
+        breakdown = {key: round(value * .8, 2) for key, value in breakdown.items()}
+        breakdown["artist"] = 20 if matches else 0
+    return {"qualified": not reasons, "reasons": reasons,
+            "score": (round(base_score * .8 + breakdown["artist"], 2) if preferred else base_score) if base_score is not None else None,
+            "scoring_version": "scene-score-v3" if preferred else "scene-score-v2", "breakdown": breakdown,
+            "base_score": base_score, "base_weight": .8 if preferred else 1, "matched_artists": matches}
 
 
 def scene_relevance(f, evidence, parsed):

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend import lyric_lookup
-from backend.music_agent import features, model, runtime
+from backend.music_agent import budget, features, model, runtime, service
 from backend.music_agent.models import ParsedNeed, ResultMatch
 
 
@@ -66,6 +66,145 @@ class SceneScoreTests(unittest.TestCase):
         self.assertEqual(ParsedNeed(scene='打游戏').scene, '游戏')
 
 
+class ArtistPreferenceTests(unittest.TestCase):
+    candidate = SceneScoreTests.candidate
+
+    def test_optional_artist_bonus_and_non_stacking(self):
+        track = self.candidate('韩文')
+        track['artist'] = 'EXO / BIGBANG'
+        base = features.match(track, ParsedNeed(scene='游戏').model_dump())
+        preferred = features.match(track, ParsedNeed(scene='游戏', preferred_artists=['EXO', 'BIGBANG']).model_dump())
+        self.assertEqual(base['score'], 78)
+        self.assertNotIn('artist', base['breakdown'])
+        self.assertEqual(preferred['score'], 82.4)
+        self.assertEqual(preferred['base_score'], 78)
+        self.assertEqual(preferred['breakdown']['artist'], 20)
+        self.assertEqual(preferred['matched_artists'], ['EXO', 'BIGBANG'])
+        ResultMatch.model_validate(preferred)
+        track['artist'] = 'Other'
+        self.assertEqual(features.match(track, ParsedNeed(scene='游戏', preferred_artists=['EXO']).model_dump())['score'], 62.4)
+
+    def test_credit_identity_not_title_substring_or_group_membership(self):
+        for credit in (' exo ', 'ＥＸＯ', '엑소', 'EXO / IU', 'IU feat. EXO'):
+            self.assertEqual(features.matched_artists({'artist': credit}, ['EXO']), ['EXO'])
+        for credit in ('EXO-M', 'EXO-CBX', 'D.O.', 'SomeEXO', 'Other'):
+            self.assertEqual(features.matched_artists({'artist': credit, 'title': 'EXO'}, ['EXO']), [])
+        self.assertEqual(features.matched_artists({'artist': 'Jay Chou'}, ['周杰伦']), ['周杰伦'])
+        self.assertEqual(features.matched_artists({'artist': 'AC/DC'}, ['AC']), [])
+
+    def test_artist_bonus_never_changes_any_scene_qualification(self):
+        for scene in features.SCENES:
+            for relevance in (None, .1, .149, .15, .8):
+                for failure in ('none', 'identity', 'playable', 'full', 'instrumental', 'language', 'exclusion', 'theme', 'weak_evidence'):
+                    track = self.candidate('韩文')
+                    track['artist'] = 'EXO'
+                    track['analysis']['features']['scene_scores'] = {} if relevance is None else {scene: relevance}
+                    parsed = ParsedNeed(scene=scene).model_dump()
+                    if failure in ('identity', 'playable', 'full'):
+                        track['validation'][failure] = False
+                    elif failure == 'instrumental':
+                        parsed['vocals'] = 'instrumental'
+                    elif failure == 'language':
+                        parsed['languages'] = ['中文']
+                    elif failure == 'exclusion':
+                        parsed['exclusions'] = ['EXO']
+                    elif failure == 'theme':
+                        parsed['excluded_themes'] = ['失恋']
+                    elif failure == 'weak_evidence':
+                        track['analysis']['evidence']['fields']['scene_scores']['confidence'] = .6
+                    before = features.match(track, parsed)
+                    after = features.match(track, parsed | {'preferred_artists': ['EXO']})
+                    with self.subTest(scene=scene, relevance=relevance, failure=failure):
+                        self.assertEqual(after['qualified'], before['qualified'])
+                        self.assertEqual(after['reasons'], before['reasons'])
+                        self.assertEqual(after['base_score'], before['score'])
+                        if before['score'] is None:
+                            self.assertIsNone(after['score'])
+
+    def test_sleep_full_audio_thresholds_unchanged(self):
+        for energy in (.3, .4, .41):
+            for variation in (.7, .8, .81):
+                for coverage in ('full', 'partial'):
+                    track = self.candidate()
+                    track['artist'] = 'EXO'
+                    track['analysis']['features'].update(energy=energy, variation=variation)
+                    for field in ('energy', 'variation'):
+                        track['analysis']['evidence']['fields'][field] = {'confidence': .9, 'coverage': coverage}
+                    parsed = ParsedNeed(scene='睡眠').model_dump()
+                    before, after = [features.match(track, p) for p in (parsed, parsed | {'preferred_artists': ['EXO']})]
+                    self.assertEqual(before['qualified'], after['qualified'])
+                    self.assertEqual(before['reasons'], after['reasons'])
+                    self.assertEqual(after['qualified'], coverage == 'full' and energy <= .4 and variation <= .8)
+
+    def row(self, artists=None):
+        return {'request': {'parsed': ParsedNeed(scene='游戏', source_mode='discover', target_count=1,
+                    preferred_artists=artists or ['EXO', 'BIGBANG']).model_dump()},
+                'context': {'candidates': [], 'limits': {'candidates': 100, 'sources': ['netease', 'qq'],
+                    'search_rounds': 5, 'network_requests': 300}, 'budget': {}}}
+
+    @patch.object(runtime.service, 'network_allowed', return_value=True)
+    def test_each_artist_searched_before_round_robin_evaluation(self, _):
+        row = self.row()
+        self.assertEqual(runtime.pending_tool(row, set()), ('search_online_tracks', {'provider': 'netease', 'query': 'EXO', 'page': 1}))
+        row['context']['artist_searches'] = [{'artist': 'EXO', 'source': 'netease', 'success': True}]
+        row['context']['candidates'] = [{'key': 'exo', 'title': 'Song', 'artist': 'EXO', 'source': {'kind': 'online_search'}}]
+        self.assertEqual(runtime.pending_tool(row, set())[1]['query'], 'BIGBANG')
+        row['context']['artist_searches'].append({'artist': 'BIGBANG', 'source': 'netease', 'success': True})
+        row['context']['candidates'].append({'key': 'bigbang', 'title': 'Song2', 'artist': 'BIGBANG', 'source': {'kind': 'online_search'}})
+        self.assertEqual(runtime.pending_tool(row, set()), ('get_track_features', {'keys': ['exo']}))
+        row['context']['candidates'][0]['analysis'] = {'features': {}}
+        self.assertEqual(runtime.pending_tool(row, set()), ('validate_tracks', {'keys': ['exo']}))
+        row['context']['candidates'][0]['validation'] = {'identity': False}
+        self.assertEqual(runtime.pending_tool(row, set()), ('get_track_features', {'keys': ['bigbang']}))
+
+    def test_count_cannot_stop_before_artist_evaluation(self):
+        row = self.row(['EXO'])
+        other = self.candidate()
+        other.update(key='other', duration=180)
+        row['context']['candidates'] = [other]
+        self.assertFalse(service.satisfied(row)[0])
+        row['context']['artist_searches'] = [{'artist': 'EXO', 'source': 'netease', 'success': True}]
+        self.assertTrue(service.satisfied(row)[0])
+        self.assertEqual(service.artist_coverage(row)[0]['status'], 'no_candidates')
+        exo = self.candidate()
+        exo.update(key='exo', artist='EXO')
+        exo.pop('validation')
+        row['context']['candidates'].append(exo)
+        self.assertFalse(service.satisfied(row)[0])
+        exo['validation'] = {'identity': False, 'reason': '身份不符'}
+        self.assertTrue(service.satisfied(row)[0])
+        self.assertEqual(service.artist_coverage(row)[0]['status'], 'no_qualified')
+        self.assertIn('身份不符', service.artist_coverage(row)[0]['reasons'])
+
+    @patch.object(runtime.service, 'network_allowed', return_value=True)
+    def test_budget_reserve_and_search_failure_report_incomplete(self, _):
+        row = self.row(['EXO'])
+        row['context']['artist_searches'] = [{'artist': 'EXO', 'source': 'netease', 'success': False}]
+        self.assertEqual(runtime.pending_tool(row, set())[1]['provider'], 'qq')
+        row['context']['budget']['search_rounds'] = 5
+        self.assertIsNone(runtime.pending_tool(row, set()))
+        self.assertEqual(service.artist_coverage(row)[0]['status'], 'incomplete')
+        row['context']['budget'] = {'network_requests': 225}
+        self.assertIsNone(runtime.pending_tool(row, set()))
+
+    @patch.object(runtime.service, 'network_allowed', return_value=False)
+    def test_offline_artist_search_stays_local(self, _):
+        row = self.row(['EXO'])
+        row['request']['parsed']['network_allowed'] = False
+        self.assertEqual(runtime.pending_tool(row, set())[0], 'search_my_music')
+        row['context']['artist_searches'] = [{'artist': 'EXO', 'source': 'personal', 'success': True}]
+        self.assertTrue(service.artists_complete(row))
+
+    def test_offline_explicit_artist_parsing(self):
+        parsed = model.offline_parse('打游戏的音乐,exo和bigbang合适的歌优先', {})
+        self.assertEqual(parsed['preferred_artists'], ['exo', 'bigbang'])
+        self.assertEqual(model.offline_parse('想听周杰伦的歌', {})['preferred_artists'], ['周杰伦'])
+        self.assertEqual(model.offline_parse('打游戏的音乐', {})['preferred_artists'], [])
+        self.assertEqual(model.offline_parse('不要EXO', {})['preferred_artists'], [])
+        self.assertEqual(model.offline_parse('英文优先', {})['preferred_artists'], [])
+        self.assertEqual(model.offline_parse('喜欢EXO，不要BIGBANG', {})['preferred_artists'], ['EXO'])
+
+
 class LyricClassificationTests(unittest.TestCase):
     def test_actual_credit_only_responses_have_no_lyric_body(self):
         for text in ('[00:00.00-1] 作曲 : T3CHN0/Oliver Stock',
@@ -107,10 +246,27 @@ class PendingWorkTests(unittest.TestCase):
     @patch.object(runtime.service, 'network_allowed', return_value=True)
     def test_analysis_and_validation_precede_new_playlists(self, _):
         row = self.row()
-        row['context']['candidates'] = [{'key': 'song'}]
+        row['context']['candidates'] = [{'key': 'song', 'title': 'Song', 'artist': 'Artist'}]
         self.assertEqual(runtime.pending_tool(row, set())[0], 'get_track_features')
         row['context']['candidates'][0]['analysis'] = {'features': {}}
         self.assertEqual(runtime.pending_tool(row, set())[0], 'validate_tracks')
+
+    def test_gap_batch_and_validation_reserve(self):
+        row = self.row()
+        row['request']['parsed']['target_count'] = 20
+        with patch.object(service, 'qualified', return_value=[]), patch.object(service, 'deduplicated') as unique:
+            for count, size in ((0, 5), (16, 2), (19, 1)):
+                unique.return_value = [{}] * count
+                self.assertEqual(service.batch_size(row), size)
+        row['context']['limits']['network_requests'] = 300
+        row['context']['budget']['network_requests'] = 224
+        self.assertFalse(budget.validation_only(row))
+        row['context']['budget']['network_requests'] = 225
+        self.assertTrue(budget.validation_only(row))
+        row['context']['candidates'] = [{'key': 'raw', 'title': 'Raw', 'artist': 'Artist'}, {'key': 'ready', 'title': 'Ready', 'artist': 'Artist', 'analysis': {'features': {}}}]
+        self.assertEqual(runtime.pending_tool(row, set()), ('validate_tracks', {'keys': ['ready']}))
+        row['context']['candidates'].pop()
+        self.assertIsNone(runtime.pending_tool(row, set()))
 
     @patch.object(runtime.service, 'network_allowed', return_value=False)
     def test_offline_does_not_read_online_playlists(self, _):

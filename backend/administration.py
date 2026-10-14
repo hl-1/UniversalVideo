@@ -35,6 +35,7 @@ class SettingsUpdate(BaseModel):
     music_agent_network_enabled: bool = True
     music_agent_sources: list[Literal["netease", "qq", "kugou"]] = Field(default_factory=lambda: ["netease", "qq", "kugou"])
     music_agent_decisions: int = Field(default=12, ge=2, le=12)
+    music_agent_network_requests: int = Field(default=300, ge=160, le=600)
     music_agent_search_rounds: int = Field(default=5, ge=0, le=5)
     music_agent_candidates: int = Field(default=100, ge=1, le=100)
     music_agent_seconds: int = Field(default=600, ge=30, le=600)

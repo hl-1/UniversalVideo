@@ -142,8 +142,68 @@ def run(run_id):
             heartbeat.join(timeout=2)
 
 
+def preferred_artist_tool(row, attempted):
+    """Bounded artist recall and round-robin evaluation, with unchanged qualification."""
+    parsed, ctx = row["request"]["parsed"], row["context"]
+    preferred = parsed.get("preferred_artists", [])
+    if not preferred:
+        return None
+    candidates = ctx.get("candidates", [])
+    searches = ctx.get("artist_searches", [])
+    reserve = budget.validation_only(row)
+    local = parsed["source_mode"] != "discover" or not service.network_allowed(row)
+    personal_ready = ctx.get("personal_searched") and not any(
+        t["source"]["kind"] == "personal" and (not t.get("analysis") or not t.get("validation")) for t in candidates)
+    coverage = ctx.get("coverage", {})
+    personal_ready = personal_ready and coverage.get("personal_checked_until", 0) >= coverage.get("personal_total", 0)
+    sources = ctx["limits"].get("sources", [])
+    def available(name, arguments):
+        return (name, arguments) if store.encode([name, arguments]) not in attempted else None
+    # Give every requested artist a search before evaluating any one artist's batch.
+    if not reserve and len(candidates) < ctx["limits"]["candidates"]:
+        for item in service.artist_coverage(row):
+            artist = item["artist"]
+            if item["complete"]:
+                continue
+            history = [s for s in searches if features.artist_identity(s["artist"]) == features.artist_identity(artist)]
+            if local and not any(s["source"] == "personal" for s in history):
+                action = available("search_my_music", {"query": artist, "offset": 0, "limit": 20})
+                if action:
+                    return action
+            online = parsed["source_mode"] != "personal_only" and service.network_allowed(row)
+            if not online or (parsed["source_mode"] == "personal_first" and not personal_ready):
+                continue
+            if any(s["source"] != "personal" and s["success"] for s in history):
+                continue
+            if ctx.get("budget", {}).get("search_rounds", 0) >= ctx["limits"].get("search_rounds", 5):
+                continue
+            for provider in sources:
+                if any(s["source"] == provider for s in history):
+                    continue
+                action = available("search_online_tracks", {"provider": provider, "query": artist, "page": 1})
+                if action:
+                    return action
+    # One candidate per artist per round; validation precedes further analysis.
+    progress = sorted(service.artist_coverage(row), key=lambda item: item["evaluated_count"])
+    for name, field in (("validate_tracks", "validation"), ("get_track_features", "analysis")):
+        if name == "get_track_features" and reserve:
+            continue
+        for item in progress:
+            tracks = [t for t in candidates if features.matched_artists(t, [item["artist"]])][:5]
+            for track in tracks:
+                if track.get(field) or (name == "validate_tracks" and not track.get("analysis")):
+                    continue
+                action = available(name, {"keys": [track["key"]]})
+                if action:
+                    return action
+    return None
+
+
 def pending_tool(row, attempted):
     """Drain discovered work without spending another model/search round."""
+    preferred = preferred_artist_tool(row, attempted)
+    if preferred:
+        return preferred
     ctx = row["context"]
     candidates = ctx.get("candidates", [])
     def available(name, arguments):
@@ -152,12 +212,18 @@ def pending_tool(row, attempted):
         call = available("search_my_music", {"offset": 0, "limit": 20})
         if call:
             return call
-    for name, field in (("get_track_features", "analysis"), ("validate_tracks", "validation")):
-        keys = [t["key"] for t in candidates if not t.get(field)]
-        for start in range(0, len(keys), 20):
-            call = available(name, {"keys": keys[start:start+20]})
+    size = service.batch_size(row)
+    for name, field in (("validate_tracks", "validation"), ("get_track_features", "analysis")):
+        if name == "get_track_features" and budget.validation_only(row):
+            continue
+        keys = [t["key"] for t in candidates if not t.get(field)
+                and (name != "validate_tracks" or t.get("analysis"))]
+        for start in range(0, len(keys), size):
+            call = available(name, {"keys": keys[start:start+size]})
             if call:
                 return call
+    if budget.validation_only(row):
+        return None
     if len(candidates) >= ctx["limits"]["candidates"]:
         return None
     coverage = ctx.get("coverage", {})
@@ -210,11 +276,15 @@ def execute_run(row, last):
         used, limits = row["context"].get("budget", {}), row["context"]["limits"]
         exhausted_search = used.get("search_rounds", 0) >= limits["search_rounds"]
         offline = not service.network_allowed(row)
-        if drain or offline or exhausted_search or used.get("decisions", 0) >= limits["decisions"]:
+        ready = pending_tool(row, attempted)
+        process_candidates = ready is not None
+        if process_candidates or budget.validation_only(row) or drain or offline or exhausted_search or used.get("decisions", 0) >= limits["decisions"]:
             action = pending_tool(row, attempted)
             if action is None:
                 reason = "已检查可用候选，目标尚有缺口"
-                if exhausted_search:
+                if budget.validation_only(row):
+                    reason = f"网络额度进入播放校验预留区（{used.get('network_requests',0)}/{limits.get('network_requests',160)}），可校验候选已处理"
+                elif exhausted_search:
                     reason = f"已达到搜索{limits['search_rounds']}次上限，并已检查可用候选"
                 with library.database() as cursor:
                     current = store.get(cursor,run_id,lock=True)
@@ -223,6 +293,8 @@ def execute_run(row, last):
             name, arguments = action
             attempted.add(store.encode([name, arguments]))
             data = client.call(name, arguments)
+            if (data.get("error") or {}).get("budget") == "network_reserve":
+                continue
             if (data.get("error") or {}).get("code") == "BUDGET_EXHAUSTED":
                 raise budget.BudgetExceeded(data["error"]["message"], data["error"].get("budget"))
             called = True
@@ -255,7 +327,7 @@ def execute_run(row, last):
             data = client.call(name,arguments)
             error = data.get("error") or {}
             if error.get("code") == "BUDGET_EXHAUSTED":
-                if error.get("budget") == "search_rounds":
+                if error.get("budget") in {"search_rounds", "network_reserve"}:
                     drain = True
                     break
                 raise budget.BudgetExceeded(error["message"], error.get("budget"))
@@ -278,7 +350,14 @@ def finish(run_id,last,worker=None):
         result = service.result(row)
         if row["context"].get("stop_reason"):
             result["notice"] = row["context"]["stop_reason"]+"；"+result["notice"]
-        success = result["gap"]["seconds"]==0 if result["gap"]["primary"]=="duration" else result["gap"]["count"]==0
+        if row['context'].get('stop_reason'):
+            used = row['context'].get('budget', {}).get('network_requests', 0)
+            limit = row['context']['limits'].get('network_requests', 160)
+            pending = sum(not t.get('validation') for t in row['context'].get('candidates', []))
+            result['notice'] += f"；网络请求 {used}/{limit}，另有 {pending} 首待校验"
+        success = (result["gap"]["seconds"]==0 if result["gap"]["primary"]=="duration" else result["gap"]["count"]==0) and service.artists_complete(row)
+        if not service.artists_complete(row):
+            result["notice"] = (result["notice"] + "；指定歌手尚未全部完成评估，请查看歌手检索范围")[:300]
         store.update(cursor,row,status="finished" if success else "partial",result=result,result_version=row["result_version"]+1,
                      worker_id=None,lease_until=None,context=row["context"] | {"candidates":[],
                          "message":"歌单已生成" if success else "已生成部分结果，目标尚有缺口"})

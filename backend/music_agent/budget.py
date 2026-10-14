@@ -23,12 +23,12 @@ def charge(run_id, **costs):
             raise HTTPException(409, "任务已停止")
         context = row["context"]
         used = dict(context.get("budget", {}))
-        limits = context["limits"] | {"network_requests": 160, "tools": 60, "analysis": 100}
+        limits = {"network_requests": 160, "tools": 60, "analysis": 100} | context["limits"]
         for key, cost in costs.items():
             if cost < 0:
                 raise ValueError("Budget cannot be refunded")
             if used.get(key, 0)+cost > limits.get(key, 0):
-                raise BudgetExceeded(f"已达到{key}预算上限", key)
+                raise BudgetExceeded("网络请求额度已用完" if key == "network_requests" else f"已达到{key}预算上限", key)
         for key, cost in costs.items():
             used[key] = used.get(key, 0)+cost
         store.update(cursor, row, context=context | {"budget": used})
@@ -44,3 +44,8 @@ def mark_step(run_id, tool, data=None, error=None, elapsed=0):
                 "count": len((data or {}).get("tracks", (data or {}).get("playlists", [])))}
         store.update(cursor, row, steps=(row["steps"]+[step])[-200:],
                      context=row["context"] | {"message": f"{tool} · {step['count']} 项"})
+
+
+def validation_only(row):
+    limit = row['context']['limits'].get('network_requests', 160)
+    return row['context'].get('budget', {}).get('network_requests', 0) >= limit * 3 // 4

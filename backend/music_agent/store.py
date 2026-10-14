@@ -157,7 +157,7 @@ def recover(cursor):
                context=row["context"] | {"message": "服务执行中断，请继续任务"})
 
 
-def create(request, key, skill_version, parent=None):
+def create(request, key, skill_version, parent=None, seed=None):
     uid = accounts.current().id
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     config = accounts.settings()
@@ -170,7 +170,7 @@ def create(request, key, skill_version, parent=None):
         if existing:
             if existing["deleted"]:
                 raise HTTPException(410, "此幂等请求已删除，请使用新的请求键")
-            if existing["request"]["need"] != request["need"] or existing["request"].get("preferences", {}) != request.get("preferences", {}):
+            if existing["parent_run_id"] != parent or bool(existing["context"].get("fill_missing")) != (seed is not None) or existing["request"]["need"] != request["need"] or existing["request"].get("preferences", {}) != request.get("preferences", {}):
                 raise HTTPException(409, "幂等键已用于其他需求")
             return existing, False
         cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE AND status IN ('pending','running')", (uid,))
@@ -183,6 +183,19 @@ def create(request, key, skill_version, parent=None):
                    steps=[], result={}, policy_version=POLICY_VERSION, skill_version=skill_version, idempotency_key=key_hash,
                    revision=0, result_version=0, saved_playlist_id=None, saved_at=None, worker_id=None,
                    lease_until=now+60, created_at=now, updated_at=now, deleted=False)
+        if seed is not None:
+            candidates = []
+            for track in seed:
+                track = dict(track)
+                track['user_id'] = uid
+                if now - (track.get('validation', {}).get('checked_at') or 0) > 3600:
+                    track.pop('validation', None)
+                analysis = track.get('analysis') or {}
+                ttl = 604800 if (analysis.get('features') or {}).get('vocal_role', 'unknown') != 'unknown' else 86400
+                if now - (analysis.get('checked_at') or 0) > ttl:
+                    track.pop('analysis', None)
+                candidates.append(track)
+            row['context'].update(candidates=candidates, fill_missing=True)
         columns = list(row)
         cursor.execute("INSERT INTO music_recommendation_runs (" + ",".join(f"`{k}`" for k in columns) + ") VALUES (" + ",".join(["%s"]*len(columns)) + ")",
                        tuple(encode(row[k]) if k in {"request","context","steps","result"} else row[k] for k in columns))

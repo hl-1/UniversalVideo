@@ -127,8 +127,12 @@ def search_personal(run_id, query="", offset=0, limit=20):
     candidates = add_candidates(run_id, rows, {"kind": "personal", "label": "个人歌单、收藏和下载"})
     with library.database() as cursor:
         row = store.get(cursor, run_id, uid, lock=True)
-        store.update(cursor, row, context=row["context"] | {"personal_searched": True,
-            "coverage": (row["context"].get("coverage") or {}) | {"personal_total": total, "personal_checked_until": offset+len(rows)}})
+        # Targeted artist pages must not masquerade as a scan of the whole library.
+        targeted_artist = any(features.artist_identity(query) == features.artist_identity(a)
+                              for a in row["request"]["parsed"].get("preferred_artists", []))
+        if not targeted_artist:
+            store.update(cursor, row, context=row["context"] | {"personal_searched": True,
+                "coverage": (row["context"].get("coverage") or {}) | {"personal_total": total, "personal_checked_until": offset+len(rows)}})
     return {"tracks": candidates, "offset": offset, "next_offset": offset+len(rows), "total": total,
             "has_more": offset+len(rows)<total and len(candidates)>0, "coverage": "已分页检索当前账号个人库"}
 
@@ -153,12 +157,48 @@ def deduplicated(tracks):
     return result
 
 
+def artist_coverage(row):
+    parsed, ctx = row["request"].get("parsed", {}), row["context"]
+    coverage = []
+    for artist in parsed.get("preferred_artists", []):
+        tracks = [t for t in ctx.get("candidates", []) if features.matched_artists(t, [artist])][:5]
+        evaluated = [t for t in tracks if t.get("analysis") and t.get("validation")]
+        qualified_count = sum(features.match(t, parsed)["qualified"] for t in evaluated)
+        searches = [s for s in ctx.get("artist_searches", [])
+                    if features.artist_identity(s["artist"]) == features.artist_identity(artist)]
+        online = any(s["source"] != "personal" and s["success"] for s in searches)
+        personal = any(s["source"] == "personal" and s["success"] for s in searches)
+        can_network = parsed.get("network_allowed", True) and ctx.get("limits", {}).get("network_enabled", True)
+        local_only = parsed.get("source_mode") == "personal_only" or not can_network
+        searched = online or (personal and (local_only or qualified_count > 0))
+        complete = searched and len(evaluated) == len(tracks)
+        status = ("qualified" if qualified_count else "no_qualified" if tracks else "no_candidates") if complete else "incomplete"
+        coverage.append({"artist": artist, "search_attempted": bool(searches), "evaluated_count": len(evaluated),
+                         "candidate_count": len(tracks), "qualified_count": qualified_count, "status": status,
+                         "complete": complete,
+                         "reasons": list(dict.fromkeys(reason for t in evaluated
+                             for reason in features.match(t, parsed)["reasons"]))[:6]})
+    return coverage
+
+
+def artists_complete(row):
+    return all(item["complete"] for item in artist_coverage(row))
+
+
+def batch_size(row):
+    parsed = row['request']['parsed']
+    if parsed.get('goal') != 'count':
+        return 5
+    gap = max(1, parsed.get('target_count', 20) - len(deduplicated(qualified(row))))
+    return 1 if gap == 1 else 2 if gap < 5 else 5
+
+
 def satisfied(row):
     tracks = deduplicated(qualified(row))
     parsed = row["request"].get("parsed", {})
     seconds = sum(t.get("validation", {}).get("duration") or t.get("duration") or 0 for t in tracks[:50])
     success = seconds>=parsed.get("target_duration_minutes",60)*60 if parsed.get("goal")=="duration" else len(tracks)>=parsed.get("target_count",20)
-    return success, tracks
+    return success and artists_complete(row), tracks
 
 
 def result(row):
@@ -184,6 +224,9 @@ def result(row):
         chosen = dict(chosen)
         chosen.pop("user_id", None)
         chosen["reason"] = f"{parsed['scene']}场景 · {chosen['source']['label']} · 匹配分 {chosen['match']['score']}"
+        if chosen["match"].get("matched_artists"):
+            chosen["reason"] += " · 歌手偏好 +20：" + "、".join(chosen["match"]["matched_artists"])
+        chosen["reason"] = chosen["reason"][:600]
         chosen["unknown_features"] = [k for k,v in chosen.get("analysis",{}).get("features",{}).items() if v is None]
         ordered.append(chosen)
     gap_count = max(0, parsed["target_count"]-len(ordered)) if parsed["goal"]=="count" else 0
@@ -192,7 +235,7 @@ def result(row):
                 for t in row["context"].get("candidates",[]) if not features.match(t,parsed)["qualified"]]
     return RunResult.model_validate({"title":parsed["title"], "tracks":ordered, "duration_seconds":round(duration),
             "gap": {"count":gap_count,"seconds":round(gap_seconds), "primary":parsed["goal"]},
-            "coverage":row["context"].get("coverage",{}), "rejected":rejected,
+            "coverage":row["context"].get("coverage",{}) | ({"artists": artist_coverage(row)} if parsed.get("preferred_artists") else {}), "rejected":rejected,
             "notice":"结果来自已检查候选范围；播放时重新解析音源", "budget":row["context"].get("budget",{})}).model_dump()
 
 
@@ -233,6 +276,8 @@ def execute(token, name, arguments):
                 error = HTTPException(403,"当前任务已禁止新增网络请求")
                 error.agent_policy_error = True
                 raise error
+            if name != "validate_tracks" and budget.validation_only(current):
+                raise budget.BudgetExceeded("剩余网络额度已预留给播放校验", "network_reserve")
             budget.charge(row["run_id"],network_requests=1)
         marker = network.request_guard.set(guard)
         try:
@@ -294,11 +339,13 @@ def execute_scoped(token, name, arguments):
                             "page":arguments.get("page",1), "count":len(data.get("tracks",data.get("playlists",[])))}])[-5:]
                     store.update(cursor,current,context=current["context"] | {"coverage":coverage})
             elif name in {"get_track_features","validate_tracks"}:
-                tracks = selected_candidates(row,arguments["keys"])
+                tracks = selected_candidates(row,arguments["keys"])[:batch_size(row)]
                 parsed = row["request"]["parsed"]
                 data = {"tracks":[]}
                 for track in tracks:
-                    check_active(run_id)
+                    current = check_active(run_id)
+                    if satisfied(current)[0]:
+                        break
                     if name == "get_track_features":
                         value = features.analyze(run_id,track,charge,network_allowed(row),
                             need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"},check=lambda:check_active(run_id))
@@ -318,6 +365,16 @@ def execute_scoped(token, name, arguments):
             error = {"code":str(exc.status_code),"message":str(exc.detail),"retryable":False}
         except Exception:
             error = {"code":"SOURCE_UNAVAILABLE","message":"来源未返回有效数据，请尝试其他来源或候选","retryable":True}
+        if name in {"search_my_music", "search_online_tracks"}:
+            query = arguments.get("query", "")
+            artists = row["request"]["parsed"].get("preferred_artists", [])
+            artist = next((a for a in artists if features.artist_identity(a) == features.artist_identity(query)), None)
+            if artist:
+                with library.database() as cursor:
+                    current = store.get(cursor, run_id, lock=True)
+                    searches = current["context"].get("artist_searches", [])
+                    record = {"artist": artist, "source": arguments.get("provider", "personal"), "success": error is None}
+                    store.update(cursor, current, context=current["context"] | {"artist_searches": (searches + [record])[-40:]})
         budget.mark_step(run_id,name,data,error,time.monotonic()-started)
         after = current_run(run_id)["context"].get("budget",{})
         return {"data":data,"source":name,"coverage":data.get("coverage"),"error":error,

@@ -98,6 +98,21 @@ def retry_run(run_id:str,payload:ContinueRun,idempotency_key:str=Header(min_leng
     return store.public(row)
 
 
+@router.post("/{run_id}/fill", status_code=201)
+def fill_run(run_id: str, payload: SaveRun, idempotency_key: str = Header(min_length=8, max_length=200)):
+    auth.require_enabled()
+    auth.check_session(accounts.current().id, accounts.current().session_id)
+    with library.database() as cursor:
+        old = store.get(cursor, run_id, accounts.current().id)
+    if old['status'] != 'partial' or old['result_version'] != payload.result_version:
+        raise HTTPException(409, '只能补齐当前版本的部分完成结果')
+    row, created = store.create(old['request'], idempotency_key, skill.load()['version'], run_id,
+                                seed=old['result'].get('tracks', []))
+    if created:
+        runtime.submit(row['run_id'])
+    return store.public(row)
+
+
 @router.post("/{run_id}/save")
 def save_run(run_id:str,payload:SaveRun):
     auth.require_enabled()

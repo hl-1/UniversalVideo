@@ -35,6 +35,16 @@ class SettingsTests(unittest.TestCase):
             with self.subTest(tokens=tokens), self.assertRaises(ValidationError):
                 administration.SettingsUpdate.model_validate(payload | {"music_agent_tokens":tokens})
 
+    def test_network_request_settings_range(self):
+        payload = dict(accounts.DEFAULT_SETTINGS)
+        payload.pop('music_agent_network_requests')
+        self.assertEqual(administration.SettingsUpdate.model_validate(payload).music_agent_network_requests, 300)
+        for count in (160, 300, 600):
+            self.assertEqual(administration.SettingsUpdate.model_validate(payload | {'music_agent_network_requests': count}).music_agent_network_requests, count)
+        for count in (159, 601):
+            with self.assertRaises(ValidationError):
+                administration.SettingsUpdate.model_validate(payload | {'music_agent_network_requests': count})
+
     def test_search_round_budget_default_and_maximum(self):
         payload = dict(accounts.DEFAULT_SETTINGS)
         payload.pop('music_agent_search_rounds')
@@ -43,6 +53,36 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(administration.SettingsUpdate.model_validate(payload | {'music_agent_search_rounds':count}).music_agent_search_rounds,count)
         with self.assertRaises(ValidationError):
             administration.SettingsUpdate.model_validate(payload | {'music_agent_search_rounds':6})
+
+
+class NeedParsingTests(unittest.TestCase):
+    def parse(self, replies):
+        request = {'need': '游戏，EXO和BIGBANG优先', 'preferences': {'target_count': 13, 'source_mode': 'discover'}}
+        with patch.object(model.library, 'database'), patch.object(model.store, 'get', return_value={'context': {'limits': {'network_enabled': True}}}), patch.object(model, 'complete', side_effect=replies) as call:
+            result = model.parse('test', request, {'text': 'rules', 'schema': {}})
+        return result, call
+
+    def test_empty_truncated_and_invalid_outputs_retry_once(self):
+        valid = {'content': json.dumps(model.offline_parse('游戏', {})), 'finish_reason': 'stop'}
+        for bad in ({'content': ''}, {'content': 'explanation'}, {'content': '{}', 'finish_reason': 'length'}, {'content': '[]'}, {'content': '{"target_count":999}'}):
+            with self.subTest(bad=bad):
+                result, call = self.parse([bad, valid])
+                self.assertEqual(call.call_count, 2)
+                self.assertEqual(call.call_args.kwargs['max_output'], 4000)
+                self.assertTrue(call.call_args.kwargs['json_output'])
+                self.assertEqual(result['target_count'], 13)
+                self.assertEqual(result['source_mode'], 'discover')
+
+    def test_second_failure_is_actionable_and_budget_is_not_swallowed(self):
+        with self.assertRaisesRegex(model.ModelOutputError, '模型需求解析失败.*已重试一次'):
+            self.parse([{'content': ''}, {'content': ''}])
+        with self.assertRaises(budget.BudgetExceeded):
+            self.parse([{'content': ''}, budget.BudgetExceeded('limit')])
+
+    def test_valid_fenced_json_does_not_retry(self):
+        result, call = self.parse([{'content': '```json\n'+json.dumps(model.offline_parse('游戏', {}))+'\n```'}])
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(result['scene'], '游戏')
 
 
 class MatchTests(unittest.TestCase):
@@ -162,6 +202,59 @@ class AgentIntegrationTests(unittest.TestCase):
             row = store.update(cursor,row,request=row["request"] | {"parsed":model.offline_parse("放松",preferences or {})})
         return row
 
+    def test_fill_keeps_parent_and_refreshes_expired_validation(self):
+        row = self.running()
+        seed = [{'key': 'old', 'analysis': {'checked_at': None}, 'validation': {'checked_at': time.time()-7200}},
+                {'key': 'fresh', 'validation': {'checked_at': time.time()}}]
+        with library.database() as cursor:
+            row = store.get(cursor, row['run_id'], lock=True)
+            store.update(cursor, row, status='partial', result={'tracks': seed}, result_version=1)
+        url = f"/api/music/recommendations/{row['run_id']}/fill"
+        headers = {'Idempotency-Key': secrets.token_hex(16)}
+        self.assertEqual(self.client.post(url, json={'result_version': 2}, headers=headers).status_code, 409)
+        result = self.client.post(url, json={'result_version': 1}, headers=headers)
+        self.assertEqual(result.status_code, 201, result.text)
+        again = self.client.post(url, json={'result_version': 1}, headers=headers)
+        self.assertEqual(again.json()['run_id'], result.json()['run_id'])
+        with library.database() as cursor:
+            child = store.get(cursor, result.json()['run_id'])
+            parent = store.get(cursor, row['run_id'])
+        self.assertEqual(child['parent_run_id'], row['run_id'])
+        self.assertEqual(parent['status'], 'partial')
+        self.assertNotIn('validation', child['context']['candidates'][0])
+        self.assertIn('validation', child['context']['candidates'][1])
+        self.assertEqual(child['context']['candidates'][0]['user_id'], self.user_id)
+        self.assertEqual(child['context']['budget'], {})
+        self.assertEqual(child['context']['limits']['network_requests'], 300)
+
+    def test_reserve_blocks_analysis_requests_but_allows_validation(self):
+        from backend import network
+        row = self.running()
+        token = auth.issue(row)
+        budget.charge(row['run_id'], network_requests=225)
+        def request(*args):
+            network.request_guard.get()()
+            return {'ok': True}
+        with patch.object(service, 'execute_scoped', side_effect=request):
+            with self.assertRaises(budget.BudgetExceeded) as raised:
+                service.execute(token, 'get_track_features', {'keys': []})
+            self.assertEqual(raised.exception.resource, 'network_reserve')
+            self.assertEqual(service.execute(token, 'validate_tracks', {'keys': []}), {'ok': True})
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['network_requests'], 226)
+
+    def test_network_limit_snapshot_and_legacy_default(self):
+        row = self.running()
+        budget.charge(row['run_id'], network_requests=300)
+        with self.assertRaises(budget.BudgetExceeded):
+            budget.charge(row['run_id'], network_requests=1)
+        with library.database() as cursor:
+            current = store.get(cursor, row['run_id'], lock=True)
+            limits = dict(current['context']['limits']); limits.pop('network_requests')
+            store.update(cursor, current, context=current['context'] | {'limits': limits, 'budget': {}})
+        budget.charge(row['run_id'], network_requests=160)
+        with self.assertRaises(budget.BudgetExceeded):
+            budget.charge(row['run_id'], network_requests=1)
+
     def test_idempotency_concurrency_isolation_and_no_session_leak(self):
         row,key,request = self.create()
         response = self.client.post("/api/music/recommendations",json=request,headers={"Idempotency-Key":key})
@@ -257,6 +350,25 @@ class AgentIntegrationTests(unittest.TestCase):
         with library.database() as cursor:
             cursor.execute("SELECT deleted FROM resources WHERE kind='music_recommendation' AND resource_key=%s",(row["run_id"],))
             self.assertTrue(cursor.fetchone()["deleted"])
+
+    def test_json_transport_reports_truncation_and_uses_json_mode(self):
+        row = self.running()
+        response = SimpleNamespace(choices=[SimpleNamespace(finish_reason='length', message=SimpleNamespace(tool_calls=[], content=None))], usage=SimpleNamespace(total_tokens=20))
+        config = {'api_key': 'test-key', 'base_url': 'https://api.siliconflow.cn/v1', 'model': 'test-model'}
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'OpenAI') as constructor:
+            constructor.return_value.chat.completions.create.return_value = response
+            result = model.complete(row['run_id'], [{'role':'user','content':'Return JSON'}], json_output=True)
+            self.assertEqual(result['content'], '')
+            self.assertEqual(result['finish_reason'], 'length')
+            self.assertEqual(constructor.return_value.chat.completions.create.call_args.kwargs['response_format'], {'type':'json_object'})
+        with library.database() as cursor:
+            current = store.get(cursor, row['run_id'], lock=True)
+            store.update(cursor, current, context=current['context'] | {'limits': current['context']['limits'] | {'api':'responses'}})
+        with patch.object(model.ai, 'load_config', return_value=config | {'base_url':'https://api.openai.com/v1'}), patch.object(model, 'OpenAI') as constructor:
+            constructor.return_value.responses.create.return_value = SimpleNamespace(output=[], output_text='', status='incomplete', usage=SimpleNamespace(total_tokens=20))
+            result = model.complete(row['run_id'], [{'role':'user','content':'Return JSON'}], json_output=True)
+            self.assertEqual(result['finish_reason'], 'incomplete')
+            self.assertEqual(constructor.return_value.responses.create.call_args.kwargs['text'], {'format':{'type':'json_object'}})
 
     def test_model_request_reserves_budget_and_uses_existing_connection(self):
         row = self.running()
@@ -478,6 +590,55 @@ class AgentIntegrationTests(unittest.TestCase):
             finished = store.get(cursor,row["run_id"])
         self.assertEqual(finished["status"],"finished")
         self.assertEqual([s["tool"] for s in finished["steps"]],["search_my_music","get_track_features","validate_tracks"])
+
+    def test_artist_runtime_searches_both_artists_and_preserves_scene_rejection(self):
+        prefs = {"target_count": 1, "source_mode": "discover", "preferred_artists": ["EXO", "BIGBANG"]}
+        public, _, _ = self.create(prefs)
+        class InProcessClient:
+            def __init__(self, token): self.token = token
+            def tools(self): return []
+            def call(self, name, args): return service.execute(self.token, name, args)
+        queries, evaluated = [], []
+        def search(provider, query, page):
+            queries.append(query)
+            return [library.TrackInput(provider=provider, identifier=str(index + (100 if query == 'EXO' else 200)),
+                title=query + str(index), artist=query, duration=180,
+                webpage_url='https://music.163.com/song?id=' + str(index + (100 if query == 'EXO' else 200))) for index in range(2)]
+        def analyze(run_id, track, *args, **kwargs):
+            evaluated.append(track['artist'])
+            score = .1 if track['title'] == 'EXO0' else .9 if track['artist'] == 'EXO' else .7
+            return {'features': {'vocal_role': 'lead', 'vocals': True, 'language': '韩文', 'scene_scores': {'游戏': score}},
+                    'evidence': {'fields': {k: {'confidence': .9} for k in ('vocal_role', 'vocals', 'language', 'scene_scores')}}}
+        parsed = model.offline_parse('游戏', prefs)
+        with patch.object(model, 'parse', return_value=parsed), patch.object(mcp, 'LocalClient', InProcessClient), \
+             patch.object(service.music, '_search', side_effect=search), patch.object(features, 'analyze', side_effect=analyze), \
+             patch.object(validation, 'validate', return_value={'checked_at': time.time(), 'identity': True,
+                 'playable': True, 'full': True, 'duration': 180}), \
+             patch.object(model, 'complete', side_effect=AssertionError('Artist work should be scheduled before generic discovery')):
+            runtime.run(public['run_id'])
+        with library.database() as cursor:
+            finished = store.get(cursor, public['run_id'])
+        self.assertEqual(finished['status'], 'finished', finished['context'].get('message'))
+        self.assertEqual(queries, ['EXO', 'BIGBANG'])
+        self.assertEqual(evaluated, ['EXO', 'BIGBANG', 'EXO', 'BIGBANG'])
+        self.assertEqual(finished['result']['tracks'][0]['title'], 'EXO1')
+        match = finished['result']['tracks'][0]['match']
+        self.assertEqual(match['score'], 87.2)
+        self.assertEqual(match['breakdown']['artist'], 20)
+        self.assertEqual(match['matched_artists'], ['EXO'])
+        self.assertEqual([a['evaluated_count'] for a in finished['result']['coverage']['artists']], [2, 2])
+        rejected = next(t for t in finished['result']['rejected'] if t['title'] == 'EXO0')
+        self.assertIn('曲目级证据与场景不匹配', rejected['reasons'])
+
+    def test_targeted_personal_search_does_not_claim_full_library_coverage(self):
+        row = self.running({'preferred_artists': ['EXO']})
+        response = service.execute(auth.issue(row), 'search_my_music', {'query': 'EXO'})
+        self.assertIsNone(response['error'])
+        with library.database() as cursor:
+            current = store.get(cursor, row['run_id'])
+        self.assertFalse(current['context'].get('personal_searched'))
+        self.assertNotIn('personal_total', current['context'].get('coverage', {}))
+        self.assertEqual(current['context']['artist_searches'], [{'artist': 'EXO', 'source': 'personal', 'success': True}])
 
     def test_fifth_search_allowed_sixth_blocked_but_discovered_playlist_drains(self):
         row = self.running({"target_count":1})

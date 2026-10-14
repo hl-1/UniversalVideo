@@ -135,6 +135,7 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
           <label>允许来源<select v-model="settings.music_agent_sources" multiple aria-label="场景歌单允许来源"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option><option value="kugou">酷狗音乐</option></select></label>
           <label>模型接口<select v-model="settings.music_agent_api"><option value="auto">自动</option><option value="chat">Chat Completions</option><option value="responses">Responses</option></select></label>
           <label>模型决策次数<input v-model.number="settings.music_agent_decisions" type="number" min="2" max="12" required /></label>
+          <label>每任务网络请求上限<input v-model.number="settings.music_agent_network_requests" type="number" min="160" max="600" required /></label>
           <label>联网搜索轮数<input v-model.number="settings.music_agent_search_rounds" type="number" min="0" max="5" required /></label>
           <label>候选歌曲上限<input v-model.number="settings.music_agent_candidates" type="number" min="1" max="100" required /></label>
           <label>累计执行秒数<input v-model.number="settings.music_agent_seconds" type="number" min="30" max="600" required /></label>

@@ -160,7 +160,7 @@ DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video
                     "ai_vision_model": "", "ai_asr_model": ""}
 DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
                         music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=12,
-                        music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
+                        music_agent_network_requests=300, music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
                         music_agent_tokens=200000, music_agent_concurrency=2, music_agent_api="auto")
 
 
@@ -236,7 +236,10 @@ def settings() -> dict:
     with database() as cursor:
         cursor.execute("SELECT config FROM system_settings WHERE id=1")
         row = cursor.fetchone()
-    config = DEFAULT_SETTINGS | (json.loads(row["config"]) if row else {})
+    saved = json.loads(row["config"]) if row else {}
+    config = DEFAULT_SETTINGS | saved
+    if row and "music_agent_network_requests" not in saved:
+        config["music_agent_network_requests"] = 160
     if not config["ai_api_key"]:
         local = local_ai_config()
         if local["api_key"]:
