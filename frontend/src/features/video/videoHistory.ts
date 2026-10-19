@@ -23,7 +23,10 @@ export type VideoTaskReference = {
   created_at: number
 }
 
-export type MapView = { scale: number; x: number; y: number; collapsed: string[] }
+import type { MindMapLayout, ResolvedMindMapLayout } from './mindMapLayout'
+
+export type MapView = { scale: number; x: number; y: number; collapsed: string[];
+  layout?: MindMapLayout; resolved_layout?: ResolvedMindMapLayout; framing_valid?: boolean }
 export type VideoView = {
   tab: 'summary' | 'transcript' | 'mind-map'
   summary_task_id: string | null

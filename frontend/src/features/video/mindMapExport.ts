@@ -117,7 +117,7 @@ export async function createMindMapImage(result: MindMapResult, theme: Theme, fo
   try {
     await document.fonts.ready
     // A separate map exports either the current overview or the complete tree.
-    map = new MindElixir({ el: host, direction: MindElixir.SIDE, editable: false,
+    map = new MindElixir({ el: host, direction: data.direction, editable: false,
       contextMenu: false, toolBar: false, keypress: false, allowUndo: false,
       compact: false, alignment: 'root', theme })
     map.init(data)

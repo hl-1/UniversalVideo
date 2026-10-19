@@ -35,6 +35,15 @@ def finished_summary(task_id: str = "summary123") -> video_tasks.SummaryTask:
 
 
 class MindMapSanitizerTests(unittest.TestCase):
+    def test_layout_preferences_are_optional_and_validated(self):
+        self.assertEqual(MapView(scale=1, x=0.1, y=0.2).layout, 'auto')
+        for layout in ('auto', 'balanced', 'right', 'left'):
+            self.assertEqual(MapView(layout=layout, resolved_layout='right', framing_valid=False).layout, layout)
+        with self.assertRaises(ValueError):
+            MapView(layout='unknown')
+        with self.assertRaises(ValueError):
+            MapView(resolved_layout='auto')
+
     def test_saved_zoom_accepts_the_canvas_range(self):
         self.assertEqual(MapView(scale=0.2).scale, 0.2)
         self.assertEqual(MapView(scale=1.6).scale, 1.6)

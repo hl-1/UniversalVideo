@@ -115,11 +115,14 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         map_id = self.a.post(f"/api/summaries/{summary.task_id}/mind-map").json()["task_id"]
         self.finish_map(map_id)
         view = {"tab": "mind-map", "summary_task_id": summary.task_id, "mind_map_id": map_id, "playback_time": 42,
-                "map_view": {"scale": 1.2, "x": 0.1, "y": 0.3, "collapsed": ["node-1", "unknown"]}}
+                "map_view": {"scale": 1.2, "x": 0.1, "y": 0.3, "collapsed": ["node-1", "unknown"],
+                             "layout": "right", "resolved_layout": "right", "framing_valid": True}}
         path = f"/api/videos/records/{record_id}/view"
         self.a.put(path, json=view).raise_for_status()
         restored = self.a.get(f"/api/videos/records/{record_id}").json()["view"]
         self.assertEqual(restored["map_view"]["collapsed"], ["node-1"])
+        self.assertEqual(restored["map_view"]["layout"], 'right')
+        self.assertEqual(restored["map_view"]["resolved_layout"], 'right')
         self.assertEqual(restored["playback_time"], 42)
         self.assertEqual(self.a.get("/api/videos/last-record").json()["record_id"], record_id)
         self.assertEqual(self.b.put(path, json=view).status_code, 404)

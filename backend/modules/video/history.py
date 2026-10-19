@@ -38,6 +38,9 @@ class MapView(BaseModel):
     x: float = Field(default=0, ge=-100000, le=100000, allow_inf_nan=False)
     y: float = Field(default=0, ge=-100000, le=100000, allow_inf_nan=False)
     collapsed: list[str] = Field(default_factory=list, max_length=12000)
+    layout: Literal["auto", "balanced", "right", "left"] = "auto"
+    resolved_layout: Literal["balanced", "right", "left"] = "balanced"
+    framing_valid: bool = True
 
 
 class VideoView(BaseModel):

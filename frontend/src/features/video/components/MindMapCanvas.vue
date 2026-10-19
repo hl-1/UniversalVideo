@@ -5,6 +5,7 @@ import 'mind-elixir/style.css'
 import { toMindElixirData, type MindMapDisplayMode, type MindMapNode, type MindMapResult } from '../mindMap'
 import { createMindMapImage, mindMapImageFilename, type MindMapImageFormat } from '../mindMapExport'
 import type { MapView } from '../videoHistory'
+import { chooseMindMapLayout, mindMapFitScale, type MindMapLayout, type ResolvedMindMapLayout } from '../mindMapLayout'
 import { Download, Expand, FileImage, FoldVertical, Image, LoaderCircle, Maximize2, Minus, Plus, UnfoldVertical, X } from 'lucide-vue-next'
 
 const props = defineProps<{ result: MindMapResult; seekEnabled?: boolean; savedView?: MapView | null }>()
@@ -15,6 +16,10 @@ let renderReported = false
 const host = ref<HTMLDivElement | null>(null)
 const shell = ref<HTMLDivElement | null>(null)
 const displayMode = ref<MindMapDisplayMode>('overview')
+const layoutPreference = ref<MindMapLayout>(props.savedView?.layout || 'auto')
+const resolvedLayout = ref<ResolvedMindMapLayout>('balanced')
+const layoutNames = { balanced: '居中双向', right: '向右展开', left: '向左展开' }
+const layoutHint = computed(() => layoutPreference.value === 'auto' ? `自动布局：${layoutNames[resolvedLayout.value]}` : layoutNames[resolvedLayout.value])
 const overviewDepth = ref(2)
 const selected = ref<MindMapNode | null>(null)
 const exportScope = ref<'overview' | 'detail'>('overview')
@@ -37,10 +42,18 @@ function mapPadding() { return host.value && host.value.clientWidth < 640 ? 12 :
 
 function defaultOverviewDepth() { return host.value && host.value.clientWidth < 640 ? 1 : 2 }
 
-function mapData() {
+function mapData(layout = resolvedLayout.value, preserveExpansion = false) {
+  const collapsed: string[] = []
+  if (preserveExpansion && mind) {
+    const visit = (node: ReturnType<typeof toMindElixirData>['nodeData']) => {
+      if (node.expanded === false) collapsed.push(node.id)
+      node.children?.forEach(visit)
+    }
+    visit(mind.getData().nodeData)
+  }
   return toMindElixirData(props.result, { mode: displayMode.value,
-    depth: displayMode.value === 'overview' ? overviewDepth.value : 4,
-    collapsed: displayMode.value === 'detail' ? props.savedView?.collapsed : [] })
+    layout, depth: preserveExpansion ? 4 : displayMode.value === 'overview' ? overviewDepth.value : 4,
+    collapsed: preserveExpansion ? collapsed : displayMode.value === 'detail' ? props.savedView?.collapsed : [] })
 }
 
 function captureView() {
@@ -60,7 +73,8 @@ function captureView() {
     const container = host.value.getBoundingClientRect()
     // Relative root coordinates preserve framing across different screen sizes.
     emit('viewChange', { scale: mind.scaleVal, x: (rect.left - container.left) / container.width,
-      y: (rect.top - container.top) / container.height, collapsed })
+      y: (rect.top - container.top) / container.height, collapsed,
+      layout: layoutPreference.value, resolved_layout: resolvedLayout.value, framing_valid: true })
   })
 }
 
@@ -102,16 +116,25 @@ function fitMap(save = true, restore = false) {
   layoutFrame = requestAnimationFrame(() => {
     layoutFrame = undefined
     if (!mind || !host.value || !host.value.clientWidth || !host.value.clientHeight) { restoring = false; return }
-    const root = MindElixir.E('video-mind-map-root', host.value)
-    const bounds = mind.nodes.getBoundingClientRect()
-    const rootRect = root.getBoundingClientRect()
     const padding = mapPadding()
-    const centerX = rootRect.left + rootRect.width / 2
-    const centerY = rootRect.top + rootRect.height / 2
-    const halfWidth = Math.max(centerX - bounds.left, bounds.right - centerX) / mind.scaleVal
-    const halfHeight = Math.max(centerY - bounds.top, bounds.bottom - centerY) / mind.scaleVal
-    const targetScale = Math.min(1, (host.value.clientWidth / 2 - padding) / Math.max(1, halfWidth),
-      (host.value.clientHeight / 2 - padding) / Math.max(1, halfHeight))
+    const viewport = { width: host.value.clientWidth, height: host.value.clientHeight }
+    const fit = (layout: ResolvedMindMapLayout) => {
+      mind!.refresh(mapData(layout, true))
+      const root = MindElixir.E('video-mind-map-root', host.value!)
+      return mindMapFitScale(layout, mind!.nodes.getBoundingClientRect(), root.getBoundingClientRect(),
+        viewport, mind!.scaleVal, padding)
+    }
+    let targetScale: number
+    if (layoutPreference.value === 'auto') {
+      const balancedScale = fit('balanced')
+      const rightScale = fit('right')
+      resolvedLayout.value = chooseMindMapLayout(balancedScale, rightScale)
+      targetScale = resolvedLayout.value === 'right' ? rightScale : fit('balanced')
+    } else {
+      resolvedLayout.value = layoutPreference.value
+      targetScale = fit(resolvedLayout.value)
+    }
+    syncSeekButtons()
     if (displayMode.value === 'overview' && overviewDepth.value > 1
       && (targetScale < 12 / 14 || host.value.querySelectorAll('me-tpc').length > 25)) {
       overviewDepth.value = 1
@@ -120,11 +143,12 @@ function fitMap(save = true, restore = false) {
       nextTick(() => fitMap(save))
       return
     }
-    mind.scale(Math.max(mind.scaleMin, targetScale))
+    mind.scale(Math.max(mind.scaleMin, Math.min(1, targetScale)))
     mind.toCenter()
-    centerRoot()
-    if (savedView) {
+    frameMap()
+    if (savedView && savedView.framing_valid !== false && (savedView.resolved_layout || 'balanced') === resolvedLayout.value) {
       mind.scale(Math.min(mind.scaleMax, Math.max(mind.scaleMin, savedView.scale)))
+      const root = MindElixir.E('video-mind-map-root', host.value)
       const rect = root.getBoundingClientRect()
       const container = host.value.getBoundingClientRect()
       mind.move(savedView.x * container.width - (rect.left - container.left), savedView.y * container.height - (rect.top - container.top))
@@ -136,14 +160,14 @@ function fitMap(save = true, restore = false) {
   })
 }
 
-function centerRoot() {
+function frameMap() {
   if (!mind || !host.value) return
   const root = MindElixir.E('video-mind-map-root', host.value)
   if (!root) return
   const hostRect = host.value.getBoundingClientRect()
-  const rootRect = root.getBoundingClientRect()
-  mind.move(hostRect.left + hostRect.width / 2 - (rootRect.left + rootRect.width / 2),
-    hostRect.top + hostRect.height / 2 - (rootRect.top + rootRect.height / 2))
+  const anchor = resolvedLayout.value === 'balanced' ? root.getBoundingClientRect() : mind.nodes.getBoundingClientRect()
+  mind.move(hostRect.left + hostRect.width / 2 - (anchor.left + anchor.width / 2),
+    hostRect.top + hostRect.height / 2 - (anchor.top + anchor.height / 2))
 }
 
 function updatePanTravel() {
@@ -164,13 +188,13 @@ function syncSeekButtons() {
   })
 }
 
-function renderMap(restore = false) {
+function renderMap(restore = false, save = false, preserveExpansion = false) {
   if (!mind) return
   renderStarted = performance.now(); renderReported = false
-  mind.refresh(mapData())
+  mind.refresh(mapData(resolvedLayout.value, preserveExpansion))
   nextTick(() => {
     syncSeekButtons()
-    fitMap(false, restore)
+    fitMap(save, restore)
   })
 }
 
@@ -195,7 +219,7 @@ function setAllExpanded(expanded: boolean) {
   displayMode.value = expanded ? 'detail' : 'overview'
   exportScope.value = displayMode.value
   overviewDepth.value = 1
-  mind.refresh(toMindElixirData(props.result, { mode: displayMode.value, depth: expanded ? 4 : 1 }))
+  mind.refresh(toMindElixirData(props.result, { mode: displayMode.value, depth: expanded ? 4 : 1, layout: resolvedLayout.value }))
   syncSeekButtons()
   const root = MindElixir.E('video-mind-map-root', host.value)
   if (root && expanded) mind.expandNodeAll(root, true)
@@ -208,6 +232,16 @@ function setDisplayMode(mode: MindMapDisplayMode) {
   overviewDepth.value = defaultOverviewDepth()
   selected.value = null
   renderMap(mode === 'detail')
+}
+
+function changeLayout() {
+  selected.value = null
+  if (displayMode.value === 'overview') {
+    // Persist only the preference; keep the detailed view's framing and collapsed nodes.
+    emit('viewChange', { scale: 1, x: 0.5, y: 0.5, collapsed: [], framing_valid: false, ...props.savedView,
+      layout: layoutPreference.value })
+  }
+  renderMap(false, true, true)
 }
 
 async function toggleFullscreen() {
@@ -265,7 +299,7 @@ async function exportImage(format: MindMapImageFormat) {
       visit(mind.getData().nodeData)
     }
     const blob = await createMindMapImage(result, theme, format, exportScope.value === 'detail'
-      ? { mode: 'detail', depth: 4 } : { mode: 'overview',
+      ? { mode: 'detail', depth: 4, layout: resolvedLayout.value } : { mode: 'overview', layout: resolvedLayout.value,
         depth: displayMode.value === 'overview' ? 4 : defaultOverviewDepth(), collapsed })
     if (disposed) return
     const url = URL.createObjectURL(blob)
@@ -365,6 +399,7 @@ onBeforeUnmount(() => {
   <div ref="shell" class="video-mind-map-shell" :class="{ 'is-overview': displayMode === 'overview' }">
     <div class="video-mind-map-tools" aria-label="思维导图视图控制">
       <div class="video-mind-map-modes" role="group" aria-label="导图阅读模式"><button type="button" :aria-pressed="displayMode === 'overview'" @click="setDisplayMode('overview')">概览</button><button type="button" :aria-pressed="displayMode === 'detail'" @click="setDisplayMode('detail')">详细</button></div>
+      <select v-model="layoutPreference" class="video-mind-map-layout" aria-label="导图布局" title="选择布局" @change="changeLayout"><option value="auto">自动布局</option><option value="balanced">居中双向</option><option value="right">向右展开</option><option value="left">向左展开</option></select>
       <button type="button" aria-label="全部收起" title="全部收起" @click="setAllExpanded(false)"><FoldVertical :size="17" /></button>
       <button type="button" aria-label="全部展开" title="全部展开" @click="setAllExpanded(true)"><UnfoldVertical :size="17" /></button>
       <button type="button" aria-label="缩小" title="缩小" @click="zoom(-0.1)"><Minus :size="17" /></button>
@@ -388,7 +423,7 @@ onBeforeUnmount(() => {
     <p v-if="exportError" class="video-mind-map-export-error" role="alert">{{ exportError }}</p>
     <div ref="host" class="video-mind-map-canvas" aria-label="AI 视频总结思维导图"></div>
     <aside v-if="selected" class="video-mind-map-node-detail" aria-label="节点详情"><div><strong>{{ selected.title }}</strong><button type="button" aria-label="关闭节点详情" @click="selected = null"><X :size="16" /></button></div><p>{{ selected.summary || '暂无补充说明' }}</p><button type="button" class="video-mind-detail-seek" :disabled="!seekEnabled" @click="emit('seek', selected.timestamp)">定位视频 {{ Math.floor(selected.timestamp / 60) }}:{{ String(Math.floor(selected.timestamp % 60)).padStart(2, '0') }}</button><ul v-if="selected.children.length"><li v-for="child in selected.children" :key="child.id"><button type="button" @click="selected = child">{{ child.title }}</button></li></ul></aside>
-    <p class="video-mind-map-hint">{{ displayMode === 'overview' ? overviewHint : '完整内容可拖拽、缩放，点击时间戳定位视频' }}</p>
+    <p class="video-mind-map-hint">{{ layoutHint }} · {{ displayMode === 'overview' ? overviewHint : '完整内容可拖拽、缩放，点击时间戳定位视频' }}</p>
     <label class="video-mind-map-pan">
       <input
         type="range"

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { chooseMindMapLayout, mindMapFitScale } from '../src/features/video/mindMapLayout.ts'
 
 import { canSeekMedia, clampSeekTime, filterMindMapTask, mindMapDirections, mindMapPanDelta, toMindElixirData, type MindMapNode } from '../src/features/video/mindMap.ts'
 
@@ -169,4 +170,33 @@ test('maps horizontal slider movement to inverse canvas movement', () => {
   assert.equal(mindMapPanDelta(0, 25, 800), -200)
   assert.equal(mindMapPanDelta(75, 50, 800), 200)
   assert.equal(mindMapPanDelta(0, 100, -1), 0)
+})
+
+test('single-sided layouts retain all descendants, source order and expansion state', () => {
+  const result = { title: '课程', generated_at: '', nodes: [mapNode('a', [mapNode('a1')]), mapNode('b')] }
+  for (const [layout, direction] of [['right', 1], ['left', 0]] as const) {
+    const data = toMindElixirData(result, { layout, mode: 'detail', collapsed: ['a'] })
+    assert.equal(data.direction, direction)
+    assert.deepEqual(data.nodeData.children?.map(node => node.id), ['a', 'b'])
+    assert.ok(data.nodeData.children?.every(node => node.direction === direction))
+    assert.equal(data.nodeData.children?.[0]?.children?.[0]?.direction, direction)
+    assert.equal(data.nodeData.children?.[0]?.expanded, false)
+    assert.match(data.nodeData.children?.[0]?.dangerouslySetInnerHTML || '', /video-mind-time/)
+  }
+})
+
+test('automatic layout uses measured available space and avoids switching for tiny gains', () => {
+  assert.equal(chooseMindMapLayout(0.7, 0.9), 'right')
+  assert.equal(chooseMindMapLayout(0.9, 0.7), 'balanced')
+  assert.equal(chooseMindMapLayout(0.9, 0.95), 'balanced')
+  const bounds = { left: 0, top: 0, width: 800, height: 400 }
+  const root = { left: 0, top: 180, width: 100, height: 40 }
+  const viewport = { width: 1000, height: 600 }
+  const single = mindMapFitScale('right', bounds, root, viewport, 1, 20)
+  const balanced = mindMapFitScale('balanced', bounds, root, viewport, 1, 20)
+  assert.equal(single, 1.2)
+  assert.equal(balanced, 0.64)
+  assert.equal(chooseMindMapLayout(balanced, single), 'right')
+  assert.equal(mindMapFitScale('right', { left: 0, top: 0, width: 400, height: 200 },
+    { left: 0, top: 90, width: 50, height: 20 }, viewport, 0.5, 20), single)
 })

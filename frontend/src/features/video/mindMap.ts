@@ -1,4 +1,5 @@
 import { filterTiming, type ExecutionTiming, type ModelInfo } from './executionTiming.ts'
+import type { ResolvedMindMapLayout } from './mindMapLayout.ts'
 export type MindMapStatus = 'pending' | 'running' | 'finished' | 'failed' | 'cancelled'
 
 export type MindMapNode = {
@@ -32,7 +33,7 @@ export type MindMapTask = {
 const statuses: MindMapStatus[] = ['pending', 'running', 'finished', 'failed', 'cancelled']
 const branchColors = ['#2563eb', '#f59e0b', '#22c55e', '#ec4899', '#8b5cf6', '#06b6d4']
 export type MindMapDisplayMode = 'overview' | 'detail'
-export type MindMapDisplayOptions = { mode?: MindMapDisplayMode; depth?: number; collapsed?: string[] }
+export type MindMapDisplayOptions = { mode?: MindMapDisplayMode; depth?: number; collapsed?: string[]; layout?: ResolvedMindMapLayout }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -192,10 +193,11 @@ function toMindElixirNode(node: MindMapNode, branchColor: string, depth: number,
 
 export function toMindElixirData(result: MindMapResult, display: MindMapDisplayOptions = {}): MindElixirData {
   const mode = display.mode || 'overview'
-  const options = { mode, depth: display.depth ?? (mode === 'overview' ? 2 : 4), collapsed: display.collapsed || [] }
-  const directions = mindMapDirections(result.nodes, options.depth)
+  const options = { mode, depth: display.depth ?? (mode === 'overview' ? 2 : 4), collapsed: display.collapsed || [], layout: display.layout || 'balanced' }
+  const directions = options.layout === 'balanced' ? mindMapDirections(result.nodes, options.depth)
+    : result.nodes.map(() => options.layout === 'left' ? 0 as const : 1 as const)
   return {
-    direction: 2,
+    direction: options.layout === 'balanced' ? 2 : options.layout === 'left' ? 0 : 1,
     nodeData: {
       id: 'video-mind-map-root',
       topic: result.title,

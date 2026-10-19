@@ -314,3 +314,66 @@ MySQL 无新增或修改的表、表结构、字段、索引和关系，无数�
 Redis 无新增或修改的 key 模板与示例、类型、值结构、TTL、读写、失效或一致性规则，因为本次布局在客户端计算，导图仍由原持久化链路保存。
 
 回滚生成提示词、画布组件、数据适配器、导出和样式，并恢复缩放校验，即可恢复旧行为，无数据迁移或数据回滚。已经生成的 v2 继续符合原节点契约，可保留或切回 v1；不自动批量重写历史导图。
+
+## 13. 导图布局可选与自动适配（2026-10-19）
+
+### 行为修正
+
+第 12 节实现将画布与导出固定为根节点居中、左右展开，未保留用户截图中的单向结构。本节取代其中“固定居中”的现行规则，第 12 节的生成样本和测量记录保留为当时结果。
+
+现在提供四个布局选项：自动布局、居中双向、向右展开、向左展开。向右展开时根节点位于树的左侧，全部分支向右；向左展开相反。手动方向在概览、详细、展开收起、窗口尺寸变化及导出时保持一致。切换方向保留当前展开状态，概览的字号与可见节点限制仍可触发主主题概览。
+
+自动布局在当前画布实际渲染并测量双向与向右展开两种排法，比较可容纳的缩放比例；向右展开比双向大超过 8% 时采用单向，其余优先双向。双向按根节点两侧最大伸展范围适配并将根节点居中；单向按整树边界适配和居中，避免浪费根节点背面的画布。导出沿用当前实际方向，不以独立导出画布重新决定自动方向。
+
+本轮复用已有 v2（`1139213ddc1c`），不重新生成总结或导图，没有增加 AI 调用。第 3 节基准与第 12 节模型耗时不变，本轮不新增或宣称模型生成性能收益。
+
+### 数据结构、兼容与回滚
+
+MySQL 无新增或修改的表、列、索引、外键和关系，无 DDL 迁移。布局选择复用现有 `video_view_states.view_state.map_view` JSON；该既有表完整结构如下：
+
+```sql
+CREATE TABLE IF NOT EXISTS video_view_states (
+    user_id BIGINT NOT NULL, record_id VARCHAR(64) NOT NULL, view_key VARCHAR(255) NOT NULL,
+    selected_tab VARCHAR(24) NOT NULL, playback_time DOUBLE NOT NULL, view_state JSON NOT NULL,
+    created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL, deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY(user_id,record_id), UNIQUE KEY video_view_key(view_key),
+    INDEX video_view_recent(user_id,deleted,updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+逻辑关系沿用 `user_id → users.id`、`record_id → video_parse_records.record_id`，现有定义没有数据库外键；接口继续校验登录账号和解析记录归属。读取沿用 `GET /api/videos/records/{record_id}` 的 `view`，保存沿用 `PUT /api/videos/records/{record_id}/view`，浏览器继续使用原 650ms 防抖及串行保存队列，无新增缓存层。
+
+`map_view` 的完整字段契约如下：
+
+| 字段 | 类型与范围 | 默认 / 用途 |
+| --- | --- | --- |
+| `scale` | 有限数字，0.2–1.6 | 1，详细视图缩放 |
+| `x`、`y` | 有限数字，-100000–100000 | 0，相对画布的根节点位置 |
+| `collapsed` | 字符串数组，至多 12000 项 | 空数组，按既有规则清理无效节点 ID |
+| `layout` | `auto/balanced/right/left` | `auto`，新增可选布局偏好 |
+| `resolved_layout` | `balanced/right/left` | `balanced`，新增可选实际方向，匹配坐标 |
+| `framing_valid` | 布尔值 | true，新增可选位置有效标记 |
+
+示例：
+
+```json
+{"scale":1,"x":0.2,"y":0.4,"collapsed":[],"layout":"right","resolved_layout":"right","framing_valid":true}
+```
+
+旧 JSON 缺少新增字段仍可读取：布局默认为自动，旧坐标按双向解释。概览更换布局时只保存偏好，保留原详细视图的坐标和实际方向；尚无详细视图时标记 `framing_valid=false`。进入详细模式，仅在位置有效且实际方向一致时恢复坐标，否则重新适配，避免恢复到另一种排法的位置。概览几何位置、层级及节点详情不持久化。
+
+Redis 无新增或修改的 key 模板与示例、类型、值结构、TTL、读写、失效和一致性规则；布局在浏览器计算，偏好随既有 MySQL 视图保存，不需要 Redis。
+
+回滚前后端新增布局代码及可选字段即可恢复上一版本的固定双向显示。JSON 中的新字段可以保留，旧 Pydantic 请求模型忽略未知字段；无表结构回滚、数据删除或历史导图改写。
+
+### 验证记录
+
+前端 40 项测试通过，TypeScript 类型检查与 Vite 生产构建通过。后端导图与视图历史相关测试及其引用的账号集成测试共 56 项通过（348.142 秒）。测试覆盖单向完整树、顺序和折叠状态，尺寸与缩放比较、8% 阈值，布局字段默认值 / 非法值及账号隔离下的保存恢复。
+
+真实页面验证四种布局、概览 / 详细、展开收起、节点详情、布局保存后刷新恢复及 SVG / PNG 导出。1536×864 全屏向右概览中 19 个节点均在画布内；普通双向概览根节点中心偏差小于 0.01px；向左展开的全部分支均在根节点左侧。390×844 手机宽度下工具栏换行、无页面横向溢出，中心和全部 5 个主主题均在画布边界内。浏览器未捕获 warning/error。
+
+实际导出的单向概览 SVG 为 455×379，根节点在左、5 个主题向右；完整 PNG 为 1746×2676，包含全部 19 个节点的标题、说明及时间戳，已检查中文与节点边界。完整导图包含长说明，允许纵向浏览；一屏预览使用概览模式。
+
+确认占用进程属于本项目后，后端在原 8001 端口重启并通过健康检查；前端继续使用 5174 热更新，交付地址为 `http://127.0.0.1:5174/`。
+
+![根节点在左、分支向右的全屏概览](ai-video-generation-2026-10-19.mindmap-flexible.right.png)
