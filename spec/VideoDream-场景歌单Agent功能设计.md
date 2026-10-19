@@ -510,7 +510,7 @@ flowchart LR
 
 | 模块 | 已实现行为 |
 |---|---|
-| `backend/music_agent/api.py` | 当前账号任务创建、分页、查询、取消、继续、关联重试、指定结果版本保存和软删除 |
+| `backend/modules/music/agent/api.py` | 当前账号任务创建、分页、查询、取消、继续、关联重试、指定结果版本保存和软删除 |
 | `runtime.py` / `store.py` | MySQL 任务、租约、幂等及乐观版本；解析、模型调用和工具执行均校验 Worker；取消、等待及中断记录累计执行时间 |
 | `model.py` | 复用管理后台 AI 配置；支持 Chat Completions 与 Responses 工具调用；禁用网络时使用本地解析和确定性 MCP 调度；模型请求关闭自动重试，事先预留输入输出 tokens |
 | `mcp.py` / `auth.py` | 官方 MCP SDK 无状态 Streamable HTTP；本地 Client 调用固定 `8001`；短期任务凭证和独立保存授权；每个 ASGI 事件循环使用独立协议传输实例 |

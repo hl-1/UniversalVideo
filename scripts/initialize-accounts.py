@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import set_key
 from pydantic import ValidationError
-from backend import accounts, library
+from backend.modules.accounts import service as accounts
+from backend.modules.music import library
 
 
 def read_password(username: str) -> str:

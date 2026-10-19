@@ -1,0 +1,658 @@
+{
+  "schema_version": 1,
+  "recorded_on": "2026-10-19",
+  "timezone": "Asia/Shanghai",
+  "source_sha256": "bed5017eabbcd3f2b86d9bd0b1206b70a39b4b1fd4f34f821cf58e6698b27844",
+  "source_identical": true,
+  "real_pipeline": {
+    "before": {
+      "mode": "before",
+      "url": "https://www.bilibili.com/video/BV1tDsgzxECr/?p=2",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "asr_model": "FunAudioLLM/SenseVoiceSmall",
+      "started_at": "2026-10-19T03:17:55Z",
+      "events": [
+        {
+          "stage": "source_total",
+          "start_ms": 0.42,
+          "elapsed_ms": 1606.89,
+          "error": null
+        },
+        {
+          "stage": "summary_model",
+          "start_ms": 1607.38,
+          "elapsed_ms": 89954.26,
+          "error": null
+        },
+        {
+          "stage": "save_files",
+          "start_ms": 91561.73,
+          "elapsed_ms": 5.99,
+          "error": null
+        },
+        {
+          "stage": "mind_map_model",
+          "start_ms": 91567.8,
+          "elapsed_ms": 68996.28,
+          "error": null
+        }
+      ],
+      "summary_status": "finished",
+      "map_status": "finished",
+      "summary_error": null,
+      "map_error": null,
+      "segments": 190,
+      "characters": 2998,
+      "node_count": 4,
+      "summary_characters": 4074,
+      "total_ms": 160565.73
+    },
+    "after": {
+      "mode": "after",
+      "url": "https://www.bilibili.com/video/BV1tDsgzxECr/?p=2",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "asr_model": "FunAudioLLM/SenseVoiceSmall",
+      "started_at": "2026-10-19T03:21:37Z",
+      "events": [
+        {
+          "stage": "source_total",
+          "start_ms": 0.53,
+          "elapsed_ms": 966.94,
+          "error": null
+        },
+        {
+          "stage": "summary_model",
+          "start_ms": 968.94,
+          "elapsed_ms": 92861.77,
+          "error": null
+        },
+        {
+          "stage": "save_files",
+          "start_ms": 93830.85,
+          "elapsed_ms": 6.08,
+          "error": null
+        },
+        {
+          "stage": "mind_map_model",
+          "start_ms": 968.3,
+          "elapsed_ms": 107910.07,
+          "error": null
+        }
+      ],
+      "summary_status": "finished",
+      "map_status": "finished",
+      "summary_error": null,
+      "map_error": null,
+      "segments": 190,
+      "characters": 2998,
+      "node_count": 5,
+      "summary_characters": 3996,
+      "summary_timing": {
+        "version": 1,
+        "accepted_at_ms": 1792380097572.8154,
+        "server_now_ms": 1792380191400.8154,
+        "finished_at_ms": 1792380191400.8154,
+        "elapsed_ms": 93828.0,
+        "stages": [
+          {
+            "id": "queue",
+            "label": "任务排队",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380097572.8154,
+            "finished_at_ms": 1792380097572.8154,
+            "elapsed_ms": 0.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          },
+          {
+            "id": "source",
+            "label": "字幕与转写准备",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380097572.8154,
+            "finished_at_ms": 1792380098541.8154,
+            "elapsed_ms": 969.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          },
+          {
+            "id": "summary_model",
+            "label": "AI 总结生成",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380098541.8154,
+            "finished_at_ms": 1792380191400.8154,
+            "elapsed_ms": 92859.0,
+            "attempts": 1,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          },
+          {
+            "id": "save",
+            "label": "保存总结文件",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380191400.8154,
+            "finished_at_ms": 1792380191400.8154,
+            "elapsed_ms": 0.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          }
+        ]
+      },
+      "map_timing": {
+        "version": 1,
+        "accepted_at_ms": 1792380098540.8125,
+        "server_now_ms": 1792380206446.8125,
+        "finished_at_ms": 1792380206446.8125,
+        "elapsed_ms": 107906.0,
+        "stages": [
+          {
+            "id": "queue",
+            "label": "任务排队",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380098540.8125,
+            "finished_at_ms": 1792380098540.8125,
+            "elapsed_ms": 0.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          },
+          {
+            "id": "waiting_source",
+            "label": "等待字幕就绪",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380098540.8125,
+            "finished_at_ms": 1792380098540.8125,
+            "elapsed_ms": 0.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          },
+          {
+            "id": "map_model",
+            "label": "思维导图生成",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380098540.8125,
+            "finished_at_ms": 1792380206446.8125,
+            "elapsed_ms": 107906.0,
+            "attempts": 1,
+            "retry_wait_ms": 0,
+            "completed_units": 1,
+            "total_units": 1,
+            "reused": false
+          },
+          {
+            "id": "map_validate",
+            "label": "导图结果校验",
+            "parent_id": null,
+            "status": "finished",
+            "started_at_ms": 1792380206446.8125,
+            "finished_at_ms": 1792380206446.8125,
+            "elapsed_ms": 0.0,
+            "attempts": 0,
+            "retry_wait_ms": 0,
+            "completed_units": 0,
+            "total_units": 0,
+            "reused": false
+          }
+        ]
+      },
+      "total_ms": 108881.49
+    }
+  },
+  "real_asr": {
+    "url": "https://www.bilibili.com/video/BV1tDsgzxECr/?p=2",
+    "model": "FunAudioLLM/SenseVoiceSmall",
+    "runs": [
+      {
+        "mode": "before",
+        "events": [
+          {
+            "stage": "audio_export",
+            "elapsed_ms": 309.23
+          },
+          {
+            "stage": "download_and_export",
+            "elapsed_ms": 30664.74
+          },
+          {
+            "stage": "audio_split",
+            "elapsed_ms": 1433.67
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 3023.57
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2116.9
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 5773.11
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 6186.77
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 1968.28
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 10889.27
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2071.02
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 7518.63
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 5706.91
+          }
+        ],
+        "status": "finished",
+        "segments": 9,
+        "characters": 3231,
+        "total_ms": 77427.13
+      },
+      {
+        "mode": "after",
+        "events": [
+          {
+            "stage": "audio_export",
+            "elapsed_ms": 323.87
+          },
+          {
+            "stage": "download_and_export",
+            "elapsed_ms": 10510.45
+          },
+          {
+            "stage": "audio_split",
+            "elapsed_ms": 1017.27
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2503.01
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2626.21
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2909.53
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2171.8
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2308.12
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 3175.15
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 2103.87
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 1383.43
+          },
+          {
+            "stage": "asr_chunk",
+            "elapsed_ms": 3435.05
+          }
+        ],
+        "status": "finished",
+        "segments": 9,
+        "characters": 3230,
+        "total_ms": 19715.25
+      }
+    ]
+  },
+  "controlled": {
+    "kind": "controlled_fixed_delay_not_real_provider",
+    "repetitions": 3,
+    "pipeline": {
+      "before": {
+        "runs_ms": [
+          653.49,
+          654.17,
+          653.09
+        ],
+        "median_ms": 653.49,
+        "chunks": 4,
+        "coverage_segment_ids": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "after": {
+        "runs_ms": [
+          295.02,
+          292.88,
+          293.07
+        ],
+        "median_ms": 293.07,
+        "chunks": 4,
+        "coverage_segment_ids": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    "asr": {
+      "before": {
+        "runs_ms": [
+          742.44,
+          741.17,
+          748.19
+        ],
+        "median_ms": 742.44,
+        "chunks": 9
+      },
+      "after": {
+        "runs_ms": [
+          257.32,
+          259.18,
+          258.39
+        ],
+        "median_ms": 258.39,
+        "chunks": 9
+      }
+    }
+  },
+  "source_interface_verification": {
+    "segments": 190,
+    "first": "好嘞各位那本小节呢我们先对Python进行一个简单的概述",
+    "sha256": "bed5017eabbcd3f2b86d9bd0b1206b70a39b4b1fd4f34f821cf58e6698b27844",
+    "baseline_identical": true
+  },
+  "source_code_sha256": {
+    "backend/modules/video/summary.py": {
+      "baseline": "b8974f62cc7a27da398a0575c6150f49466fbc82f5b92aea0d549160e792de3d",
+      "optimized": "101488c97bb6ae20a2ddae780118c711c8a84c2ee0bb46d6ae9407ce2728870a"
+    },
+    "backend/modules/video/tasks.py": {
+      "baseline": "83242d61bb81dcda30b31ea9717eb63c054970d58b12ea40a2e8ea426e25a354",
+      "optimized": "fc4e825d920aa49298f803cc8d09f25998aab3de3e68ebbe01f91fc96f2cf027"
+    },
+    "backend/modules/video/api.py": {
+      "baseline": "781ff26c72e1f7182a06ff584c5b87611506c52e12dce9c611b181ea638c5977",
+      "optimized": "c4b3f950452c9d76d72baabb696fd8b21aab55d1bb349f39bb41c97103b27473"
+    },
+    "backend/infrastructure/speech.py": {
+      "baseline": "ef22623db558b4fc9bf6368bbe9cf8d080bda66371509a0b1c5fc9bc88bc606a",
+      "optimized": "223ac65bdd18398b325fa612f7420669dd9f3033a7abeb956b2566e081b53aae"
+    },
+    "backend/infrastructure/audio.py": {
+      "baseline": "0c04f1f01e3bb9bc2b3e7daca4091b68bad8d3cb23704b82bdb431179ea96fdd",
+      "optimized": "f6f0a26647d2621de35f085ac9229994f9b5ee126647bfbe3555c48260a3fdfd"
+    },
+    "frontend/src/features/video/useVideoSummary.ts": {
+      "baseline": "b00f754aa3977861a842d961294ec62abb2e8695f8175a25fd71fa032b056c78",
+      "optimized": "063d90e8ff5202b84c607b28a51cc101ea08817e49e07ceea0a421242d253e73"
+    },
+    "frontend/src/features/video/VideoWorkspace.vue": {
+      "baseline": "6cab772368a9a6d9791fc4214040cd54ea7f4384a5342328b03ac224ba4ee9cf",
+      "optimized": "157695c0b65544e6a5d28d61d3a7204b8f68138102e1e474db380f4425d97f12"
+    }
+  },
+  "browser_validation": {
+    "kind": "authenticated_browser_validation_not_paired_benchmark",
+    "summary_status": "finished",
+    "map_status": "finished",
+    "source_sha256": "60e220b2ca1bddd280222a3942983361e0dcd9827429bf5ee8fcfcb417d06baa",
+    "source_identical_to_baseline": true,
+    "segments": 190,
+    "model_info": {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "service": "api.siliconflow.cn"
+    },
+    "summary_timing": {
+      "stages": [
+        {
+          "id": "queue",
+          "label": "任务排队",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 62.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383363965.0415,
+          "finished_at_ms": 1792383364027.0415,
+          "completed_units": 0
+        },
+        {
+          "id": "source",
+          "label": "字幕与转写准备",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 1328.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383364027.0415,
+          "finished_at_ms": 1792383365355.0415,
+          "completed_units": 0
+        },
+        {
+          "id": "summary_model",
+          "label": "AI 总结生成",
+          "reused": false,
+          "status": "finished",
+          "attempts": 1,
+          "parent_id": null,
+          "elapsed_ms": 53313.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383365402.0415,
+          "finished_at_ms": 1792383418715.0415,
+          "completed_units": 0
+        },
+        {
+          "id": "save",
+          "label": "保存总结文件",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 31.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383418730.0415,
+          "finished_at_ms": 1792383418761.0415,
+          "completed_units": 0
+        }
+      ],
+      "version": 1,
+      "elapsed_ms": 54796.0,
+      "server_now_ms": 1792383418761.0415,
+      "accepted_at_ms": 1792383363965.0415,
+      "finished_at_ms": 1792383418761.0415
+    },
+    "map_timing": {
+      "stages": [
+        {
+          "id": "queue",
+          "label": "任务排队",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 0.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383363973.1555,
+          "finished_at_ms": 1792383363973.1555,
+          "completed_units": 0
+        },
+        {
+          "id": "waiting_source",
+          "label": "等待字幕就绪",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 1422.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383363973.1555,
+          "finished_at_ms": 1792383365395.1555,
+          "completed_units": 0
+        },
+        {
+          "id": "map_queue",
+          "label": "导图任务排队",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 47.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383365395.1555,
+          "finished_at_ms": 1792383365442.1555,
+          "completed_units": 0
+        },
+        {
+          "id": "map_model",
+          "label": "思维导图生成",
+          "reused": false,
+          "status": "finished",
+          "attempts": 1,
+          "parent_id": null,
+          "elapsed_ms": 77547.0,
+          "total_units": 1,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383365473.1555,
+          "finished_at_ms": 1792383443020.1555,
+          "completed_units": 1
+        },
+        {
+          "id": "map_validate",
+          "label": "导图结果校验",
+          "reused": false,
+          "status": "finished",
+          "attempts": 0,
+          "parent_id": null,
+          "elapsed_ms": 0.0,
+          "total_units": 0,
+          "retry_wait_ms": 0,
+          "started_at_ms": 1792383443020.1555,
+          "finished_at_ms": 1792383443020.1555,
+          "completed_units": 0
+        }
+      ],
+      "version": 1,
+      "elapsed_ms": 79047.0,
+      "server_now_ms": 1792383443020.1555,
+      "accepted_at_ms": 1792383363973.1555,
+      "finished_at_ms": 1792383443020.1555
+    },
+    "total_ms": 79055.11401367188,
+    "canonical_source_sha256": "81cc7df252656fa64faa123ee0a03f609aeba6c255c1e3028e7f25f92de5dcda",
+    "source_hash_note": "Raw serialized hash differs because MySQL JSON reorders object keys; compare parsed structures or canonical sorted-key JSON."
+  },
+  "baseline_canonical_source_sha256": "81cc7df252656fa64faa123ee0a03f609aeba6c255c1e3028e7f25f92de5dcda",
+  "validation": {
+    "backend_final": {
+      "tests": 337,
+      "passed": 337,
+      "elapsed_s": 162.109
+    },
+    "backend_initial": {
+      "tests": 334,
+      "passed": 333,
+      "failed": 1,
+      "note": "Existing recent-links ordering failed once, then passed isolated, focused and final full suite."
+    },
+    "frontend": {
+      "tests": 34,
+      "passed": 34,
+      "typecheck": "passed",
+      "production_build": "passed"
+    },
+    "browser": {
+      "desktop": "passed",
+      "narrow_viewport": {
+        "width": 390,
+        "height": 844,
+        "panel_horizontal_overflow": false
+      },
+      "console_warn_error_count": 0
+    },
+    "ports": {
+      "frontend": 5174,
+      "backend": 8001
+    },
+    "git_diff_check": "passed"
+  },
+  "final_file_sha256": {
+    "backend/infrastructure/generation.py": "fe132e81182e7dbcfc679122db285cc081b91f9a4ad4d54f47797b52ded70a1f",
+    "backend/infrastructure/speech.py": "223ac65bdd18398b325fa612f7420669dd9f3033a7abeb956b2566e081b53aae",
+    "backend/infrastructure/audio.py": "f6f0a26647d2621de35f085ac9229994f9b5ee126647bfbe3555c48260a3fdfd",
+    "backend/modules/video/api.py": "c4b3f950452c9d76d72baabb696fd8b21aab55d1bb349f39bb41c97103b27473",
+    "backend/modules/video/summary.py": "101488c97bb6ae20a2ddae780118c711c8a84c2ee0bb46d6ae9407ce2728870a",
+    "backend/modules/video/timing.py": "3dc48e152016abec92c16947a0e02f018d58cc324db3864e0c2dda7a6b30512b",
+    "backend/modules/video/tasks.py": "fc4e825d920aa49298f803cc8d09f25998aab3de3e68ebbe01f91fc96f2cf027",
+    "backend/modules/video/history.py": "158e6833746df0f22a4936b777d93fdbd377d81a2ad723e3d0f97c1d475ee07e",
+    "backend/modules/video/schemas.py": "47a25f8a615ade8ddcfb17b64f764494bbd42e830c2540a75ec792c2395f761c",
+    "backend/modules/video/subtitles.py": "14503edcd07c889a331a297b31115c59d0f77ca683162b97ec6b4e3b1a137567",
+    "backend/tests/video/test_generation_timing.py": "e78ac705bd6c30506e06cfff87dfdbf183b1395aac6e28e3ffe816e5da25ce3b",
+    "backend/tests/video/test_video_history.py": "b995597a3c7939126039a41c60142b569e08c2f0f8927b1861b2f22a90e92f1c",
+    "backend/tests/video/test_summary.py": "4649258f7888f263744d14551a542a2f1f265bb88ee2151dbdefe1062c2b468a",
+    "backend/tests/video/test_mind_map.py": "c91e9f8a5bb32c077609aed8438ec02d8b4955587ec2de26442c147521cef57a",
+    "backend/tests/accounts/test_accounts.py": "479726f62f65d4fcc7497df8242ac4672723b4bd6defdeedd62e355fea058da7",
+    "frontend/src/features/video/executionTiming.ts": "91ce06d113c6d3429ce3bb1ebeba5c46a515b0259c44ae30a3997478039a320c",
+    "frontend/src/features/video/components/ExecutionTiming.vue": "13f58eae784687af7fe58090f0148b9326d355b570fb69e878a0015f9eff9d15",
+    "frontend/src/features/video/components/MindMapCanvas.vue": "ba1b1945e8b0ec839faef7089b73676d68d8765d3651fc06876f73611aeec740",
+    "frontend/src/features/video/VideoWorkspace.vue": "157695c0b65544e6a5d28d61d3a7204b8f68138102e1e474db380f4425d97f12",
+    "frontend/src/features/video/useVideoSummary.ts": "063d90e8ff5202b84c607b28a51cc101ea08817e49e07ceea0a421242d253e73",
+    "frontend/src/features/video/useVideoWorkspace.ts": "3ef063d80713c3cdac48884f9d9af9d35b596f2251a5fa7b694ce65dde368902",
+    "frontend/src/features/video/types.ts": "b7d2f503470b2bb866f2f27dd34622a4d02f8ab33afc4272f1c615b04facd544",
+    "frontend/src/features/video/mindMap.ts": "4f7cb4b6aa41b4796b778288c361bcfa7bcf9f2a8d0a80c694f6606e3b36a7ca",
+    "frontend/tests/executionTiming.test.mts": "3e059b0bf5f1d1088d913ca77a2a1da5cdf6baeaf58f6b37cacebddaa4fd9902",
+    "spec/README.md": "e07180e53bf3cd78850ba12f77a82cd6eff83fd900714f1037e0612fbc8d1fd6",
+    "spec/features/ai-video-summary.md": "44a465223a4514f70d2ad3d30cf23497f977d6ae0bf5b144c0416351e9f3b76e",
+    "spec/features/ai-summary-mindmap.md": "482b905b63bf9c990b956c049a3c19a53b4eab69ac41adec4e6e27bb53298a04",
+    "spec/features/video-summary-platform-subtitles.md": "7e1b64098904a60c07a0ce587afcf51f77721ca1baa0e845180590ddd2e341dd"
+  }
+}

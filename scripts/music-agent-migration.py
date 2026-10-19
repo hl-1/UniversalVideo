@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from backend import library
+from backend.modules.music import library
+from backend.infrastructure.database import database_config
 import pymysql
 
 
@@ -24,7 +25,7 @@ def main():
         return
     if not args.apply:
         parser.error("Rollback requires --apply. Stop the backend and use a compatible version before restarting.")
-    connection = pymysql.connect(**library.database_config())
+    connection = pymysql.connect(**database_config())
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT GET_LOCK('videodream-music-agent-migration',30) AS acquired")

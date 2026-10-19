@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from backend.music_agent import platforms, validation
-from backend import network
+from backend.modules.music.agent import platforms, validation
+from backend.infrastructure import network
 
 
 def main():

@@ -2,7 +2,7 @@
 
 当前版本：`v1.0.0`
 
-VideoDream 是一个本地运行的视频下载工作台，前端使用 Vue 3 + Vite，后端使用 FastAPI。它封装 `yt-dlp`、浏览器页面解析和任务下载能力，支持先解析视频信息，再选择格式和保存位置。
+VideoDream 是一个本地运行的视频与音乐工作台，前端使用 Vue 3 + Vite，后端使用 FastAPI。它封装 `yt-dlp`、浏览器页面解析和任务下载能力，支持先解析视频信息，再选择格式和保存位置。
 
 ## 已支持的网站
 
@@ -66,7 +66,7 @@ VideoDream 是一个本地运行的视频下载工作台，前端使用 Vue 3 + 
 
 侧栏「批量找歌」支持上传、拖入或粘贴歌单截图，以及多行文本名单。截图一次最多 8 张，单张不超过 10 MB、总计不超过 32 MB；长截图保留完整内容并分段识别。文本每行一首，可选择「歌名 - 歌手」或「歌手 - 歌名」顺序。一次最多 100 首，导入后可编辑、添加和删除歌曲，再逐首搜索 QQ、网易云和酷狗。匹配结果支持切换候选、试听、勾选和跳过已下载歌曲，确认后进入现有批量下载队列。截图识别与歌曲搜索可取消，任务和匹配结果按账号保存；截图仅临时用于识别，不保存到音乐封面目录。
 
-AI 按输入类型选择模型：文字总结和思维导图使用 `LLM_MODEL`，截图识别使用 `LLM_VISION_MODEL`，无字幕视频转写使用 `LLM_ASR_MODEL`；三者共用服务地址和密钥，也可在管理后台分别配置。例如 SiliconFlow 可使用 `deepseek-ai/DeepSeek-V4-Flash` 处理文字、`Qwen/Qwen3-VL-8B-Instruct` 识别图片、`FunAudioLLM/SenseVoiceSmall` 转写音频。截图和待转写音频会发送到已配置的 AI 服务，并按服务方规则计费；未配置视觉模型时仅截图识别不可用，文本名单仍可导入和搜索。
+AI 按输入类型选择模型：文字总结和思维导图使用 `LLM_*`，截图识别使用 `LLM_VISION_*`，无字幕视频转写使用 `LLM_ASR_*`；三组各自配置服务地址、模型和密钥。例如文字模型可使用 DeepSeek，截图识别和语音转写分别使用 SiliconFlow 的 `Qwen/Qwen3-VL-8B-Instruct`、`FunAudioLLM/SenseVoiceSmall`。截图和待转写音频会发送到对应的 AI 服务，并按服务方规则计费；未配置视觉模型时仅截图识别不可用，文本名单仍可导入和搜索。
 
 取消任务会停止后续识别和搜索，并丢弃当前请求的结果；已发送至外部服务的请求可能仍会完成并产生费用。
 
@@ -85,10 +85,10 @@ AI 按输入类型选择模型：文字总结和思维导图使用 `LLM_MODEL`�
 密码长度为 8 到 128 个字符，不强制包含大小写字母、数字或特殊符号。输入时终端不显示字符；长度不合规或两次输入不一致时，脚本会提示重新输入。
 
 ```powershell
-.\.run\startup-venv\Scripts\python.exe scripts\initialize-accounts.py --username admin
+.\.venv\Scripts\python.exe scripts\initialize-accounts.py --username admin
 ```
 
-未使用 `startup-venv` 时改用 `.venv\Scripts\python.exe`。密码不通过命令行参数传入，不提供默认密码。脚本还会在忽略的 `.env.universal-video.local` 中生成 JWT 密钥。Access Token 在浏览器内存保存 15 分钟；Refresh Token 使用 HttpOnly / SameSite Cookie 和 Redis 会话，最长 7 天，轮换不延长会话期限。修改或重置密码、停用账号会撤销全部会话。
+已有环境使用 `.run/startup-venv` 时，替换为其 `Scripts/python.exe`；启动脚本会显示实际所选环境。密码不通过命令行参数传入，不提供默认密码。脚本还会在忽略的 `.env.universal-video.local` 中生成 JWT 密钥。Access Token 在浏览器内存保存 15 分钟；Refresh Token 使用 HttpOnly / SameSite Cookie 和 Redis 会话，最长 7 天，轮换不延长会话期限。修改或重置密码、停用账号会撤销全部会话。
 
 开发访问地址固定为 `http://127.0.0.1:5174/`。生产环境配置 HTTPS、`VIDEODREAM_COOKIE_SECURE=true`，并将 `VIDEODREAM_ORIGINS` 设置为实际前端地址。媒体资源通过同源 Service Worker 添加认证头，文件、图片、歌词及 Range 请求均需认证；旧匿名地址不能直接访问。Redis 不可用时返回 503，不允许仅凭 JWT 访问。
 
@@ -158,17 +158,29 @@ CUDA 与 DirectML 使用不同的 ONNX Runtime 安装包，同一个虚拟环境
 AI 总结使用 OpenAI 兼容接口。在项目根目录的统一配置文件 `.env.universal-video.local` 中填写：
 
 ```dotenv
+# 文字总结与思维导图
 LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=replace-with-your-api-key
 LLM_MODEL=gpt-4.1-mini
+LLM_API_KEY=replace-with-your-text-api-key
+
+# 截图识别
+LLM_VISION_BASE_URL=https://api.openai.com/v1
+LLM_VISION_MODEL=
+LLM_VISION_API_KEY=replace-with-your-vision-api-key
+
+# 语音转写
+LLM_ASR_BASE_URL=https://api.siliconflow.cn/v1
 LLM_ASR_MODEL=
+LLM_ASR_API_KEY=replace-with-your-speech-api-key
 ```
 
-管理后台已保存的 AI 密钥优先使用；后台未配置密钥时，自动读取此本地文件中的 API 地址、密钥和模型。进程中的同名环境变量优先于本地文件。此文件使用 UTF-8 dotenv 格式，配置值按字面量读取，不展开 `${...}`。
+登录任务和本地脚本都优先使用进程中的同名环境变量，其次是 `.env.universal-video.local`、旧 `.env`；登录任务再使用后台保存配置和默认值。修改本地文件后重启后端，新任务使用新配置，已固定配置的在途任务继续使用原配置。三组地址和密钥应分别填写；一组的独立地址已填写但密钥缺失时，不借用文字服务密钥。仅旧配置完全没有独立连接字段时，兼容原有共享连接；后台下次保存会将旧连接分别固定，再修改文字组不会改变其他组。
+
+后台分别显示三组地址、模型及脱敏密钥。有环境配置的组标注来源并禁用后台修改，避免保存后被环境值覆盖；如需使用后台管理，请移除该组环境配置及进程变量。环境密钥不会因保存其他后台设置而写入数据库。此文件使用 UTF-8 dotenv 格式，配置值不展开 `${...}`；普通地址、模型和密钥可不加引号，含空格或注释符号的值需保证解析后完整。
 
 视频总结优先使用平台人工字幕或自动字幕。没有可用字幕时，自动下载音轨、校验完整性、按约 60 秒分段，通过 `/audio/transcriptions` 转写后生成总结。SiliconFlow 可填写 `LLM_ASR_MODEL=FunAudioLLM/SenseVoiceSmall`；其他服务需填写其支持的语音识别模型。仅支持 4 小时以内的非直播音轨。结果标记为「语音转写（分段时间戳）」，时间戳代表分段起点，章节定位为近似值。临时音频在成功、失败或取消后清理，服务重启可能中断正在处理的任务。
 
-兼容原有配置：未登录的脚本调用还可复制 `config/ai.example.json` 为 `config/ai.json`，填写：
+兼容原有配置：未登录脚本未提供对应环境连接时，还可复制 `config/ai.example.json` 为 `config/ai.json`，填写：
 
 ```json
 {
@@ -182,112 +194,41 @@ B 站总结优先调用平台字幕 API，直接获取创作者上传或平台�
 
 `.env.universal-video.local` 和 `config/ai.json` 已被 `.gitignore` 忽略，请不要提交真实密钥。
 
-## 运行环境
+## 开发运行
 
-- Python 3.11+（可选 AI 修复依赖需要 Python 3.12+）
-- Node.js 20 系列需要 20.19+，或使用 22.12 及以上版本
-- ffmpeg
-- MySQL 和 Redis
-
-优先使用本机已有的 Python 和 Node，只要满足版本要求。创建 `.venv` 会复用当前 Python 解释器，不需要另外安装 Python 3.12，也不会把项目依赖装到全局环境。具体兼容性以依赖安装和测试结果为准。
-
-ffmpeg/ffprobe、Node 和 Chrome/Edge 自动从本机查找；没有本机浏览器时使用 Playwright 安装的 Chromium。启动前可通过进程环境变量 `VIDEODREAM_FFMPEG_DIR`、`VIDEODREAM_NODE_EXE`、`VIDEODREAM_BROWSER_EXE` 指定自定义目录或可执行文件路径。
-
-### macOS 本地运行
-
-已有 MySQL、Redis 时复用现有服务，仅补装缺少的工具。ffmpeg 缺失时可运行 `brew install ffmpeg`。
-
-在项目根目录执行：
-
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r backend/requirements.txt
-npm --prefix frontend ci
-cp .env.example .env.universal-video.local
-```
-
-在 `.env.universal-video.local` 中填写已创建的 MySQL 数据库和用户。Homebrew 常见端口为 MySQL `3306`、Redis `6379`，需要与本机实际服务一致。将 `VIDEODREAM_JWT_SECRET` 留空，初始化脚本会生成随机密钥。若本机没有 Chrome/Edge，先执行 `.venv/bin/python -m playwright install chromium`。
-
-```bash
-.venv/bin/python scripts/initialize-accounts.py --username admin
-.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
-```
-
-另开终端，在项目根目录运行 `npm --prefix frontend run dev`，访问 `http://127.0.0.1:5174/`。
-
-## 首次安装
-
-安装后端依赖：
+环境初始化、配置、管理员设置、日常启动与验证见 [开发指南](docs/development.md)。在项目根目录用两个 PowerShell 7 终端分别启动：
 
 ```powershell
-cd C:\softWare\project\UniversalVideo
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-.\.venv\Scripts\python.exe -m playwright install chromium
+pwsh -File scripts/start-backend.ps1
+pwsh -File scripts/start-frontend.ps1
 ```
 
-安装前端依赖：
+首次安装先执行 `pwsh -File scripts/setup.ps1`。日常启动不重复安装依赖；后端打印实际使用的 Python 环境。访问固定地址 `http://127.0.0.1:5174/`，后端为 `8001`。端口已占用时检查现有进程，不自动换端口或启动第二份服务。
+
+统一验证入口：
 
 ```powershell
-cd C:\softWare\project\UniversalVideo\frontend
-npm ci
+pwsh -File scripts/test.ps1
 ```
 
-首次使用 AI 总结前，创建本地配置并填写 OpenAI 兼容接口信息：
-
-```powershell
-cd C:\softWare\project\UniversalVideo
-Copy-Item config\ai.example.json config\ai.json
-notepad config\ai.json
-```
-
-## 启动后端
-
-打开一个 PowerShell 7 终端并保持窗口运行：
-
-```powershell
-cd C:\softWare\project\UniversalVideo
-pwsh -File scripts\start-backend.ps1
-```
-
-健康检查：
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8001/api/health
-```
-
-接口文档：`http://127.0.0.1:8001/docs`
-
-## 启动前端
-
-再打开一个 PowerShell 7 终端并保持窗口运行：
-
-```powershell
-cd C:\softWare\project\UniversalVideo\frontend
-npm run dev
-```
-
-访问：
+## 项目结构与文档
 
 ```text
-http://127.0.0.1:5174
+backend/core/            路径与配置
+backend/infrastructure/  数据库、网络、浏览器、音频与 AI 适配
+backend/modules/         按业务组织的后端代码
+backend/migrations/      已有数据迁移的协调入口
+backend/tests/           按业务归类的 Python 测试
+frontend/src/app/        应用入口与布局
+frontend/src/features/   按业务组织的组件与状态
+frontend/src/shared/     公共请求、工具与样式
+frontend/tests/          前端测试
+spec/                    当前功能规格
+docs/                    架构、开发指南和历史资料
+scripts/                 初始化、启动与验证
 ```
 
-前端开发服务器会把 `/api` 请求代理到 `http://127.0.0.1:8001`，因此手动启动后端时必须使用 `8001` 端口。
-
-后端和前端都是前台进程。关闭对应 PowerShell 窗口会停止服务；需要停止时，在对应终端按 `Ctrl+C`。
-
-本地固定使用前端 `5174`、后端 `8001`。更新后端代码后重启 `8001` 上的项目进程，使新增接口生效；不要另开端口连接另一份后端。前端开发模式在原地址自动更新，后端单独提供页面时需重新构建前端后访问 `http://127.0.0.1:8001/`。
-
-## 项目结构
-
-```text
-backend/      FastAPI 后端、解析与下载任务
-frontend/     Vue 3 前端工作台
-downloads/    本地临时下载目录，已加入 .gitignore
-docs/         需求与方案文档
-scripts/      本地启动脚本
-```
+详见 [工程结构](docs/architecture.md)、[功能规格](spec/README.md) 和 [文档导航](docs/README.md)。用户媒体位于 `downloads/`，运行资源和备份位于 `.run/`。
 
 ## 发布记录
 
