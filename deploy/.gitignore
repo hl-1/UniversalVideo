@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+certs/
+backups/
+*.local.sql
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+*.zip

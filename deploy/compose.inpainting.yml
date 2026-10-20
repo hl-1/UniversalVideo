@@ -1,0 +1,6 @@
+# Append this file to EVERY build/up command when using local CPU AI inpainting.
+services:
+  app:
+    build:
+      args:
+        INSTALL_INPAINTING: "true"

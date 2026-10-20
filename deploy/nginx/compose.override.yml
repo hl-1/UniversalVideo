@@ -1,0 +1,12 @@
+# Merge with the existing aippt Compose file; never run this file on its own.
+# Keep using BOTH files for future aippt Compose operations, or copy this volume
+# into aippt's original nginx service once and use that original file afterwards.
+services:
+  nginx:
+    volumes:
+      - type: bind
+        source: /opt/videodream/deploy/nginx/xianyue.huanliyu.cn.conf
+        target: /etc/nginx/conf.d/xianyue.huanliyu.cn.conf
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,62 @@
+name: videodream
+
+services:
+  app:
+    image: videodream:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        INSTALL_INPAINTING: "false"
+    restart: unless-stopped
+    cpus: "2.0"
+    mem_limit: 3g
+    shm_size: 512m
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ../downloads
+        target: /app/downloads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.run
+        target: /app/.run
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.env.production
+        target: /app/.env.universal-video.local
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      ingress:
+        aliases:
+          - videodream-app
+      database: {}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ingress:
+    external: true
+    name: huanliyu-ingress
+  database:
+    external: true
+    name: code-generator_default
