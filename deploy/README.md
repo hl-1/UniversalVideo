@@ -168,9 +168,15 @@ docker compose --progress plain -f deploy/compose.yml build app
 
 首次构建会下载镜像、Python/npm 依赖和 Chromium；建议低峰执行。GitHub SSH 已配置不代表镜像仓库、npm、PyPI 和浏览器下载都可访问。若失败，先按实际错误修复网络或依赖问题。
 
+前端 npm 安装统一使用 `https://registry.npmmirror.com`，保留锁文件版本及完整性校验，设置 60 秒请求超时和 5 次连接重试；构建时可通过 `--build-arg NPM_REGISTRY=https://其他镜像` 选择软件源。
+
 镜像内的 Debian 软件包源使用阿里云 `https://mirrors.aliyun.com/debian` 和 `https://mirrors.aliyun.com/debian-security`，沿用 Bookworm 的发行版本与 Debian 原有签名校验。目标服务器下载 2 MB 索引样本时实测约 11.3 MB/s，默认源在 20 秒内连接超时；后续速度以实际构建日志为准。Playwright 安装系统依赖也使用这组软件源。
 
-Python 包、Playwright 系统依赖和 Chromium 下载分别构建为独立步骤；浏览器下载失败后重试，可以复用已经成功的依赖安装步骤。Python 包和浏览器仍从各自官方源下载，需要分别观察其速度。
+Python 依赖（含可选 AI 去水印依赖）使用清华源 `https://pypi.tuna.tsinghua.edu.cn/simple`，设置 60 秒网络超时和 5 次连接重试。需要另选软件源时，可在构建命令中传入 `--build-arg PIP_INDEX_URL=https://其他镜像/simple`。该参数在 Debian 安装步骤之后声明，切换 Python 源可以复用前面的系统依赖安装缓存。
+
+Python 包、Playwright 系统依赖和 Chromium 下载分别构建为独立步骤；浏览器下载失败后重试，可以复用已经成功的依赖安装步骤。Playwright 安装系统依赖时，APT 使用 60 秒网络超时和 3 次重试。
+
+Chromium、无头浏览器和 Playwright FFmpeg 使用国内 `https://npmmirror.com/mirrors/playwright` 下载源，由已锁定的 Playwright 版本选择对应浏览器版本，下载空闲超时设为 120 秒。构建参数 `PLAYWRIGHT_DOWNLOAD_HOST` 可指定其他兼容镜像，`PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT` 可调整超时（毫秒）。例如传入 `--build-arg PLAYWRIGHT_DOWNLOAD_HOST=` 可恢复 Playwright 官方下载源。浏览器参数在系统依赖安装后声明，更换浏览器源时可以复用前面的安装缓存。
 
 如果旧版本构建仍在运行，先在该终端按 `Ctrl+C` 停止本次构建，然后拉取更新并重试：
 
@@ -181,6 +187,8 @@ docker compose --progress plain -f deploy/compose.yml build app
 ```
 
 构建时保留缓存，无需添加 `--no-cache` 或清理 Docker 缓存。
+
+npm 和 Python 下载目录使用 BuildKit 缓存挂载，依赖步骤失败后重试也可复用已缓存的包，缓存保留在构建器中。缓存挂载不会写入最终应用镜像；单个下载中断的文件仍可能需要重新下载。构建需使用支持缓存挂载的 Docker BuildKit，本文的 `docker compose build` 使用该构建方式。
 
 检查固定 JWT 配置与 Redis 连接（不显示密钥）：
 

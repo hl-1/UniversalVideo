@@ -3,7 +3,10 @@ FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /build/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --registry="$NPM_REGISTRY" --replace-registry-host=always \
+      --fetch-retries=5 --fetch-timeout=60000
 
 COPY frontend/ ./
 RUN npm run build
@@ -36,15 +39,30 @@ RUN sed -i \
 COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
 
 COPY backend/requirements*.txt ./backend/
-RUN python -m pip install --no-cache-dir -r backend/requirements.txt \
+# Declare the Python mirror here to preserve the Debian installation cache.
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install \
+      --index-url "$PIP_INDEX_URL" --timeout 60 --retries 5 \
+      -r backend/requirements.txt \
     && if [ "$INSTALL_INPAINTING" = "true" ]; then \
-         python -m pip install --no-cache-dir -r backend/requirements-inpainting.txt; \
+         python -m pip install \
+           --index-url "$PIP_INDEX_URL" --timeout 60 --retries 5 \
+           -r backend/requirements-inpainting.txt; \
        fi
 
 # Cache Python and system dependencies independently of the browser download.
-RUN python -m playwright install-deps chromium \
+RUN printf '%s\n' \
+      'Acquire::Retries "3";' \
+      'Acquire::http::Timeout "60";' \
+      'Acquire::https::Timeout "60";' \
+      > /etc/apt/apt.conf.d/80videodream-downloads \
+    && python -m playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep browser source changes independent of Python and system dependency layers.
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+ARG PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000
 RUN python -m playwright install chromium \
     && chmod -R a+rX /ms-playwright
 
