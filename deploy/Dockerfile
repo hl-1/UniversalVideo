@@ -21,7 +21,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+# Keep Debian's suites and signing keys; use the mirror measured on the cloud host.
+# Playwright's system dependency installer will use these sources as well.
+RUN sed -i \
+      -e 's|http://deb.debian.org|https://mirrors.aliyun.com|g' \
+      -e 's|https://deb.debian.org|https://mirrors.aliyun.com|g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates ffmpeg libstdc++6 libatomic1 libgomp1 tini \
     && rm -rf /var/lib/apt/lists/*
@@ -33,10 +39,14 @@ COPY backend/requirements*.txt ./backend/
 RUN python -m pip install --no-cache-dir -r backend/requirements.txt \
     && if [ "$INSTALL_INPAINTING" = "true" ]; then \
          python -m pip install --no-cache-dir -r backend/requirements-inpainting.txt; \
-       fi \
-    && python -m playwright install --with-deps chromium \
-    && chmod -R a+rX /ms-playwright \
+       fi
+
+# Cache Python and system dependencies independently of the browser download.
+RUN python -m playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python -m playwright install chromium \
+    && chmod -R a+rX /ms-playwright
 
 RUN groupadd --gid 10001 videodream \
     && useradd --uid 10001 --gid 10001 --create-home videodream

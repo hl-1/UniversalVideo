@@ -163,10 +163,24 @@ Compose 把该文件只读挂载到 `/app/.env.universal-video.local`，由项�
 ```bash
 cd /opt/videodream
 docker compose -f deploy/compose.yml config -q
-docker compose -f deploy/compose.yml build app
+docker compose --progress plain -f deploy/compose.yml build app
 ```
 
 首次构建会下载镜像、Python/npm 依赖和 Chromium；建议低峰执行。GitHub SSH 已配置不代表镜像仓库、npm、PyPI 和浏览器下载都可访问。若失败，先按实际错误修复网络或依赖问题。
+
+镜像内的 Debian 软件包源使用阿里云 `https://mirrors.aliyun.com/debian` 和 `https://mirrors.aliyun.com/debian-security`，沿用 Bookworm 的发行版本与 Debian 原有签名校验。目标服务器下载 2 MB 索引样本时实测约 11.3 MB/s，默认源在 20 秒内连接超时；后续速度以实际构建日志为准。Playwright 安装系统依赖也使用这组软件源。
+
+Python 包、Playwright 系统依赖和 Chromium 下载分别构建为独立步骤；浏览器下载失败后重试，可以复用已经成功的依赖安装步骤。Python 包和浏览器仍从各自官方源下载，需要分别观察其速度。
+
+如果旧版本构建仍在运行，先在该终端按 `Ctrl+C` 停止本次构建，然后拉取更新并重试：
+
+```bash
+cd /opt/videodream
+git pull --ff-only
+docker compose --progress plain -f deploy/compose.yml build app
+```
+
+构建时保留缓存，无需添加 `--no-cache` 或清理 Docker 缓存。
 
 检查固定 JWT 配置与 Redis 连接（不显示密钥）：
 
