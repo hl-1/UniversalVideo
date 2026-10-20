@@ -46,7 +46,7 @@ def image_path(url: str) -> Path:
     return image_directory() / name
 
 
-def save_image(data: bytes, *, background: bool = False, uid: int | None = None) -> str:
+def save_image(data: bytes, *, background: bool = False, uid: int | None = None, source: dict | None = None) -> str:
     limit = MAX_BACKGROUND_IMAGE_BYTES if background else MAX_IMAGE_BYTES
     if not data or len(data) > limit:
         raise HTTPException(422, f"请选择 {limit // (1024 * 1024)} MB 以内的 JPG、PNG 或 WebP 图片。")
@@ -63,16 +63,16 @@ def save_image(data: bytes, *, background: bool = False, uid: int | None = None)
             folder.mkdir(parents=True, exist_ok=True)
             name = secrets.token_hex(16) + ".webp"
             picture.save(folder / name, "WEBP", quality=90)
-            accounts.register_resource("image", name, {"filename": name, "size": (folder / name).stat().st_size}, uid=uid)
+            accounts.register_resource("image", name, {"filename": name, "size": (folder / name).stat().st_size, **(source or {})}, uid=uid)
             return f"/api/library/images/{name}"
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise HTTPException(422, "图片无法读取，请选择有效的 JPG、PNG 或 WebP 图片。") from exc
 
 
-def upload_image(file: UploadFile, *, background: bool = False, uid: int | None = None) -> str:
+def upload_image(file: UploadFile, *, background: bool = False, uid: int | None = None, source: dict | None = None) -> str:
     limit = MAX_BACKGROUND_IMAGE_BYTES if background else MAX_IMAGE_BYTES
     try:
-        return save_image(file.file.read(limit + 1), background=background, uid=uid)
+        return save_image(file.file.read(limit + 1), background=background, uid=uid, source=source)
     finally:
         file.file.close()
 
@@ -99,8 +99,9 @@ def require_track(cursor, key: str) -> str:
 def upload_track_cover(key: str, file: UploadFile):
     with library.database() as cursor:
         key = require_track(cursor, key)
-        cursor.execute("SELECT user_id FROM music_tracks WHERE id=%s", (key,))
-        url = upload_image(file, uid=cursor.fetchone()["user_id"])
+        cursor.execute("SELECT * FROM music_tracks WHERE id=%s", (key,))
+        track = cursor.fetchone()
+        url = upload_image(file, uid=track["user_id"], source={"source_url": track["webpage_url"]})
         cursor.execute("UPDATE music_tracks SET custom_thumbnail=%s,cover_updated_at=%s WHERE id=%s", (url, time.time(), key))
     return {"id": key, "thumbnail": url, "custom_thumbnail": url}
 
@@ -222,21 +223,22 @@ def matching_cover(track: dict) -> str | None:
     return None
 
 
-def cache_cover(url: str) -> str:
+def cache_cover(url: str, *, source=None) -> str:
     if url.startswith("/api/") and not url.startswith("/api/image-proxy"):
         return url
     if url.startswith("/api/image-proxy"):
         url = parse_qs(urlparse(url).query).get("url", [""])[0]
     if urlparse(url).scheme not in {"https", "http"}:
         raise ValueError("Invalid cover URL")
-    with requests.get(url, headers=music.HEADERS, stream=True, timeout=(4, 10)) as response:
+    from backend.infrastructure import video_network
+    with video_network.get(url, referer=(source or {}).get("webpage_url"), headers=music.HEADERS, stream=True, timeout=(4, 10)) as response:
         response.raise_for_status()
         data = bytearray()
         for chunk in response.iter_content(65536):
             data.extend(chunk)
             if len(data) > MAX_IMAGE_BYTES:
                 raise ValueError("Cover too large")
-    return save_image(bytes(data))
+    return save_image(bytes(data), source={"source_url": (source or {}).get("webpage_url"), "cover_url": url})
 
 
 def backfill_covers():
@@ -252,7 +254,7 @@ def backfill_covers():
         with cover_lock:
             state["total"] = len(tracks)
         for track in tracks:
-            accounts.active_worker(accounts.owner_id())
+            accounts.active_worker(accounts.owner_id(), source=track)
             updated = False
             try:
                 url = track["thumbnail"]
@@ -261,7 +263,7 @@ def backfill_covers():
                 if not url:
                     url = matching_cover(track)
                 if url:
-                    thumbnail = cache_cover(url)
+                    thumbnail = cache_cover(url, source=track)
                     with library.database() as cursor:
                         cursor.execute("UPDATE music_tracks SET thumbnail=%s WHERE id=%s", (thumbnail, track["id"]))
                     updated = True

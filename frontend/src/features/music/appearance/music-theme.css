@@ -11,7 +11,7 @@ html[data-music-theme] .mc-sidebar nav button:hover, html[data-music-theme] .mc-
 html[data-music-theme] .mc-sidebar nav button.active, html[data-music-theme] .mc-icon.active, html[data-music-theme] .mc-track-row.playing { background: var(--music-accent-soft); color: var(--music-accent); }
 html[data-music-theme] .mc-icon.liked { color: #df6078; }
 html[data-music-theme] .mc-topbar, html[data-music-theme] .mc-track-row, html[data-music-theme] .queue-heading, html[data-music-theme] .player-queue li { border-color: var(--music-line); }
-html[data-music-theme] .mc-search, html[data-music-theme] .track-art, html[data-music-theme] .playlist-art, html[data-music-theme] .mc-avatar { background: var(--music-soft); color: var(--music-muted); }
+html[data-music-theme] .mc-search-field, html[data-music-theme] .track-art, html[data-music-theme] .playlist-art, html[data-music-theme] .mc-avatar { background: var(--music-soft); color: var(--music-muted); }
 html[data-music-theme] .mc-search input, html[data-music-theme] .mc-profile-stats strong { color: var(--music-text); }
 html[data-music-theme] .mc-search input::placeholder { color: var(--music-muted); }
 html[data-music-theme] .mc-command { background: var(--music-surface); border-color: var(--music-line); color: var(--music-text); }

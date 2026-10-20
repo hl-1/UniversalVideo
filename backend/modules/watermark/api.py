@@ -193,7 +193,7 @@ def _filter_chain(info: VideoInfo, regions: list[WatermarkRegion]) -> str:
 def _update(job: WatermarkJob, **changes) -> None:
     if job.user_id and not job.cancel.is_set() and time.monotonic() - getattr(job, "_checked_at", 0) >= 1:
         try:
-            accounts.active_worker(job.user_id)
+            accounts.active_worker(job.user_id, source={"source_filename": job.source.name})
             job._checked_at = time.monotonic()
         except HTTPException:
             job.cancel.set()
@@ -202,11 +202,11 @@ def _update(job: WatermarkJob, **changes) -> None:
         for key, value in changes.items():
             setattr(job, key, value)
     if job.user_id and (time.monotonic() - getattr(job, "_saved_at", 0) >= 1 or job.status in {"finished", "failed", "cancelled"}):
-        accounts.register_resource("watermark", job.task_id, job.response().model_dump(), uid=job.user_id)
+        accounts.register_resource("watermark", job.task_id, dict(job.response().model_dump(), source_filename=job.source.name), uid=job.user_id)
         job._saved_at = time.monotonic()
         if job.status == "finished" and job.filename:
             path = DOWNLOAD_DIR / job.filename
-            accounts.register_resource("file", job.filename, {"filename": job.filename, "size": path.stat().st_size}, uid=job.user_id)
+            accounts.register_resource("file", job.filename, {"filename": job.filename, "size": path.stat().st_size, "source_filename": job.source.name}, uid=job.user_id)
 
 
 def _stop_processes(job: WatermarkJob) -> None:
@@ -277,7 +277,7 @@ def _run_watermark(job: WatermarkJob) -> None:
     timed_out = threading.Event()
     try:
         if job.user_id:
-            accounts.active_worker(job.user_id)
+            accounts.active_worker(job.user_id, source={"source_filename": job.source.name})
         with jobs_lock:
             if job.cancel.is_set():
                 return
@@ -448,7 +448,7 @@ def create_watermark(payload: WatermarkRequest) -> WatermarkResponse:
             raise HTTPException(status_code=429, detail="去水印队列已满，请等待现有任务完成。")
         jobs[job.task_id] = job
         response = job.response()
-    accounts.register_resource("watermark", job.task_id, response.model_dump(), uid=job.user_id)
+    accounts.register_resource("watermark", job.task_id, dict(response.model_dump(), source_filename=job.source.name), uid=job.user_id)
     accounts.submit(executor, _run_watermark, job)
     return response
 

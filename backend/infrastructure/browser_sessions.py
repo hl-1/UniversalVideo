@@ -159,6 +159,7 @@ class BrowserSessions:
         profile.mkdir(parents=True, exist_ok=True, mode=0o700)
         profile.chmod(0o700)
         options = {
+            "proxy": {"server": "direct://"},
             "headless": not bool(visible), "locale": "zh-CN",
             "viewport": {"width": 1365, "height": 768}, "service_workers": "block",
             "args": ["--autoplay-policy=no-user-gesture-required", "--disable-extensions", "--disable-notifications", "--mute-audio"],

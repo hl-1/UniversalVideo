@@ -4,6 +4,14 @@ from typing import Any
 
 from backend.modules.video import schemas as video_schemas
 from backend.modules.video import thumbnails as video_thumbnails
+from backend.infrastructure import platform_access
+
+
+def pornhub_selector(height: int, extension: str = "mp4", hls: bool = True) -> str:
+    # HLS IDs contain measured bandwidth and can change on the next extraction.
+    # Keep the requested quality, while allowing the same quality's HTTP backup.
+    base = f"best[height={height}][ext={extension}]"
+    return f"{base}[protocol^=m3u8]/{base}" if hls else f"{base}[protocol^=http]/{base}"
 
 
 def _format_label(item: dict[str, Any]) -> str:
@@ -30,8 +38,9 @@ def _format_label(item: dict[str, Any]) -> str:
 def _extract_formats(info: dict[str, Any]) -> list[video_schemas.FormatInfo]:
     candidates: list[video_schemas.FormatInfo] = []
     seen: set[str] = set()
-    for item in info.get("formats") or []:
-        raw_format_id = str(item.get("format_id") or "")
+    items = info.get("formats") or ([info] if info.get("url") else [])
+    for item in items:
+        raw_format_id = str(item.get("format_id") or ("best" if item is info else ""))
         if not raw_format_id or raw_format_id in seen:
             continue
         if item.get("vcodec") == "none" and item.get("acodec") == "none":
@@ -42,7 +51,10 @@ def _extract_formats(info: dict[str, Any]) -> list[video_schemas.FormatInfo]:
         has_audio = item.get("acodec") not in (None, "none")
         format_id = raw_format_id
         label = _format_label(item)
-        if has_video and not has_audio:
+        if (platform_access.platform(info.get("webpage_url")) == "pornhub" or str(info.get("extractor_key", "")).lower() == "pornhub") and item.get("height") and item.get("ext") in {"mp4", "webm"}:
+            format_id = pornhub_selector(int(item["height"]), item["ext"], str(item.get("protocol", "")).startswith("m3u8"))
+            label += " · HLS" if str(item.get("protocol", "")).startswith("m3u8") else " · HTTP"
+        elif has_video and not has_audio:
             format_id = f"{raw_format_id}+bestaudio/best"
             label = f"{label} · 含最佳音频"
 
@@ -54,6 +66,7 @@ def _extract_formats(info: dict[str, Any]) -> list[video_schemas.FormatInfo]:
                 resolution=item.get("resolution")
                 or (f"{item.get('height')}p" if item.get("height") else None),
                 filesize=video_thumbnails._safe_int(item.get("filesize") or item.get("filesize_approx")),
+                has_video=has_video if item.get("vcodec") is not None else None,
             )
         )
 

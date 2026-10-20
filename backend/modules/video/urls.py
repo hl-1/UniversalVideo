@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 
 from backend.modules.video import constants as video_constants
+from backend.infrastructure import video_network
 
 
 def _host(url: str) -> str:
@@ -14,16 +15,16 @@ def _host(url: str) -> str:
 
 def _is_bilibili_url(url: str) -> bool:
     host = _host(url)
-    return "bilibili.com" in host or "b23.tv" in host
+    return video_network.matches(url, ("bilibili.com", "b23.tv"))
 
 
 def _is_pornhub_url(url: str) -> bool:
-    return "pornhub.com" in _host(url)
+    return video_network.matches(url, ("pornhub.com",))
 
 
 def _is_youtube_url(url: str) -> bool:
     host = _host(url)
-    return "youtube.com" in host or "youtu.be" in host
+    return video_network.matches(url, ("youtube.com", "youtu.be"))
 
 
 def _extract_youtube_video_id(url: str) -> str | None:
@@ -77,14 +78,16 @@ def _resolve_douyin_url(url: str) -> str:
     if _extract_douyin_video_id(url):
         return url
     try:
-        response = requests.get(
+        response = video_network.get(
             url,
             headers=video_constants.DOUYIN_HEADERS,
-            allow_redirects=True,
             timeout=(10, 20),
         )
-        response.raise_for_status()
-        return response.url or url
+        try:
+            response.raise_for_status()
+            return response.url or url
+        finally:
+            response.close()
     except requests.RequestException:
         return url
 
@@ -103,13 +106,21 @@ def normalize_url(url: str) -> str:
 
 
 def _clean_error(error: Exception, url: str | None = None) -> str:
+    from backend.infrastructure.ytdlp import network_failure
+    if failure := network_failure(error):
+        return failure.message.replace("重试播放", "重试")
+    from fastapi import HTTPException
+    if isinstance(error, HTTPException):
+        return str(error.detail)
     text = str(error).strip()
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
     text = text.replace("ERROR:", "").strip()
+    if url and _is_bilibili_url(url) and "B站公开 API 解析失败" in text:
+        return text
     if url and _is_bilibili_url(url) and "412" in text:
         return (
-            "B站接口返回 412，通常是请求头或登录态校验导致。"
-            "当前版本仅支持无需 Cookie 的公开资源，请确认链接可公开访问后重试。"
+            "B站请求返回 HTTP 412，被平台访问校验拒绝。"
+            "请稍后重试；该状态不能单独证明视频需要登录。"
         )
     if url and _is_pornhub_url(url) and "410" in text:
         return (

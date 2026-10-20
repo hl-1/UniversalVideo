@@ -10,6 +10,8 @@ from fastapi import HTTPException
 
 from backend.modules.video import constants as video_constants
 from backend.modules.video import schemas as video_schemas
+from backend.infrastructure import video_network
+from backend.modules.video import parse_runtime
 
 
 def _looks_like_media_url(url: str) -> bool:
@@ -27,14 +29,24 @@ def _media_ext(url: str) -> str:
 
 def _fetch_html(url: str) -> str:
     try:
-        response = requests.get(url, headers=video_constants.DEFAULT_HEADERS, timeout=(10, 25))
+        response = video_network.get(url, headers=video_constants.DEFAULT_HEADERS, stream=True,
+                                     timeout=(parse_runtime.seconds(3), parse_runtime.seconds(5)))
         response.raise_for_status()
     except requests.RequestException as exc:
         raise HTTPException(status_code=422, detail="网页访问失败，无法嗅探视频资源。") from exc
-    content_type = response.headers.get("Content-Type", "").lower()
-    if "text/html" not in content_type and "application/xhtml" not in content_type:
-        return ""
-    return response.text or ""
+    try:
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "text/html" not in content_type and "application/xhtml" not in content_type:
+            return ""
+        content = bytearray()
+        for chunk in response.iter_content(65536):
+            parse_runtime.check()
+            content.extend(chunk)
+            if len(content) > 4 * 1024 * 1024:
+                raise HTTPException(422, "视频页面过大，请使用单个视频的分享链接。")
+        return content.decode(response.encoding or "utf-8", "replace")
+    finally:
+        response.close()
 
 
 def _sniff_media_urls(page_url: str, html_text: str) -> list[str]:

@@ -2,14 +2,18 @@
 
 ## 当前功能规格
 
+- [移动端音乐中心布局与交互](features/mobile-music-experience.md)
 - [视频模块持久化](VideoDream-视频模块持久化功能设计.md)
 - [用户与管理员](VideoDream-用户与管理员功能设计.md)
 - [场景歌单 Agent](VideoDream-场景歌单Agent功能设计.md)
 - [AI 视频总结](features/ai-video-summary.md)
 - [思维导图](features/ai-summary-mindmap.md)
 - [平台字幕](features/video-summary-platform-subtitles.md)
+- [B站公开 API 解析与下载](features/bilibili-public-parsing.md)
+- [国内平台下载与速度优化](features/domestic-video-downloads.md)
+- [YouTube / Pornhub 下载与统一超级管理员权限](features/overseas-video-downloads.md)
 - [抖音公开解析](features/douyin-public-parsing.md)
-- [抖音在线预览](features/douyin-online-preview.md)
+- [通用视频在线预览](features/douyin-online-preview.md)
 - [最近链接](features/recent-link-history.md)
 
 ## 规划与工程记录

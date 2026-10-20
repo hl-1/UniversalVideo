@@ -355,8 +355,8 @@ def _save_summary_files(task: video_tasks.SummaryTask, result: video_schemas.Sum
     )
     result.markdown_url = f"/api/summary-files/{quote(markdown_name, safe='')}"
     result.json_url = f"/api/summary-files/{quote(json_name, safe='')}"
-    accounts.register_resource("summary_file", markdown_name, {"filename": markdown_name, "size": markdown_path.stat().st_size}, uid=task.user_id)
-    accounts.register_resource("summary_file", json_name, {"filename": json_name, "size": json_path.stat().st_size}, uid=task.user_id)
+    accounts.register_resource("summary_file", markdown_name, {"filename": markdown_name, "size": markdown_path.stat().st_size, "source_url": task.url, "summary_task_id": task.task_id, "parse_record_id": task.parse_record_id}, uid=task.user_id)
+    accounts.register_resource("summary_file", json_name, {"filename": json_name, "size": json_path.stat().st_size, "source_url": task.url, "summary_task_id": task.task_id, "parse_record_id": task.parse_record_id}, uid=task.user_id)
     return result
 
 

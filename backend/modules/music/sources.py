@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from urllib.parse import parse_qs, urlparse
 
 import requests
+from backend.infrastructure import video_network
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
@@ -60,6 +61,7 @@ class PlaybackSession:
     media_url: str
     headers: dict[str, str]
     expires_at: float
+    referer: str = ""
 sessions: dict[str, TrackSession] = {}
 playback_sessions: dict[str, PlaybackSession] = {}
 search_cache: dict[tuple[str, str, int], tuple[float, list[Track]]] = {}
@@ -355,8 +357,8 @@ def create_playback(payload: PlaybackRequest) -> dict:
             del playback_sessions[expired]
         if len(playback_sessions) >= 200:
             del playback_sessions[next(iter(playback_sessions))]
-        playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL)
-    accounts.register_resource("playback", token)
+        playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL, track.webpage_url)
+    accounts.register_resource("playback", token, {"source_url": track.webpage_url, "media_url": media_url})
     return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL, "source": source}
 
 
@@ -377,7 +379,7 @@ def playback_content(token: str, range_header: Annotated[str | None, Header(alia
     if range_header:
         headers["Range"] = range_header.strip()
     try:
-        upstream = requests.get(session.media_url, headers=headers, stream=True, timeout=(10, 30))
+        upstream = video_network.get(session.media_url, referer=session.referer, headers=headers, stream=True, timeout=(10, 30))
     except requests.RequestException as exc:
         raise HTTPException(502, "连接音源失败，请重新点击播放。") from exc
     content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()

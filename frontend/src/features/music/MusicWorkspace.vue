@@ -2,7 +2,8 @@
 import { createMusicBatch } from './musicBatch'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account } from '../accounts/auth'
-import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileArchive, Heart, LoaderCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Search, Square, X } from 'lucide-vue-next'
+import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileArchive, Heart, ListChecks, LoaderCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Search, Square, X } from 'lucide-vue-next'
+import TrackCover from './components/TrackCover.vue'
 import { extractHttpUrl } from '../../shared/utils/downloadInput'
 import { getTracks, isLiked, libraryRevision, refreshLibrary, renewTrack, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from './musicLibrary'
 import { currentTrack, isPlaybackTrack, playbackState, playTrack, togglePlayback } from './player/musicPlayer'
@@ -30,12 +31,16 @@ type Batch = {
   items: BatchItem[]
   download_url?: string | null
 }
-const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean; queueOnly?: boolean }>(), { active: true, embedded: false, queueOnly: false })
-const emit = defineEmits<{ 'track-menu': [track: MusicTrack, event: MouseEvent] }>()
+const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean; queueOnly?: boolean; provider?: string }>(), { active: true, embedded: false, queueOnly: false })
+const emit = defineEmits<{ 'track-menu': [track: MusicTrack, event: MouseEvent]; 'source-change': [source: string] }>()
 const input = ref('')
 const source = ref('video')
 const audioFormat = ref<'m4a' | 'mp3'>('m4a')
 const busy = ref(false)
+const hasSearched = ref(false)
+const slowSearch = ref(false)
+const selectionMode = ref(false)
+let slowSearchTimer: number | undefined
 const downloading = ref(false)
 const saving = ref(false)
 const pollingError = ref(false)
@@ -62,7 +67,8 @@ let batchController: AbortController | undefined
 let batchGeneration = 0
 let disposed = false
 const task = ref<Task | null>(null)
-const sourceMessages = ref<Array<{ provider: string; message: string }>>([])
+const sourceMessages = ref<Array<{ provider: string; message: string; available?: boolean }>>([])
+const sourceSummary = computed(() => sourceMessages.value.some(item => item.available === false) ? '部分平台暂不可用' : `搜索来源 · ${sourceMessages.value.length} 个平台`)
 const failedCover = ref(false)
 const localTracks = ref<Track[]>([])
 const announcedDownloads = new Set<string>()
@@ -335,11 +341,20 @@ async function submit() {
   if (!text) { error.value = '请输入歌曲名称或粘贴链接。'; return }
   const link = extractHttpUrl(text)
   if (!link && source.value === 'video') { error.value = '请粘贴视频链接或完整的抖音分享文字。'; return }
+  if (busy.value && text === searchQuery.value && source.value === searchSource.value) return
   if (batchComplete.value) dismissBatch()
   controller?.abort()
   controller = new AbortController()
+  const requestController = controller
   const current = ++generation
+  let timedOut = false
+  const requestTimer = window.setTimeout(() => { timedOut = true; requestController.abort() }, 30000)
+  window.clearTimeout(slowSearchTimer)
+  slowSearch.value = false
+  slowSearchTimer = window.setTimeout(() => { if (current === generation) slowSearch.value = true }, 3000)
   busy.value = true
+  hasSearched.value = true
+  selectionMode.value = false
   error.value = ''
   saved.value = ''
   selected.value = null
@@ -356,17 +371,25 @@ async function submit() {
   stopPolling()
   try {
     const response = link
-      ? await fetch('/api/music/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: link }), signal: controller.signal })
-      : await fetch(`/api/music/search?q=${encodeURIComponent(text)}&source=${source.value}`, { signal: controller.signal })
+      ? await fetch('/api/music/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: link }), signal: requestController.signal })
+      : await fetch(`/api/music/search?q=${encodeURIComponent(text)}&source=${searchSource.value}`, { signal: requestController.signal })
     if (!response.ok) throw new Error(await apiError(response))
     const data = await response.json()
     if (current !== generation) return
     if (link) selected.value = data
-    else { tracks.value = data.tracks; sourceMessages.value = data.sources; hasMore.value = data.has_more }
+    else {
+      tracks.value = data.tracks; sourceMessages.value = data.sources; hasMore.value = data.has_more
+      if (!data.tracks.length && data.sources.length && data.sources.every((item: { available?: boolean }) => item.available === false)) error.value = '当前搜索平台暂不可用，请重试或切换平台。'
+    }
   } catch (failure) {
+    if (current !== generation) return
+    if (timedOut) { error.value = link ? '链接解析超时，请重试。' : '搜索超时，请重试或切换平台。'; return }
     if (failure instanceof DOMException && failure.name === 'AbortError') return
     error.value = failure instanceof Error ? failure.message : '音乐解析失败。'
-  } finally { if (current === generation) busy.value = false }
+  } finally {
+    window.clearTimeout(requestTimer)
+    if (current === generation) { busy.value = false; window.clearTimeout(slowSearchTimer) }
+  }
 }
 async function poll(id: string) {
   try {
@@ -453,7 +476,8 @@ async function showBatch(id: string) {
   rememberBatch(id)
   await pollBatch(id, revision)
 }
-defineExpose({ search, downloadTrack, showBatch, activeTask })
+defineExpose({ search, downloadTrack, showBatch, activeTask, singleActive, busy, searchQuery, searchSource })
+watch(() => props.provider, value => { if (value) source.value = value }, { immediate: true })
 watch(libraryRevision, () => { void loadLocalTracks() })
 watch(() => trackArtwork(selected.value), () => { failedCover.value = false })
 watch(() => props.active, active => { if (!active && batchComplete.value) dismissBatch() })
@@ -463,11 +487,11 @@ onMounted(() => {
   try { id = localStorage.getItem(batchStorageKey) } catch { return }
   if (id && /^[a-f0-9]{12}$/.test(id)) { batchBusy.value = true; void pollBatch(id, batchGeneration, true) }
 })
-onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; stopBatchPolling(); generation++; controller?.abort(); stopPolling() })
+onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; stopBatchPolling(); generation++; controller?.abort(); stopPolling(); window.clearTimeout(slowSearchTimer) })
 </script>
 
 <template>
-  <div class="music-workspace" :role="embedded ? undefined : 'tabpanel'" :id="embedded ? undefined : 'music-panel'" :aria-labelledby="embedded ? undefined : 'music-tab'">
+  <div class="music-workspace" :class="{ embedded, selecting: selectionMode }" :role="embedded ? undefined : 'tabpanel'" :id="embedded ? undefined : 'music-panel'" :aria-labelledby="embedded ? undefined : 'music-tab'" :aria-busy="busy">
     <form v-if="!embedded && !queueOnly" class="link-composer" @submit.prevent="submit">
       <textarea v-model="input" aria-label="歌曲名称或音乐视频链接" :disabled="singleActive" :placeholder="source === 'video' ? '粘贴抖音视频链接或分享文字…' : '输入歌名、歌手，或粘贴歌曲链接…'" @keydown.ctrl.enter.prevent="submit" />
       <div class="composer-footer">
@@ -479,8 +503,10 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
         <button class="composer-submit" :disabled="busy || singleActive || !input.trim()" type="submit"><LoaderCircle v-if="busy" :size="18" class="spin" /><Search v-else-if="!hasLink && source !== 'video'" :size="18" /><ArrowRight v-else :size="18" />{{ busy ? '处理中' : hasLink || source === 'video' ? '解析音轨' : '搜索歌曲' }}</button>
       </div>
     </form>
-    <div v-if="embedded && !queueOnly" class="music-format-toolbar"><label><span>下载格式</span><select v-model="audioFormat" :disabled="activeTask" aria-label="音频导出格式"><option value="m4a">M4A</option><option value="mp3">MP3</option></select></label></div>
-    <p v-if="error && !queueOnly" class="error-text" role="alert">{{ error }}</p>
+    <div v-if="embedded && !queueOnly" class="music-format-toolbar"><label class="music-mobile-source"><span class="sr-only">搜索平台</span><select v-model="source" aria-label="搜索平台" @change="emit('source-change', source)"><option value="all">全部平台</option><option value="qq">QQ 音乐</option><option value="netease">网易云音乐</option><option value="kugou">酷狗音乐</option><option value="video">视频音轨</option></select></label><label><span class="music-format-label">下载格式</span><select v-model="audioFormat" :disabled="activeTask" aria-label="音频导出格式"><option value="m4a">M4A</option><option value="mp3">MP3</option></select></label><button v-if="tracks.length" type="button" class="music-selection-toggle" :aria-pressed="selectionMode" @click="selectionMode = !selectionMode; checked = new Set()"><ListChecks :size="16" />{{ selectionMode ? '取消' : '多选' }}</button></div>
+    <div v-if="error && !queueOnly" class="music-search-error" role="alert"><p class="error-text">{{ error }}</p><button v-if="hasSearched && !selected && !busy" type="button" class="mc-command" @click="submit"><RefreshCw :size="16" />重试</button></div>
+    <section v-if="busy && !queueOnly" class="music-search-loading" role="status" aria-live="polite"><p><LoaderCircle :size="20" class="spin" /><span>{{ slowSearch ? '仍在处理中，请稍候…' : hasLink ? '正在解析链接…' : `正在搜索「${searchQuery}」…` }}</span></p><div v-for="row in 3" :key="row" class="music-search-skeleton" aria-hidden="true"><span /><span /></div></section>
+    <div v-else-if="!queueOnly && !error && !selected && !tracks.length" class="mc-empty music-search-empty"><Search :size="30" /><p>{{ hasSearched ? `没有找到「${searchQuery}」的相关歌曲` : '输入歌名、歌手，或粘贴链接开始搜索' }}</p><small v-if="hasSearched">试试修改关键词或切换搜索平台</small></div>
     <p v-if="saved && !queueOnly" class="success-text" role="status">{{ saved }}</p>
     <p v-if="batchError" class="error-text" role="alert">{{ batchError }}</p>
     <p v-if="batchSaved" class="success-text" role="status">{{ batchSaved }}</p>
@@ -503,7 +529,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
         </li>
       </ol>
     </section>
-    <div v-if="sourceMessages.length && !queueOnly" class="source-messages"><p v-for="item in sourceMessages" :key="item.provider"><strong>{{ providers[item.provider] }}</strong>{{ item.message }}</p></div>
+    <details v-if="sourceMessages.length && !queueOnly && !busy" class="source-messages"><summary>{{ sourceSummary }}<span>查看详情</span></summary><p v-for="item in sourceMessages" :key="item.provider"><strong>{{ providers[item.provider] }}</strong>{{ item.message }}</p></details>
     <div v-if="selected && !queueOnly" ref="audioResult" class="audio-result">
       <div class="audio-cover"><img v-if="trackArtwork(selected) && !failedCover" :src="trackArtwork(selected) || undefined" :alt="selected.title" @error="failedCover = true" /><Music2 v-else :size="32" /></div>
       <div class="audio-meta"><span class="status-chip">{{ selected.provider ? providers[selected.provider] : '视频音轨' }}</span><h2>{{ selected.title }}</h2><div class="meta-row"><span>{{ selected.artist || selected.uploader }}</span><time>{{ duration(selected.duration) }}</time><span v-if="selected.access">{{ selected.access }}</span><a :href="selected.webpage_url" target="_blank" rel="noreferrer">原始页面<ExternalLink :size="13" /></a></div></div>
@@ -520,7 +546,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
       <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ tracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ tracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首</span><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
       <div v-for="(track, index) in tracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">
         <label class="track-check" @click.stop><input type="checkbox" :checked="checked.has(trackKey(track))" :disabled="checkedTracks.length >= 100 && !checked.has(trackKey(track))" :aria-label="`勾选 ${track.title} ${track.artist || ''}`" @change="toggleChecked(track, $event)" /></label>
-        <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}</span></span></button>
+        <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><TrackCover v-if="embedded" class="search-track-cover" :src="trackArtwork(track)" :title="track.title" /><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}<span v-if="embedded" class="search-track-provider"> · {{ localFor(track) ? '已下载' : providers[track.provider || ''] }}</span></span></span></button>
         <button type="button" class="track-play" :class="{ active: isPlaybackTrack(track) }" :title="playbackLabel(track)" :aria-label="playbackLabel(track)" :aria-pressed="isPlaybackTrack(track) && playbackState === 'playing'" :aria-busy="isPlaybackTrack(track) && playbackState === 'loading'" @click.stop="playSearchTrack(track)"><LoaderCircle v-if="isPlaybackTrack(track) && playbackState === 'loading'" :size="17" class="spin" /><Pause v-else-if="isPlaybackTrack(track) && playbackState === 'playing'" :size="17" /><Play v-else :size="17" /></button>
         <span class="track-provider">{{ localFor(track) ? '已下载' : providers[track.provider || ''] }}</span>
         <div class="track-actions" @click.stop><button type="button" class="track-play track-favorite" :class="{ liked: isLiked(track) }" :title="isLiked(track) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(track) ? '取消喜欢' : '喜欢'} ${track.title}`" :aria-pressed="isLiked(track)" @click="toggleFavorite(track)"><Heart :size="17" :fill="isLiked(track) ? 'currentColor' : 'none'" /></button><button type="button" class="track-play track-download" :disabled="activeTask || busy || saving" :title="isDownloadingTrack(track) ? `正在下载 ${track.title}` : `下载 ${track.title} · ${audioFormat.toUpperCase()}`" :aria-label="`下载单曲 ${track.title} ${track.artist || ''}`" :aria-busy="isDownloadingTrack(track)" @click="downloadTrack(track)"><LoaderCircle v-if="isDownloadingTrack(track)" :size="17" class="spin" /><Download v-else :size="17" /></button><button v-if="embedded" type="button" class="track-play" title="更多操作" :aria-label="`更多操作 ${track.title}`" @click="emit('track-menu', track, $event)"><MoreHorizontal :size="18" /></button></div>
@@ -548,6 +574,23 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
 .batch-complete .batch-heading h2 { font-size: 14px; }
 .batch-complete .batch-heading p { font-size: 12px; }
 .batch-complete .batch-actions { padding: 0; }
+.search-track-cover, .search-track-provider, .music-mobile-source, .music-selection-toggle { display: none; }
+.music-format-toolbar { gap: 12px; align-items: center; }
+.music-search-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 14px 0; }
+.music-search-error .error-text { flex: 1; margin: 0; }
+.music-search-loading { color: var(--music-highlight, #109b6d); }
+.music-search-loading > p { display: flex; align-items: center; gap: 9px; min-height: 44px; margin: 12px 0 2px; font-size: 14px; }
+.music-search-skeleton { display: flex; align-items: center; gap: 12px; min-height: 70px; border-bottom: 1px solid var(--music-line, #e1e6ee); }
+.music-search-skeleton > span:first-child { width: 44px; height: 44px; border-radius: 8px; background: var(--music-soft, #eef1ec); }
+.music-search-skeleton > span:last-child { width: 48%; height: 28px; border-radius: 5px; background: var(--music-soft, #eef1ec); }
+.music-search-empty { gap: 14px; text-align: center; }
+.music-search-empty p { overflow-wrap: anywhere; }
+.music-search-empty small { font-size: 12px; }
+.source-messages { margin-top: 8px; padding: 8px 0; font-size: 12px; }
+.source-messages summary { min-height: 36px; color: var(--music-muted, #637086); cursor: pointer; }
+.source-messages summary span { margin-left: 10px; font-size: 11px; }
+.source-messages p { color: var(--music-muted, #637086); font-size: 12px; }
+.source-messages strong { color: var(--music-text, #364152); }
 @media (max-width: 700px) {
   .music-workspace .track-row { grid-template-columns: 18px minmax(0, 1fr) 32px 104px; gap: 6px; padding-left: 0; padding-right: 0; }
   .music-workspace .track-row > .track-check { grid-column: 1; grid-row: 1; }
@@ -562,5 +605,44 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
   .audio-selected-actions .composer-submit { flex: 1; }
   .music-batch .batch-items li { grid-template-columns: 18px minmax(0, 1fr) 55px 64px; gap: 8px; }
   .batch-item-actions .track-play { width: 30px; height: 32px; }
+}
+@media (max-width: 760px) {
+  .music-format-toolbar { justify-content: flex-end; padding: 0 0 10px; gap: 10px; border-color: var(--music-line, #e1e6ee); }
+  .music-format-toolbar .music-mobile-source { display: inline-flex; margin-right: auto; min-width: 0; }
+  .music-mobile-source .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .music-format-label { display: none; }
+  .music-format-toolbar select { min-height: 44px; height: 44px; padding-left: 9px; padding-right: 21px; max-width: 125px; font-size: 12px; border: 0; border-radius: 9px; background: var(--music-soft, #eef1ec); color: var(--music-text, #354760); }
+  .music-selection-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 44px; padding: 0 3px; border: 0; background: transparent; color: var(--music-muted, #637086); font-size: 12px; white-space: nowrap; }
+  .music-selection-toggle[aria-pressed=true] { color: var(--music-highlight, #109b6d); }
+  .embedded:not(.selecting) .batch-toolbar, .embedded:not(.selecting) .track-row > .track-check { display: none; }
+  .music-workspace.embedded .track-row { grid-template-columns: minmax(0, 1fr) 44px 88px; gap: 0; min-height: 70px; padding: 8px 0; }
+  .music-workspace.embedded.selecting .track-row { grid-template-columns: 24px minmax(0, 1fr) 44px 88px; }
+  .music-workspace.embedded .track-row > .track-select { grid-column: 1; grid-row: 1; }
+  .music-workspace.embedded .track-row > .track-play { grid-column: 2; grid-row: 1; }
+  .music-workspace.embedded .track-row > .track-actions { grid-column: 3; grid-row: 1; gap: 0; }
+  .music-workspace.embedded.selecting .track-row > .track-select { grid-column: 2; }
+  .music-workspace.embedded.selecting .track-row > .track-play { grid-column: 3; }
+  .music-workspace.embedded.selecting .track-row > .track-actions { grid-column: 4; }
+  .music-workspace.embedded .track-row .track-play { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+  .music-workspace.embedded .track-row .track-favorite, .music-workspace.embedded .track-number, .music-workspace.embedded .track-row > .track-provider, .music-workspace.embedded .track-row > time { display: none; }
+  .music-workspace.embedded .track-row .track-select { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; min-height: 44px; }
+  .search-track-cover { display: inline-flex; width: 40px; height: 40px; border-radius: 8px; }
+  .search-track-provider { display: inline; }
+  .track-name strong, .track-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track-name strong { font-size: 14px; font-weight: 500; }
+  .track-name > span { font-size: 11px; color: var(--music-muted, #66768e); }
+  .embedded .track-play.track-download { color: var(--music-highlight, #109b6d); }
+  .embedded .batch-toolbar { gap: 8px; }
+  .embedded .batch-toolbar .composer-submit { min-height: 44px; }
+  .results-heading { padding-top: 12px; padding-bottom: 8px; }
+  .source-messages { margin-top: 4px; padding: 2px 0; }
+  .source-messages summary { min-height: 44px; display: flex; align-items: center; }
+  .source-messages summary span { margin-left: auto; }
+}
+@media (max-width: 360px) {
+  .music-workspace.embedded .track-row .track-select { grid-template-columns: 32px minmax(0, 1fr); gap: 6px; }
+  .search-track-cover { width: 32px; height: 32px; }
+  .music-workspace.embedded.selecting .track-row .track-select { grid-template-columns: minmax(0, 1fr); }
+  .embedded.selecting .search-track-cover { display: none; }
 }
 </style>

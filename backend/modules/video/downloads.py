@@ -9,17 +9,20 @@ import re
 import hashlib
 import subprocess
 import time
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 import requests
-from yt_dlp import YoutubeDL
 from backend.modules.music import sources as music
 from backend.modules.music.media import start_cover_backfill
 from backend.modules.music import library
 from backend.core import paths
 from backend.infrastructure import audio
 from backend.infrastructure import runtime
+from backend.infrastructure import video_network, video_transfer, video_proxy, platform_access
+from backend.infrastructure.ytdlp import YoutubeDL
 from backend.modules.video import constants as video_constants
 from backend.modules.video import douyin as video_douyin
 from backend.modules.video import parse_cache as video_parse_cache
@@ -36,14 +39,226 @@ def _progress_hook(task: video_tasks.DownloadTask):
         if status == "downloading":
             total = payload.get("total_bytes") or payload.get("total_bytes_estimate") or 0
             downloaded = payload.get("downloaded_bytes") or 0
-            progress = min(99.0, downloaded / total * 100) if total else task.progress
+            progress = payload.get("overall_progress", min(99.0, downloaded / total * 100) if total else task.progress)
             speed = payload.get("speed")
-            speed_label = f" · {speed / 1024 / 1024:.1f} MB/s" if speed else ""
-            video_tasks._set_task(task, status="running", progress=progress, message=f"正在下载{speed_label}")
+            speed_label = f" · {speed / 1024 / 1024:.1f} MiB/s" if speed else ""
+            size_label = f" · {downloaded / 1024 / 1024:.1f}" + (f"/{total / 1024 / 1024:.1f} MiB" if total else " MiB")
+            eta = payload.get("eta")
+            eta_label = f" · 剩余 {int(max(0, eta))} 秒" if eta is not None else ""
+            stage = payload.get("stage", "正在下载")
+            video_tasks._set_task(task, status="running", progress=progress, message=f"{stage}{speed_label}{size_label}{eta_label}")
         elif status == "finished":
             video_tasks._set_task(task, progress=99.0, message="下载完成，正在整理文件")
 
     return hook
+
+
+def _run_domestic_download(task: video_tasks.DownloadTask) -> None:
+    # Native manifest readers share the same guarded transport as online preview;
+    # FFmpeg receives local files only. Selected DASH members run sequentially,
+    # keeping the whole task below four simultaneous media connections.
+    from yt_dlp.downloader import get_suitable_downloader
+    from yt_dlp.downloader.http import HttpFD
+    from yt_dlp.downloader.hls import HlsFD
+    from yt_dlp.downloader.dash import DashSegmentsFD
+    from backend.modules.video import preview_sources, cache
+
+    checkpoint_lock = threading.RLock()
+
+    def check():
+        with checkpoint_lock:
+            video_tasks._checkpoint(task, {})
+
+    native_format = task.format_id if task.format_id and not task.format_id.startswith(("sniff:", "sniffpair:", "douyin-public")) else "bestvideo+bestaudio/best"
+    if platform_access.platform(task.url) == "pornhub" and re.fullmatch(r"hls-\d+(?:-\d+)?", native_format or ""):
+        # Older history stored bandwidth-based IDs. Recover the exact quality.
+        from backend.modules.video.formats import pornhub_selector
+        cached = video_parse_cache._get_sniff_cache(task.url)
+        formats = [item.model_dump() for item in cached.formats] if cached else []
+        if not formats and task.parse_record_id:
+            from backend.modules.accounts import service as accounts
+            import json
+            stored = json.loads(accounts.resource("video_parse", task.parse_record_id)["payload"])
+            formats = (stored.get("result") or {}).get("formats", [])
+        chosen = next((item for item in formats if item.get("format_id") == native_format), None)
+        resolution = (chosen or {}).get("resolution") or ""
+        height = re.search(r"(?:x|^)(\d+)(?:p)?$", resolution)
+        if not height:
+            raise RuntimeError("旧视频格式已失效，请重新解析并选择清晰度。")
+        native_format = pornhub_selector(int(height[1]), (chosen or {}).get("ext") or "mp4")
+    options = {**video_parsing._ydl_base_options(task.url), "format": native_format,
+               "cachedir": False, "noprogress": True, "hls_prefer_native": True,
+               "fixup": "never", "skip_unavailable_fragments": False}
+    if task.media_type == "audio":
+        options["format"] = "bestaudio/best"
+    selection = task.format_id or "best"
+
+    def resolve(ydl):
+        duration = None
+        if selection.startswith(("sniff:", "sniffpair:")):
+            encoded = selection.partition(":")[2].split("|")
+            if len(encoded) > 2 or any(not value for value in encoded):
+                raise RuntimeError("视频源组合无效，请重新解析。")
+            members = [{"url": unquote(value), "http_headers": {**options["http_headers"], "Referer": task.url},
+                        "ext": video_sniffing._media_ext(unquote(value)), "vcodec": "none" if i else "unknown"}
+                       for i, value in enumerate(encoded)]
+            if task.media_type == "audio" and len(members) == 2:
+                members = members[1:]
+            cached = video_parse_cache._get_sniff_cache(task.url)
+            title, duration = (cached.title, cached.duration) if cached else ("video", None)
+        elif selection == "douyin-public":
+            _, item = video_douyin._fetch_douyin_item(task.url)
+            members = [{"url": video_douyin._douyin_media_url(item), "ext": "mp4", "http_headers": video_constants.DOUYIN_HEADERS}]
+            title = str(item.get("desc") or "douyin")
+            duration_ms = (item.get("video") or {}).get("duration")
+            duration = float(duration_ms) / 1000 if duration_ms else None
+        else:
+            info = ydl.extract_info(task.url, download=False)
+            if not info or info.get("_type", "video") != "video" or info.get("is_live") or info.get("has_drm"):
+                raise RuntimeError("仅支持单个已发布且未受 DRM 保护的视频。")
+            members, title = info.get("requested_formats") or [info], info.get("title") or "video"
+            duration = info.get("duration")
+        # Resolve raw HLS/DASH URLs into native fragment metadata before choosing a downloader.
+        expanded = []
+        for member in members:
+            if preview_sources.is_manifest(member["url"]) and not member.get("protocol"):
+                info = ydl.extract_info(member["url"], download=False)
+                expanded.extend(info.get("requested_formats") or [info])
+            else:
+                expanded.append(member)
+        if not expanded or len(expanded) > 2:
+            raise RuntimeError("视频源音视频组合不受支持，请重新选择格式。")
+        return title, expanded, duration
+
+    try:
+        video_tasks._set_task(task, status="running", progress=1, message="正在通过海外代理连接视频源" if platform_access.platform(task.url) else "正在直连国内视频源")
+        for attempt in range(2):
+            try:
+                with tempfile.TemporaryDirectory(prefix=f"video-{task.task_id}-", dir=paths.DOWNLOAD_DIR) as temporary, \
+                     preview_sources.PreviewYoutubeDL(options, check, lambda size: None) as ydl:
+                    work = Path(temporary)
+                    title, members, duration = resolve(ydl)
+                    check()
+                    files = []
+                    native_media = False
+                    for index, member in enumerate(members):
+                        check()
+                        if member.get("has_drm") or member.get("is_live"):
+                            raise RuntimeError("不支持直播或 DRM 视频。")
+                        extension = re.sub(r"[^a-zA-Z0-9]", "", member.get("ext") or "mp4")
+                        source = work / f"source-{index}.{extension}"
+                        last_report = [0.0]
+
+                        def hook(payload):
+                            # yt-dlp's native fragment workers can invoke hooks concurrently.
+                            with checkpoint_lock:
+                                if task.cancel.is_set():
+                                    raise RuntimeError("任务已停止。")
+                                if payload.get("status") != "downloading" or time.monotonic() - last_report[0] < 0.3:
+                                    return
+                                last_report[0] = time.monotonic()
+                                ratio = payload.get("downloaded_bytes", 0) / (payload.get("total_bytes") or payload.get("total_bytes_estimate") or float("inf"))
+                                connections = payload.get("connections", options.get("concurrent_fragment_downloads", 1))
+                                transport = "HLS/DASH" if member.get("protocol") in {"m3u8_native", "http_dash_segments"} else "HTTP"
+                                route = "海外代理" if platform_access.platform(task.url) else "国内直连"
+                                stage = f"{route} · {transport} 最多 {connections} 路 · " + ("正在下载音频" if member.get("vcodec") == "none" else "正在下载视频")
+                                if payload.get("fallback_reason"):
+                                    stage += "（" + payload["fallback_reason"] + "）"
+                                _progress_hook(task)({**payload, "overall_progress": min(97, (index + min(1, ratio)) / len(members) * 97), "stage": stage})
+
+                        media_headers = {**options["http_headers"], **member.get("http_headers", {})}
+                        cookie = ydl.cookiejar.get_cookie_header(member["url"])
+                        if cookie:
+                            media_headers["Cookie"] = cookie
+                        media = {**member, "http_headers": media_headers}
+                        downloader = get_suitable_downloader(media, options)
+                        if downloader is HttpFD:
+                            video_transfer.download(media["url"], source, referer=task.url, headers=media_headers,
+                                root=paths.DOWNLOAD_DIR / ".transfers", owner=task.user_id,
+                                key=f"{task.url}:{task.media_type}:{task.audio_format}:{task.format_id or 'best'}:{getattr(task, 'route_revision', '')}:{index}",
+                                task_id=task.task_id, progress=hook, check=check, cancel=task.cancel)
+                        elif downloader in {HlsFD, DashSegmentsFD}:
+                            native_media = True
+                            native_options = {**options, "progress_hooks": [hook], "continuedl": False}
+                            fd = {HlsFD: preview_sources.NativeHlsFD, DashSegmentsFD: preview_sources.NativeDashFD}[downloader](ydl, native_options)
+                            fd.preview_streams = []
+                            try:
+                                success, _ = fd.download(str(source), media)
+                            finally:
+                                for stream in fd.preview_streams:
+                                    stream.close()
+                            if not success:
+                                raise RuntimeError("视频分片下载失败，请重新解析。")
+                        else:
+                            raise RuntimeError("当前源暂不支持该媒体协议，请选择 HTTP、HLS 或 DASH 格式。")
+                        if not source.is_file() or not source.stat().st_size:
+                            raise RuntimeError("视频源没有生成完整文件。")
+                        with source.open("rb") as stream:
+                            beginning = stream.read(64).lstrip()
+                        if beginning.startswith((b"\xff\xd8\xff", b"\x89PNG", b"{", b"[", b"<!DOCTYPE", b"<html")):
+                            raise RuntimeError("下载结果不是有效媒体文件，请重新解析。")
+                        files.append(source)
+                    stem = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:80] or "video"
+                    if task.media_type == "audio":
+                        target = paths.DOWNLOAD_DIR / f"{task.task_id}.{stem}.{task.audio_format}"
+                        video_tasks._set_task(task, progress=98, message="下载完成，正在提取并校验音轨")
+                        audio.export_audio(files[-1], target, paths.FFMPEG_DIR, duration)
+                        _remember_audio_download(target, {"title": title, "provider": "video", "webpage_url": task.url})
+                    elif len(files) == 1 and not native_media and files[0].suffix.lower() in {".mp4", ".webm", ".mkv", ".flv"}:
+                        target = paths.DOWNLOAD_DIR / f"{task.task_id}.{stem}{files[0].suffix}"
+                        check()
+                        files[0].replace(target)
+                    else:
+                        target = paths.DOWNLOAD_DIR / f"{task.task_id}.{stem}.mp4"
+                        video_tasks._set_task(task, progress=98, message="下载完成，正在本地合并音视频")
+                        command = [str(paths.FFMPEG_DIR / runtime.executable_name("ffmpeg")), "-y", "-nostdin", "-loglevel", "error"]
+                        for source in files:
+                            command += ["-i", str(source)]
+                        if len(files) == 2:
+                            command += ["-map", "0:v:0", "-map", "1:a:0"]
+                        command += ["-c", "copy", "-movflags", "+faststart", str(target)]
+                        with (work / "merge.log").open("w+") as log:
+                            task.process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log)
+                            try:
+                                while task.process.poll() is None:
+                                    check()
+                                    time.sleep(0.2)
+                                if task.process.returncode:
+                                    raise RuntimeError("本地音视频合并失败，请重新选择格式。")
+                            finally:
+                                if task.process.poll() is None:
+                                    task.process.kill()
+                                task.process.wait()
+                                task.process = None
+                    check()
+                    video_tasks._set_task(task, status="finished", progress=100, message="文件已准备好", filename=target.name)
+                return
+            except Exception as exc:
+                if not isinstance(exc, (video_transfer.SourceExpired, video_transfer.SourceChanged)) and not re.search(r"HTTP Error (?:401|403|410)\b", str(exc)):
+                    raise
+                check()
+                if attempt:
+                    raise
+                video_tasks._set_task(task, message="视频源已过期，正在重新解析一次")
+                if selection.startswith(("sniff:", "sniffpair:")):
+                    previous = video_parse_cache._get_sniff_cache(task.url)
+                    chosen = next((f for f in previous.formats if f.format_id == selection), None) if previous else None
+                    if task.user_id:
+                        cache.remove(cache.parse_key(task.url, task.user_id))
+                    with video_parse_cache.sniff_cache_lock:
+                        video_parse_cache.sniff_cache.pop(task.url, None)
+                    refreshed = video_parsing.parse_video(task.url)
+                    matched = next((f for f in refreshed.formats if chosen and (f.label, f.ext, f.resolution) == (chosen.label, chosen.ext, chosen.resolution)), None)
+                    if not matched:
+                        raise RuntimeError("原格式已失效，请重新解析后选择清晰度。")
+                    selection = matched.format_id
+    except Exception as exc:
+        for partial in paths.DOWNLOAD_DIR.glob(f"{task.task_id}.*"):
+            if partial.is_file():
+                partial.unlink(missing_ok=True)
+        error = re.sub(r'https?://[^\s\x27"<>]+', '[视频源地址]', video_urls._clean_error(exc, task.url))
+        video_tasks._set_task(task, status="cancelled" if task.cancel.is_set() else "failed",
+                              message="任务已取消" if task.cancel.is_set() else "下载失败", error=None if task.cancel.is_set() else error)
 
 
 def _run_douyin_public_download(task: video_tasks.DownloadTask) -> bool:
@@ -353,6 +568,18 @@ def _remember_audio_download(target: Path, metadata: dict) -> None:
 
 
 def _run_download(task: video_tasks.DownloadTask) -> None:
+    try:
+        with video_proxy.scope(task.url) as route:
+            task.route_revision = (route or {}).get("revision")
+            if (video_network.domestic(task.url) or platform_access.platform(task.url)) and not (task.format_id or "").startswith("music:"):
+                _run_domestic_download(task)
+            else:
+                _run_legacy_download(task)
+    except Exception as exc:
+        video_tasks._set_task(task, status="failed", message="下载失败", error=video_urls._clean_error(exc, task.url))
+
+
+def _run_legacy_download(task: video_tasks.DownloadTask) -> None:
     if task.media_type == "audio":
         _run_audio_download(task)
         return

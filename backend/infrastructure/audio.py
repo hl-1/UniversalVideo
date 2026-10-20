@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Callable, Literal
 
 import requests
-from yt_dlp import YoutubeDL
 
 from backend.infrastructure.runtime import executable_name
+from backend.infrastructure.ytdlp import YoutubeDL
+from backend.infrastructure import video_network
 
 
 AudioFormat = Literal["m4a", "mp3"]
@@ -83,7 +84,7 @@ def download_audio(
         progress(3, "正在连接音源")
         if direct and ".m3u8" not in url.lower() and ".mpd" not in url.lower():
             source = work / "source.media"
-            with requests.get(url, headers=options.get("http_headers"), stream=True, timeout=(10, 60)) as response:
+            with video_network.get(url, referer=options.get("http_headers", {}).get("Referer"), headers=options.get("http_headers"), stream=True, timeout=(10, 60)) as response:
                 response.raise_for_status()
                 content_type = response.headers.get("Content-Type", "").lower()
                 if any(content_type.startswith(prefix) for prefix in ("text/", "image/", "application/json")):

@@ -185,7 +185,7 @@ def _checkpoint(task, changes):
         if task.cancel.is_set():
             raise HTTPException(401, "任务已取消。")
         if time.monotonic() - getattr(task, "_checked_at", 0) >= 1:
-            accounts.active_worker(task.user_id)
+            accounts.active_worker(task.user_id, source={"url": getattr(task, "url", None), "parse_record_id": getattr(task, "parse_record_id", None), "summary_task_id": getattr(task, "summary_task_id", None)})
             kind = "download" if isinstance(task, DownloadTask) else "summary" if isinstance(task, SummaryTask) else "mind_map"
             with accounts.database() as cursor:
                 if kind in video_store.TABLES:
@@ -213,6 +213,8 @@ def _persist_task(task, kind, force=False):
         if isinstance(task, SummaryTask):
             snapshot["transcript"] = [segment.model_dump() for segment in task.transcript]
         snapshot.update(parse_record_id=getattr(task, "parse_record_id", None), url=getattr(task, "url", None), worker_id=video_history.WORKER_ID)
+        if getattr(task, "route_revision", None):
+            snapshot.update(route_profile="overseas-proxy", route_revision=task.route_revision)
         with accounts.database() as cursor:
             record_id = getattr(task, "parse_record_id", None)
             if record_id:
@@ -252,7 +254,9 @@ def _persist_task(task, kind, force=False):
                                (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now))
         if task.status == "finished" and getattr(task, "filename", None):
             path = paths.DOWNLOAD_DIR / task.filename
-            accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0}, uid=task.user_id)
+            accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0,
+                "source_url": getattr(task, "url", None), "source_task_id": task.task_id,
+                "parse_record_id": getattr(task, "parse_record_id", None), "route_revision": getattr(task, "route_revision", None)}, uid=task.user_id)
         task._saved_at = time.monotonic()
 
 
@@ -287,3 +291,7 @@ def cancel_user_tasks(uid: int, key: str | None = None):
                         entry["task"].cancel.set()
     for task in cancelled:
         _persist_task(task, "download" if isinstance(task, DownloadTask) else "summary" if isinstance(task, SummaryTask) else "mind_map", force=True)
+    # In-flight transfers remove their parts in finally; failed tasks have no
+    # running worker, so their retained parts are removed here on delete/cancel.
+    from backend.infrastructure import video_transfer
+    video_transfer.cleanup(paths.DOWNLOAD_DIR / ".transfers", owner=uid, task_id=key)

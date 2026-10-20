@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from urllib.parse import parse_qs, urlparse
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from fastapi import APIRouter
 
 from backend.modules.music import sources as music
@@ -18,6 +17,7 @@ from backend.infrastructure import browser_sessions as browser_session_store
 from backend.infrastructure import network
 from backend.modules.video import downloads as video_downloads
 from backend.modules.video import parse_cache as video_parse_cache
+from backend.modules.video import parse_runtime
 from backend.modules.video import parsing as video_parsing
 from backend.modules.video import schemas as video_schemas
 from backend.modules.video import summary as video_summary
@@ -29,28 +29,57 @@ from backend.modules.video import urls as video_urls
 router = APIRouter()
 
 
+@router.get("/api/admin/video-network")
+def overseas_network_status():
+    accounts.admin()
+    from backend.infrastructure import video_proxy
+    try:
+        route = video_proxy.profile()
+        return {"enabled": True, "scheme": route["scheme"], "revision": route["revision"]}
+    except HTTPException as exc:
+        return {"enabled": False, "message": exc.detail}
+
+
+@router.post("/api/admin/video-network/check")
+def check_overseas_network():
+    accounts.admin()
+    accounts.rate_limit("overseas-network:" + str(accounts.current().id), 3, 60)
+    from backend.infrastructure import video_network, video_proxy
+    route = video_proxy.profile()
+    results = []
+    for label, target in (("YouTube", "https://www.youtube.com/robots.txt"), ("Pornhub", "https://www.pornhub.com/robots.txt")):
+        started = time.monotonic()
+        try:
+            with video_network.get(target, stream=True, timeout=(3, 5)) as response:
+                code = response.status_code
+                results.append({"platform": label, "connected": True, "available": code == 200, "status": code,
+                                "elapsed_ms": round((time.monotonic() - started) * 1000)})
+        except Exception:
+            # Never return proxy endpoints, credentials, or signed source URLs.
+            results.append({"platform": label, "connected": False, "available": False,
+                            "message": "代理连接失败或超时，请检查代理服务与出口线路。"})
+    return {"revision": route["revision"], "results": results,
+            "message": "此检查仅验证站点连通性，实际视频仍可能需要登录或受到平台限制。"}
+
+
 @router.post("/api/parse", response_model=video_schemas.ParseResponse)
-def parse_endpoint(payload: video_schemas.ParseRequest) -> video_schemas.ParseResponse:
+def parse_endpoint(payload: video_schemas.ParseRequest, response: Response = None) -> video_schemas.ParseResponse:
+    started = time.monotonic()
     network.public_url(str(payload.url))
     url = video_urls.normalize_url(str(payload.url))
     if not accounts.principal.get():
         return video_parsing.parse_video(url)
     record_id = video_history.create_record(url)
     try:
-        if payload.force:
-            video_cache.remove(video_cache.parse_key(url))
-        result = video_parse_cache._get_sniff_cache(url) or video_parsing.parse_video(url)
-        if result.thumbnail and not result.thumbnail.startswith("/api/thumbnails/"):
-            image_url = parse_qs(urlparse(result.thumbnail).query).get("url", [result.thumbnail])[0]
-            try:
-                result.thumbnail = video_thumbnails._cache_thumbnail(image_url)
-            except Exception:
-                pass
-        video_history.finish_record(record_id, result.model_dump())
-        video_history.link_legacy_results(record_id)
-        video_parse_cache._set_sniff_cache(url, result)
-        if result.webpage_url and result.webpage_url != url:
-            video_parse_cache._set_sniff_cache(result.webpage_url, result)
+        with parse_runtime.scope() as budget:
+            result = parse_runtime.resolve(url, video_parsing.parse_video, force=payload.force)
+            with parse_runtime.stage("history"):
+                video_history.finish_record(record_id, result.model_dump())
+                video_history.link_legacy_results(record_id)
+        video_thumbnails.schedule(record_id, result.thumbnail, result.webpage_url)
+        if response is not None:
+            timings = budget.timings | {"total": (time.monotonic() - started) * 1000}
+            response.headers["Server-Timing"] = ", ".join(f"{key};dur={value:.1f}" for key, value in timings.items())
         return result.model_copy(update={"record_id": record_id})
     except Exception as exc:
         message = exc.detail if isinstance(exc, HTTPException) else video_urls._clean_error(exc, url)
@@ -69,10 +98,7 @@ def refresh_record_formats(record_id: str, force: bool = False):
     stored = video_history.decode(row)
     url = video_urls.normalize_url((stored.get("result") or {}).get("webpage_url") or stored["url"])
     network.public_url(url)
-    if force:
-        video_cache.remove(video_cache.parse_key(url))
-    result = video_parse_cache._get_sniff_cache(url) or video_parsing.parse_video(url)
-    video_parse_cache._set_sniff_cache(url, result)
+    result = parse_runtime.resolve(url, video_parsing.parse_video, force=force)
     return result.model_copy(update={"record_id": record_id})
 
 

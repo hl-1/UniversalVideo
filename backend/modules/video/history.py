@@ -16,7 +16,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
 
 from backend.core.paths import ROOT_DIR as PROJECT_ROOT
+from backend.core import paths
 from backend.modules.accounts import service as accounts
+from backend.infrastructure import platform_access
 from backend.modules.video import cache as video_cache
 from backend.modules.video import store as video_store
 from backend.modules.video import timing as video_timing
@@ -175,6 +177,18 @@ def finish_record(record_id: str, result: dict | None = None, error: str | None 
         video_store.save(cursor, "video_parse", record_id, row["user_id"], data)
 
 
+def update_thumbnail(record_id: str, thumbnail: str) -> None:
+    with accounts.database() as cursor:
+        row = video_store.get(cursor, "video_parse", record_id, lock=True)
+        if not row or row["user_id"] != accounts.owner_id():
+            return
+        data = decode(row)
+        if data["status"] != "finished" or not data.get("result"):
+            return
+        data["result"]["thumbnail"] = thumbnail
+        video_store.save(cursor, "video_parse", record_id, row["user_id"], data)
+
+
 def link_legacy_results(record_id: str) -> None:
     row = owned_record(record_id)
     data = decode(row)
@@ -253,8 +267,12 @@ def records(page: int = Query(default=1, ge=1), q: str = Query(default="", max_l
             AND s.parse_record_id=p.record_id AND s.deleted=FALSE) AS has_summary,
             EXISTS(SELECT 1 FROM video_mind_maps m WHERE m.user_id=p.user_id AND m.parse_record_id=p.record_id
             AND m.deleted=FALSE AND m.status='finished') AS has_mind_map FROM video_parse_records p""" +
-            where + " ORDER BY p.created_at DESC,p.record_id DESC LIMIT 20 OFFSET %s", args + ((page - 1) * 20,))
+            where + " ORDER BY p.created_at DESC,p.record_id DESC" + (" LIMIT 20 OFFSET %s" if accounts.current().role == "super_admin" else ""), args + (((page - 1) * 20,) if accounts.current().role == "super_admin" else ()))
         rows = cursor.fetchall()
+        if accounts.current().role != "super_admin":
+            rows = [row for row in rows if platform_access.visible(decode(video_store.adapt("video_parse", row)))]
+            total = len(rows)
+            rows = rows[(page - 1) * 20:page * 20]
         items = []
         for row in rows:
             data = decode(video_store.adapt("video_parse", row))
@@ -270,10 +288,11 @@ def records(page: int = Query(default=1, ge=1), q: str = Query(default="", max_l
 def last_record():
     uid = accounts.current().id
     with accounts.database() as cursor:
-        cursor.execute("""SELECT p.record_id FROM video_view_states v JOIN video_parse_records p
+        cursor.execute("""SELECT p.* FROM video_view_states v JOIN video_parse_records p
             ON p.record_id=v.record_id AND p.user_id=v.user_id AND p.deleted=FALSE
-            WHERE v.user_id=%s AND v.deleted=FALSE ORDER BY v.updated_at DESC LIMIT 1""", (uid,))
-        row = cursor.fetchone()
+            WHERE v.user_id=%s AND v.deleted=FALSE ORDER BY v.updated_at DESC""", (uid,))
+        rows = cursor.fetchall()
+    row = next((row for row in rows if platform_access.visible(decode(video_store.adapt("video_parse", row)))), None)
     return {"record_id": row["record_id"] if row else None}
 
 
@@ -356,6 +375,8 @@ def delete_record(record_id: str, cascade: bool = False):
     for kind, filename in files:
         remove_file(kind, filename)
     data = decode(record)
+    from backend.modules.video import preview_assets
+    preview_assets.cancel_record(uid, record_id)
     for url in {data["url"], (data.get("result") or {}).get("webpage_url") or data["url"]}:
         video_cache.remove(video_cache.parse_key(url, uid))
     accounts.audit("data_delete", f"video_parse:{record_id}")
@@ -369,12 +390,15 @@ def remove_record(record_id: str, cascade: bool = False):
 
 def start_worker():
     global worker_thread, worker_stop
+    from backend.infrastructure import video_transfer
+    video_transfer.cleanup(paths.DOWNLOAD_DIR / ".transfers")
     video_cache.put(accounts.redis_prefix() + "video:worker:" + WORKER_ID, {"alive": True}, 45)
     if worker_thread and worker_thread.is_alive():
         return
     worker_stop = threading.Event()
     def heartbeat():
         while not worker_stop.wait(10):
+            video_transfer.cleanup(paths.DOWNLOAD_DIR / ".transfers")
             video_cache.put(accounts.redis_prefix() + "video:worker:" + WORKER_ID, {"alive": True}, 45)
             try:
                 restore_interrupted(include_legacy=False)

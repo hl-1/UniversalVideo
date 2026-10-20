@@ -91,12 +91,19 @@ class AudioRoutingTests(unittest.TestCase):
         format_id = "sniff:https%3A%2F%2Fcdn.example.com%2Fsource.mp4"
         result = video_schemas.ParseResponse(title="track", duration=15, webpage_url=url, formats=[video_schemas.FormatInfo(format_id=format_id, label="MP4", ext="mp4")])
         task = video_tasks.DownloadTask("audio-test", url, format_id, media_type="audio")
-        with patch.object(video_parse_cache, '_get_sniff_cache', return_value=result), patch.object(video_parsing, 'parse_video') as parse, patch.object(audio, 'download_audio', return_value=Path("track.m4a")) as download:
+        def source(url, target, **kwargs):
+            target.write_bytes(b'test-source')
+        def exported(source, target, *args):
+            target.write_bytes(b'test-audio')
+        with tempfile.TemporaryDirectory() as folder, patch.object(paths, 'DOWNLOAD_DIR', Path(folder)), \
+             patch.object(video_parse_cache, '_get_sniff_cache', return_value=result), patch.object(video_parsing, 'parse_video') as parse, \
+             patch.object(video_downloads.video_transfer, 'download', side_effect=source) as download, \
+             patch.object(audio, 'export_audio', side_effect=exported) as export, patch.object(video_downloads, '_remember_audio_download'):
             video_downloads._run_download(task)
         parse.assert_not_called()
-        self.assertEqual(download.call_args.kwargs["url"], media_url)
-        self.assertTrue(download.call_args.kwargs["direct"])
-        self.assertEqual(download.call_args.kwargs["expected_duration"], 15)
+        self.assertEqual(download.call_args.args[0], media_url)
+        self.assertEqual(download.call_args.kwargs['referer'], url)
+        self.assertEqual(export.call_args.args[3], 15)
         self.assertEqual(task.status, "finished")
         self.assertEqual(task.to_response().media_type, "audio")
 
@@ -105,10 +112,19 @@ class AudioRoutingTests(unittest.TestCase):
         format_id = "sniffpair:https%3A%2F%2Fcdn.example.com%2Fvideo.mp4|https%3A%2F%2Fcdn.example.com%2Faudio.m4a"
         result = video_schemas.ParseResponse(title="track", formats=[video_schemas.FormatInfo(format_id=format_id, label="merged")])
         task = video_tasks.DownloadTask("split-audio-test", url, format_id, media_type="audio", audio_format="mp3")
-        with patch.object(video_parse_cache, '_get_sniff_cache', return_value=result), patch.object(audio, 'download_audio', return_value=Path("track.mp3")) as download:
+        def transferred(url, target, **kwargs):
+            target.write_bytes(b'test-source')
+        def exported(source, target, *args):
+            target.write_bytes(b'test-audio')
+        with tempfile.TemporaryDirectory() as folder, patch.object(paths, 'DOWNLOAD_DIR', Path(folder)), \
+             patch.object(video_parse_cache, '_get_sniff_cache', return_value=result), \
+             patch.object(video_downloads.video_transfer, 'download', side_effect=transferred) as download, \
+             patch.object(audio, 'export_audio', side_effect=exported), patch.object(video_downloads, '_remember_audio_download'):
             video_downloads._run_download(task)
-        self.assertEqual(download.call_args.kwargs["url"], "https://cdn.example.com/audio.m4a")
-        self.assertEqual(download.call_args.kwargs["output_format"], "mp3")
+        self.assertEqual(download.call_args.args[0], "https://cdn.example.com/audio.m4a")
+        self.assertEqual(download.call_args.kwargs['referer'], url)
+        self.assertEqual(task.status, 'finished')
+        self.assertTrue(task.filename.endswith('.mp3'))
 
     def test_audio_export_failure_marks_task_failed(self):
         task = video_tasks.DownloadTask("failed-audio", "https://example.com/video", None, media_type="audio")

@@ -9,13 +9,13 @@ from urllib.parse import parse_qs, urlparse
 import logging
 
 import requests
-from yt_dlp import YoutubeDL
 from yt_dlp.cookies import extract_cookies_from_browser
 from yt_dlp.utils import DownloadError
 
 
 logger = logging.getLogger("videodream.summary")
 from backend.core import paths
+from backend.infrastructure.ytdlp import YoutubeDL
 from backend.modules.video import constants as video_constants
 from backend.modules.video import parsing as video_parsing
 from backend.modules.video import schemas as video_schemas
@@ -222,8 +222,9 @@ def _download_subtitle(subtitle: dict[str, Any], referer: str) -> tuple[str, str
     ext = str(subtitle.get("ext") or Path(urlparse(subtitle_url).path).suffix.lstrip(".") or "vtt").lower()
     if not subtitle_url:
         raise RuntimeError("字幕地址为空。")
-    response = requests.get(
-        subtitle_url,
+    from backend.infrastructure import video_network
+    response = video_network.get(
+        subtitle_url, referer=referer,
         headers={**video_constants.DEFAULT_HEADERS, "Referer": referer},
         timeout=(10, 45),
     )

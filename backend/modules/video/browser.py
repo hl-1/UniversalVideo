@@ -14,6 +14,7 @@ from backend.modules.accounts import service as accounts
 from backend.infrastructure.browser_sessions import needs_verification, verification_required
 from backend.infrastructure import browser_sessions as browser_session_store
 from backend.infrastructure import network
+from backend.infrastructure import video_network, video_proxy, platform_access
 from backend.modules.video import constants as video_constants
 from backend.modules.video import metadata as video_metadata
 from backend.modules.video import parse_cache as video_parse_cache
@@ -23,10 +24,11 @@ from backend.modules.video import schemas as video_schemas
 from backend.modules.video import sniffing as video_sniffing
 from backend.modules.video import thumbnails as video_thumbnails
 from backend.modules.video import urls as video_urls
+from backend.modules.video import parse_runtime
 
 
 @contextmanager
-def _temporary_browser_page():
+def _temporary_browser_page(url=None):
     with sync_playwright() as playwright:
         options = {
             "headless": True,
@@ -34,6 +36,10 @@ def _temporary_browser_page():
                      "--disable-extensions", "--disable-notifications", "--mute-audio"],
         }
         executable = video_resources._browser_executable()
+        if video_network.domestic(url):
+            options["proxy"] = {"server": "direct://"}
+        elif proxy := video_proxy.browser_options(url):
+            options["proxy"] = proxy
         if executable:
             options["executable_path"] = str(executable)
         browser = playwright.chromium.launch(**options)
@@ -45,6 +51,7 @@ def _temporary_browser_page():
 
 
 def parse_browser_sniffed_page(url: str) -> video_schemas.ParseResponse:
+    platform_access.require(url)
     normalized = video_urls.normalize_url(url)
     cached = video_parse_cache._get_sniff_cache(normalized)
     if cached:
@@ -70,7 +77,7 @@ def _parse_browser_sniffed_page(url: str, persistent_page=None) -> video_schemas
     douyin_meta: dict[str, Any] = {}
 
     verification_detected = False
-    with nullcontext(persistent_page) if persistent_page is not None else _temporary_browser_page() as page:
+    with nullcontext(persistent_page) if persistent_page is not None else _temporary_browser_page(normalized_url) as page:
 
         def remember(candidate: str) -> None:
             cleaned = html.unescape(candidate).replace("&amp;", "&")
@@ -104,16 +111,17 @@ def _parse_browser_sniffed_page(url: str, persistent_page=None) -> video_schemas
         page.on("response", record_response)
         try:
             if persistent_page is None or page.url != normalized_url:
-                page.goto(normalized_url, wait_until="commit", timeout=8000 if is_douyin_page else 12000)
+                page.goto(normalized_url, wait_until="commit", timeout=int(parse_runtime.seconds(8) * 1000))
             elif is_douyin_page and not needs_verification(page):
                 # Reuse media already loaded during verification before navigating again.
                 resources = page.evaluate("""() => [...performance.getEntriesByType('resource').map(item => item.name), ...Array.from(document.querySelectorAll('video')).map(item => item.currentSrc)]""")
                 for resource in resources:
                     remember(resource)
                 if not captured:
-                    page.reload(wait_until="commit", timeout=8000)
-            deadline = time.time() + (8 if is_douyin_page else 12 if (is_youtube_page or is_pornhub_page) else 4)
+                    page.reload(wait_until="commit", timeout=int(parse_runtime.seconds(6) * 1000))
+            deadline = time.time() + parse_runtime.seconds(8 if (is_douyin_page or is_youtube_page or is_pornhub_page) else 4)
             while time.time() < deadline:
+                parse_runtime.check()
                 if is_youtube_page:
                     if any(video_resources._is_youtube_progressive_stream(item) for item in captured) or (
                         any(video_resources._is_youtube_video_stream(item) for item in captured)
@@ -135,14 +143,15 @@ def _parse_browser_sniffed_page(url: str, persistent_page=None) -> video_schemas
                     or time.time() > deadline - 2
                 ):
                     break
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(200)
             if is_douyin_page:
                 verification_detected = needs_verification(page)
                 if verification_detected:
                     raise verification_required(normalized_url)
                 try:
                     page.evaluate("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); if (video) { video.muted = true; video.play().catch(() => {}); } }""")
-                    page.wait_for_function("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); return video?.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0.05; }""", timeout=3000)
+                    if not douyin_meta.get("thumbnail"):
+                        page.wait_for_function("""() => { const video = Array.from(document.querySelectorAll('video')).find(item => item.currentSrc.startsWith('blob:') || item.currentSrc.includes('.douyinvod.com/')); return video?.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0.05; }""", timeout=int(parse_runtime.seconds(1) * 1000))
                 except Exception:
                     pass
             page_meta = video_metadata._extract_browser_page_meta(page, normalized_url)
