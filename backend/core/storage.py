@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -103,11 +104,24 @@ def resource_path(kind: str, name: str) -> Path:
     return owned_path(kind, name, uid=row["user_id"])
 
 
+def download_filename(name: str) -> str:
+    # Resource IDs remain in server paths; only the suggested attachment name changes.
+    return re.sub(r"^(?:import-)?[a-f0-9]{12}\.(?=.+\.[^.]+$)", "", name, flags=re.IGNORECASE) or name
+
+
 def media_response(source: Path, *, download: bool = False) -> FileResponse:
     if not source.is_file():
         raise HTTPException(404, "文件不存在。")
     media_type = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".mp4": "video/mp4"}.get(source.suffix.lower())
     media_type = media_type or mimetypes.guess_type(source.name)[0] or "application/octet-stream"
-    return FileResponse(source, filename=source.name, media_type=media_type,
+    from backend.modules.accounts import service as accounts
+    prefix = accounts.environment("VIDEODREAM_X_ACCEL_PREFIX", "")
+    response = FileResponse(source, filename=download_filename(source.name) if download else source.name, media_type=media_type,
                         content_disposition_type="attachment" if download else "inline",
-                        headers={"Cache-Control": "private, no-store"})
+                        stat_result=source.stat(), headers={"Cache-Control": "private, no-store"})
+    if prefix:
+        from urllib.parse import quote
+        from fastapi.responses import Response
+        relative = contained(source).relative_to(paths.DOWNLOAD_DIR).as_posix()
+        return Response(headers=dict(response.headers) | {"X-Accel-Redirect": prefix.rstrip("/") + "/" + quote(relative, safe="/"), "X-Accel-Buffering": "no"})
+    return response

@@ -65,6 +65,6 @@ def playlist_tracks(provider, playlist_id, offset, limit, charge):
     raise ValueError("此平台不支持歌单曲目")
 
 
-def track_lyrics(track, charge):
+def track_lyrics(track, charge, check=None):
     from backend.modules.music.lyric_lookup import lookup
-    return lookup(track)
+    return lookup(track, check=check)

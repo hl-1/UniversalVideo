@@ -5,6 +5,12 @@ services:
   nginx:
     volumes:
       - type: bind
+        source: /opt/videodream/downloads
+        target: /videodream-downloads
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: /opt/videodream/deploy/nginx/xianyue.huanliyu.cn.conf
         target: /etc/nginx/conf.d/xianyue.huanliyu.cn.conf
         read_only: true

@@ -68,7 +68,7 @@ def reserve(run_id, amount, phase, signature, deadline, correction=False):
         return request
 
 
-def settle(run_id, request_id, actual=None, error=None):
+def settle(run_id, request_id, actual=None, error=None, dispatched=None):
     """Accounting alone may finish after cancellation/lease change, exactly once."""
     marker = store.execution_lease.set(None)
     try:
@@ -83,6 +83,8 @@ def settle(run_id, request_id, actual=None, error=None):
                 return
             request.update(state="settled" if actual is not None else "unconfirmed", actual=actual,
                            settled_at=time.time(), error=error)
+            if dispatched is not None:
+                request["dispatched"] = dispatched
             confirmed = ctx.get("actual_tokens", 0) + (actual if actual is not None else 0)
             used = dict(ctx.get("budget", {})) | {"tokens": confirmed}
             updated = ctx | {"model_requests": ledger, "actual_tokens": confirmed, "budget": used}
@@ -106,7 +108,7 @@ class BudgetExceeded(RuntimeError):
         self.resource = resource
 
 
-def charge(run_id, **costs):
+def charge(run_id, *, reserve_playback=False, **costs):
     with library.database() as cursor:
         row = store.get(cursor, run_id, lock=True)
         if row["status"] != "running" or not row["lease_until"] or row["lease_until"] <= time.time():
@@ -114,6 +116,9 @@ def charge(run_id, **costs):
         context = row["context"]
         used = dict(context.get("budget", {}))
         limits = {"network_requests": 160, "tools": 60, "analysis": 100} | context["limits"]
+        if (reserve_playback and costs.get("network_requests", 0) > 0
+                and used.get("network_requests", 0)+costs["network_requests"] > limits["network_requests"]*3//4):
+            raise BudgetExceeded("剩余网络额度已预留给播放校验", "network_reserve")
         for key, cost in costs.items():
             if cost < 0:
                 raise ValueError("Budget cannot be refunded")

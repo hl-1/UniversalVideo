@@ -2,6 +2,7 @@
 
 ## 当前功能规格
 
+- [统一下载、本机保存与云端文件去重](features/unified-download-delivery.md)
 - [移动端音乐中心布局与交互](features/mobile-music-experience.md)
 - [视频模块持久化](VideoDream-视频模块持久化功能设计.md)
 - [用户与管理员](VideoDream-用户与管理员功能设计.md)

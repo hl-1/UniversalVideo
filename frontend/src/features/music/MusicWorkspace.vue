@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { downloadUrl } from '../../shared/media'
-import { createMusicBatch } from './musicBatch'
+import { createMusicBatch, deviceBatch, cancelDeviceBatch, retryDeviceBatch } from './musicBatch'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account } from '../accounts/auth'
 import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileArchive, Heart, ListChecks, LoaderCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Search, Square, X } from 'lucide-vue-next'
 import TrackCover from './components/TrackCover.vue'
 import { extractHttpUrl } from '../../shared/utils/downloadInput'
 import { getTracks, isLiked, libraryRevision, refreshLibrary, renewTrack, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from './musicLibrary'
+import { chooseFile, downloadMedia, progressText, saveRemoteFile, saveMessage, type DownloadProgress } from '../../shared/downloads'
+import { hasLibraryFile, isMusicDownloaded, musicDownloadLabel, refreshMusicDownloadStatus, rememberMusicDownloads } from './musicDownloads'
 import { currentTrack, isPlaybackTrack, playbackState, playTrack, togglePlayback } from './player/musicPlayer'
 
 type Track = MusicTrack
@@ -19,7 +21,7 @@ type Task = {
   filename?: string | null
   download_url?: string | null
 }
-type BatchItem = Omit<Task, 'status'> & { status: Task['status'] | 'cancelled'; title: string; artist: string; provider: string }
+type BatchItem = Omit<Task, 'status'> & { status: Task['status'] | 'cancelled' | 'handed_off'; title: string; artist: string; provider: string; transfer?: DownloadProgress }
 type Batch = {
   batch_id: string
   status: 'pending' | 'running' | 'cancelling' | 'finished' | 'failed' | 'cancelled'
@@ -29,14 +31,24 @@ type Batch = {
   finished: number
   failed: number
   cancelled: number
+  handed_off?: number
   items: BatchItem[]
   download_url?: string | null
+  device?: boolean
+  message?: string
+  delivery_status?: string
 }
 const props = withDefaults(defineProps<{ active?: boolean; embedded?: boolean; queueOnly?: boolean; provider?: string }>(), { active: true, embedded: false, queueOnly: false })
 const emit = defineEmits<{ 'track-menu': [track: MusicTrack, event: MouseEvent]; 'source-change': [source: string] }>()
 const input = ref('')
 const source = ref('video')
-const audioFormat = ref<'m4a' | 'mp3'>('m4a')
+const audioFormat = ref<'original' | 'm4a' | 'mp3'>('mp3')
+const downloadDestination = ref<'device' | 'library'>('device')
+const supportsDirectorySave = Boolean(window.showDirectoryPicker)
+const batchMode = ref<'files' | 'directory' | 'library'>(supportsDirectorySave ? 'directory' : 'files')
+const transferProgress = ref('')
+let activeTransfer: AbortController | undefined
+function cancelTransfer() { activeTransfer?.abort(new DOMException('下载已取消', 'AbortError')) }
 const busy = ref(false)
 const hasSearched = ref(false)
 const slowSearch = ref(false)
@@ -80,11 +92,12 @@ let generation = 0
 const hasLink = computed(() => Boolean(extractHttpUrl(input.value)))
 const singleActive = computed(() => downloading.value || task.value?.status === 'running' || task.value?.status === 'pending')
 const batchActive = computed(() => batchBusy.value || ['pending', 'running', 'cancelling'].includes(batch.value?.status || ''))
-const batchComplete = computed(() => batch.value?.status === 'finished' && batch.value.finished === batch.value.total && !batch.value.failed && !batch.value.cancelled)
+const batchComplete = computed(() => batch.value?.status === 'finished' && batch.value.finished + (batch.value.handed_off || 0) === batch.value.total && !batch.value.failed && !batch.value.cancelled)
 const activeTask = computed(() => singleActive.value || batchActive.value)
-const checkedTracks = computed(() => tracks.value.filter(track => checked.value.has(trackKey(track))))
-const allChecked = computed(() => tracks.value.length > 0 && tracks.value.slice(0, 100).every(track => checked.value.has(trackKey(track))))
-const batchHeading = computed(() => ({ pending: '等待下载', running: '批量下载中', cancelling: '正在停止后续歌曲', finished: '批量下载完成', failed: '批量下载失败', cancelled: '批量下载已停止' }[batch.value?.status || 'pending']))
+const downloadableTracks = computed(() => tracks.value.filter(track => !isDownloaded(track)))
+const checkedTracks = computed(() => downloadableTracks.value.filter(track => checked.value.has(trackKey(track))))
+const allChecked = computed(() => downloadableTracks.value.length > 0 && downloadableTracks.value.slice(0, 100).every(track => checked.value.has(trackKey(track))))
+const batchHeading = computed(() => batch.value?.device && batch.value.delivery_status === 'handed_off' ? '已交给浏览器下载' : batch.value?.device && batch.value.status === 'failed' && batch.value.finished + (batch.value.handed_off || 0) > 0 ? '批量下载结束 · 部分失败' : ({ pending: '等待下载', running: '批量下载中', cancelling: '正在停止后续歌曲', finished: '批量下载完成', failed: '批量下载失败', cancelled: '批量下载已停止' }[batch.value?.status || 'pending']))
 const providers: Record<string, string> = { qq: 'QQ 音乐', netease: '网易云音乐', kugou: '酷狗音乐', all: '全部音乐平台', video: '视频音轨' }
 const downloadedTrack = computed<Track | null>(() => selected.value && task.value?.status === 'finished' && task.value.download_url
   ? { ...selected.value, filename: task.value.filename || undefined, local_url: task.value.download_url }
@@ -92,12 +105,19 @@ const downloadedTrack = computed<Track | null>(() => selected.value && task.valu
 
 async function loadLocalTracks() {
   const revision = ++localRevision
+  const candidates = [...tracks.value, ...(selected.value ? [selected.value] : [])]
+  if (!candidates.length) return
   try {
-    const data = await getTracks('downloads')
-    if (!disposed && revision === localRevision) localTracks.value = data
-  } catch { /* The download result remains playable if the library is temporarily offline. */ }
+    const statuses = await refreshMusicDownloadStatus(candidates)
+    if (disposed || revision !== localRevision) return
+    for (const track of candidates) Object.assign(track, statuses.get(trackKey(track)))
+    localTracks.value = candidates.filter(hasLibraryFile)
+  } catch { /* Search annotations remain available when a refresh fails. */ }
 }
-function localFor(track: Track) { return localTracks.value.find(item => trackKey(item) === trackKey(track) && item.local_url) }
+function localFor(track: Track) { return hasLibraryFile(track) ? track : localTracks.value.find(item => trackKey(item) === trackKey(track) && hasLibraryFile(item)) }
+function isDownloaded(track: Track) { return isMusicDownloaded(localFor(track) || track) }
+function downloadLabel(track: Track) { return musicDownloadLabel(localFor(track) || track) }
+
 function playableTrack(track: Track) {
   const local = localFor(track)
   return local ? { ...track, filename: local.filename, local_url: local.local_url } : track
@@ -131,6 +151,7 @@ async function playBatchItem(item: BatchItem) {
 }
 function toggleChecked(track: Track, event: Event) {
   const key = trackKey(track)
+  if (isDownloaded(track)) { checked.value.delete(key); (event.target as HTMLInputElement).checked = false; return }
   if (checked.value.has(key)) checked.value.delete(key)
   else if (checked.value.size < 100) checked.value.add(key)
   else error.value = '每批最多选择 100 首歌曲。'
@@ -141,7 +162,7 @@ function toggleAll() {
   selectFirst(allChecked.value ? 0 : 100)
 }
 function selectFirst(count: number) {
-  checked.value = new Set(tracks.value.slice(0, Math.min(count, 100)).map(trackKey))
+  checked.value = new Set(downloadableTracks.value.slice(0, Math.min(count, 100)).map(trackKey))
 }
 function quickSelect(event: Event) {
   const select = event.target as HTMLSelectElement
@@ -213,7 +234,8 @@ async function startBatch() {
   stopBatchPolling()
   const revision = ++batchGeneration
   try {
-    const created = await createMusicBatch(checkedTracks.value, audioFormat.value)
+    const created = await createMusicBatch(checkedTracks.value, audioFormat.value, undefined, { cloud: batchMode.value === 'library', local_mode: batchMode.value === 'directory' ? 'directory' : 'files' })
+    if (created.batch_id.startsWith('device-')) { batch.value = deviceBatch.value; checked.value = new Set(); return }
     const response = await fetch(`/api/music/batches/${created.batch_id}`)
     if (!response.ok) throw new Error(await apiError(response))
     const data = await response.json()
@@ -226,6 +248,7 @@ async function startBatch() {
   finally { batchBusy.value = false }
 }
 async function updateBatch(action: 'cancel' | 'retry') {
+  if (batch.value?.device) { if (action === 'cancel') cancelDeviceBatch(); else { try { await retryDeviceBatch() } catch (failure) { batchError.value = failure instanceof Error ? failure.message : '重试失败' } }; return }
   if (!batch.value || batchBusy.value || batchSaving.value) return
   batchBusy.value = true
   batchError.value = ''
@@ -253,28 +276,14 @@ async function saveBatch() {
   batchError.value = ''
   batchSaved.value = ''
   try {
-    const handle = window.showSaveFilePicker ? await window.showSaveFilePicker({ suggestedName: name,
-      types: [{ description: 'ZIP', accept: { 'application/zip': ['.zip'] } }] }) : null
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(await apiError(response))
-    if (handle && response.body) {
-      const writable = await handle.createWritable() as FileSystemWritableFileStream
-      await response.body.pipeTo(writable)
-    } else {
-      const objectUrl = URL.createObjectURL(await response.blob())
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = name
-      anchor.click()
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000)
-    }
-    batchSaved.value = 'ZIP 已保存。'
+    const result = await saveRemoteFile(url, name)
+    batchSaved.value = saveMessage(result)
   } catch (failure) {
     if (!(failure instanceof DOMException && failure.name === 'AbortError')) batchError.value = failure instanceof Error ? failure.message : '打包保存失败。'
   } finally { batchSaving.value = false }
 }
 function itemStatus(item: BatchItem) {
-  return { pending: '等待中', running: `${Math.round(item.progress)}%`, finished: '已完成', failed: '失败', cancelled: '已取消' }[item.status]
+  return { pending: '等待中', running: '保存中', finished: '已保存', handed_off: '交给浏览器', failed: '失败', cancelled: '已取消' }[item.status]
 }
 async function loadMore() {
   if (!hasMore.value || loadingMore.value || busy.value) return
@@ -331,10 +340,10 @@ async function pick(track: Track) {
 function isDownloadingTrack(track: Track) {
   return singleActive.value && selected.value?.webpage_url === track.webpage_url
 }
-async function downloadTrack(track: Track) {
-  if (activeTask.value || busy.value || saving.value) return
-  await pick(track)
-  await download()
+async function downloadTrack(track: Track, force = false) {
+  if (activeTask.value || busy.value || saving.value || (!force && isDownloaded(track))) return
+  void pick(track)
+  await download(force)
 }
 async function submit() {
   if (singleActive.value) return
@@ -377,7 +386,7 @@ async function submit() {
     if (!response.ok) throw new Error(await apiError(response))
     const data = await response.json()
     if (current !== generation) return
-    if (link) selected.value = data
+    if (link) { selected.value = data; void loadLocalTracks() }
     else {
       tracks.value = data.tracks; sourceMessages.value = data.sources; hasMore.value = data.has_more
       if (!data.tracks.length && data.sources.length && data.sources.every((item: { available?: boolean }) => item.available === false)) error.value = '当前搜索平台暂不可用，请重试或切换平台。'
@@ -408,57 +417,52 @@ async function poll(id: string) {
     error.value = failure instanceof Error ? failure.message : '任务查询失败。'
   }
 }
-async function download() {
-  if (!selected.value || activeTask.value) return
+async function download(force = false) {
+  if (!selected.value || activeTask.value || (!force && isDownloaded(selected.value))) return
+  const original = selected.value
+  const uid = account.value?.id
+  const controller = new AbortController()
+  activeTransfer = controller
   downloading.value = true
-  pollingError.value = false
-  error.value = ''
-  saved.value = ''
+  error.value = ''; saved.value = ''; transferProgress.value = '正在选择保存位置…'
   stopPolling()
   try {
-    const track = await renewTrack(selected.value)
+    const extension = audioFormat.value === 'original' ? 'm4a' : audioFormat.value
+    const handle = downloadDestination.value === 'device' ? await chooseFile(`${original.title}.${extension}`) : null
+    transferProgress.value = '正在解析与准备…'
+    const track = await renewTrack(original)
     if (disposed) return
     selected.value = track
-    const response = await fetch('/api/download', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: track.webpage_url, media_type: 'audio', audio_format: audioFormat.value,
-        format_id: track.token ? `music:${track.token}` : track.formats?.[0]?.format_id }),
+    const result = await downloadMedia({ url: track.webpage_url, title: track.title, media_type: 'audio', audio_format: audioFormat.value,
+      destination: downloadDestination.value, format_id: track.token ? `music:${track.token}` : track.formats?.[0]?.format_id }, {
+      handle, controller, onProgress(progress) { transferProgress.value = progressText(progress) }, onTask(data) { if (!disposed) task.value = data },
     })
-    if (!response.ok) throw new Error(await apiError(response))
-    const data = await response.json()
-    task.value = { task_id: data.task_id, status: 'pending', progress: 0, message: '等待下载任务开始' }
-    await poll(data.task_id)
-  } catch (failure) { error.value = failure instanceof Error ? failure.message : '下载任务创建失败。' }
-  finally { downloading.value = false }
+    if (disposed || uid !== account.value?.id) return
+    if (result.status === 'saved') rememberMusicDownloads([original], uid, { bytes: result.bytes, download_id: result.plan.download_id })
+    if (result.status === 'library') { await refreshLibrary(); await loadLocalTracks() }
+    else task.value = null
+    saved.value = saveMessage(result)
+  } catch (failure) {
+    if (!(failure instanceof DOMException && failure.name === 'AbortError')) error.value = failure instanceof Error ? failure.message : '下载失败。'
+    else saved.value = '下载已取消。'
+  } finally { downloading.value = false; transferProgress.value = ''; if (activeTransfer === controller) activeTransfer = undefined }
 }
+
 async function save() {
   if (!task.value?.download_url) return
   const downloadUrl = task.value.download_url
   const filename = task.value.filename
   const title = selected.value?.title || 'audio'
+  const original = selected.value
+  const uid = account.value?.id
   saving.value = true
   error.value = ''
   try {
     const ext = filename?.split('.').pop() || 'm4a'
     const name = title.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80) + `.${ext}`
-    const handle = window.showSaveFilePicker ? await window.showSaveFilePicker({ suggestedName: name,
-      types: [{ description: 'Audio', accept: ext === 'mp3' ? { 'audio/mpeg': ['.mp3'] } : { 'audio/mp4': ['.m4a'] } }] }) : null
-    const response = await fetch(downloadUrl)
-    if (!response.ok) throw new Error(await apiError(response))
-    const blob = await response.blob()
-    if (handle) {
-      const writable = await handle.createWritable()
-      await writable.write(blob)
-      await writable.close()
-    } else {
-      const objectUrl = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = name
-      anchor.click()
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000)
-    }
-    saved.value = '音频已保存。'
+    const result = await saveRemoteFile(downloadUrl, name)
+    if (result.status === 'saved' && original) rememberMusicDownloads([original], uid, { bytes: result.bytes })
+    saved.value = saveMessage(result)
   } catch (failure) {
     if (!(failure instanceof DOMException && failure.name === 'AbortError')) error.value = failure instanceof Error ? failure.message : '保存失败。'
   } finally { saving.value = false }
@@ -469,6 +473,7 @@ async function search(query: string, provider = 'all') {
   await submit()
 }
 async function showBatch(id: string) {
+  if (id.startsWith('device-')) { batch.value = deviceBatch.value; return }
   stopBatchPolling()
   const revision = ++batchGeneration
   batchError.value = ''
@@ -477,8 +482,10 @@ async function showBatch(id: string) {
   rememberBatch(id)
   await pollBatch(id, revision)
 }
-defineExpose({ search, downloadTrack, showBatch, activeTask, singleActive, busy, searchQuery, searchSource })
+defineExpose({ search, downloadTrack, isDownloaded, showBatch, activeTask, singleActive, busy, searchQuery, searchSource })
 watch(() => props.provider, value => { if (value) source.value = value }, { immediate: true })
+watch(deviceBatch, value => { if (value) batch.value = value }, { immediate: true })
+watch(downloadableTracks, available => { const keys = new Set(available.map(trackKey)); checked.value = new Set([...checked.value].filter(key => keys.has(key))) })
 watch(libraryRevision, () => { void loadLocalTracks() })
 watch(() => trackArtwork(selected.value), () => { failedCover.value = false })
 watch(() => props.active, active => { if (!active && batchComplete.value) dismissBatch() })
@@ -488,7 +495,7 @@ onMounted(() => {
   try { id = localStorage.getItem(batchStorageKey) } catch { return }
   if (id && /^[a-f0-9]{12}$/.test(id)) { batchBusy.value = true; void pollBatch(id, batchGeneration, true) }
 })
-onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; stopBatchPolling(); generation++; controller?.abort(); stopPolling(); window.clearTimeout(slowSearchTimer) })
+onBeforeUnmount(() => { cancelTransfer(); disposed = true; localRevision++; batchGeneration++; stopBatchPolling(); generation++; controller?.abort(); stopPolling(); window.clearTimeout(slowSearchTimer) })
 </script>
 
 <template>
@@ -508,25 +515,26 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
     <div v-if="error && !queueOnly" class="music-search-error" role="alert"><p class="error-text">{{ error }}</p><button v-if="hasSearched && !selected && !busy" type="button" class="mc-command" @click="submit"><RefreshCw :size="16" />重试</button></div>
     <section v-if="busy && !queueOnly" class="music-search-loading" role="status" aria-live="polite"><p><LoaderCircle :size="20" class="spin" /><span>{{ slowSearch ? '仍在处理中，请稍候…' : hasLink ? '正在解析链接…' : `正在搜索「${searchQuery}」…` }}</span></p><div v-for="row in 3" :key="row" class="music-search-skeleton" aria-hidden="true"><span /><span /></div></section>
     <div v-else-if="!queueOnly && !error && !selected && !tracks.length" class="mc-empty music-search-empty"><Search :size="30" /><p>{{ hasSearched ? `没有找到「${searchQuery}」的相关歌曲` : '输入歌名、歌手，或粘贴链接开始搜索' }}</p><small v-if="hasSearched">试试修改关键词或切换搜索平台</small></div>
+    <p v-if="transferProgress" class="success-text" role="status">{{ transferProgress }} <button type="button" class="secondary-action" @click="cancelTransfer">取消下载</button></p>
     <p v-if="saved && !queueOnly" class="success-text" role="status">{{ saved }}</p>
     <p v-if="batchError" class="error-text" role="alert">{{ batchError }}</p>
     <p v-if="batchSaved" class="success-text" role="status">{{ batchSaved }}</p>
     <section v-if="batch" class="music-batch" :class="{ 'batch-complete': batchComplete }" aria-label="批量下载队列">
-      <div class="batch-heading"><div><h2>{{ batchHeading }}</h2><p>成功 {{ batch.finished }} / {{ batch.total }}<span v-if="batch.failed"> · 失败 {{ batch.failed }}</span><span v-if="batch.cancelled"> · 已取消 {{ batch.cancelled }}</span> · {{ batch.audio_format.toUpperCase() }}</p></div><strong v-if="!batchComplete">{{ Math.round(batch.progress) }}%</strong></div>
+      <div class="batch-heading"><div><h2>{{ batchHeading }}</h2><p v-if="batch.device">{{ batch.message }}</p><p v-else>成功 {{ batch.finished }} / {{ batch.total }}<span v-if="batch.failed"> · 失败 {{ batch.failed }}</span><span v-if="batch.cancelled"> · 已取消 {{ batch.cancelled }}</span> · {{ batch.audio_format.toUpperCase() }}</p></div><strong v-if="!batchComplete">{{ Math.round(batch.progress) }}%</strong></div>
       <progress v-if="!batchComplete" :value="batch.progress" max="100" aria-label="批量音频下载进度" />
       <div class="batch-actions">
-        <button v-if="batchActive" type="button" class="secondary-action" :disabled="batchBusy || batch.status === 'cancelling'" @click="updateBatch('cancel')"><Square :size="15" />{{ batch.status === 'cancelling' ? '等待当前歌曲结束' : '停止后续' }}</button>
-        <button v-if="batch.failed && !batchActive" type="button" class="secondary-action" :disabled="batchSaving" @click="updateBatch('retry')"><RefreshCw :size="16" />重试失败歌曲</button>
+        <button v-if="batchActive" type="button" class="secondary-action" :disabled="(batchBusy && !batch.device) || batch.status === 'cancelling'" @click="updateBatch('cancel')"><Square :size="15" />{{ batch.status === 'cancelling' ? '等待当前歌曲结束' : '停止后续' }}</button>
+        <button v-if="(batch.failed || batch.cancelled) && !batchActive" type="button" class="secondary-action" :disabled="batchSaving" @click="updateBatch('retry')"><RefreshCw :size="16" />{{ batch.failed ? '重试失败歌曲' : '重试未完成歌曲' }}</button>
         <button v-if="batch.download_url" type="button" class="composer-submit" :disabled="batchSaving" @click="saveBatch"><LoaderCircle v-if="batchSaving" :size="18" class="spin" /><FileArchive v-else :size="18" />{{ batchSaving ? '打包保存中' : `保存 ZIP · ${batch.finished} 首` }}</button>
         <button v-if="batchPollingError" type="button" class="track-play" title="刷新队列" aria-label="刷新队列" @click="stopBatchPolling(); pollBatch(batch.batch_id)"><RefreshCw :size="17" /></button>
         <button v-if="!batchActive" type="button" class="track-play" :disabled="batchSaving" title="关闭下载记录" aria-label="关闭下载记录" @click="dismissBatch"><X :size="18" /></button>
       </div>
-      <ol v-if="!batchComplete" class="batch-items">
+      <ol v-if="!batchComplete || (batch.device && batch.handed_off)" class="batch-items">
         <li v-for="item in batch.items" :key="item.task_id" :class="item.status">
           <Check v-if="item.status === 'finished'" :size="16" /><LoaderCircle v-else-if="item.status === 'running'" :size="16" class="spin" /><X v-else-if="item.status === 'failed' || item.status === 'cancelled'" :size="16" /><Music2 v-else :size="16" />
-          <div class="batch-item-name"><strong>{{ item.title }}</strong><span>{{ item.artist }} · {{ providers[item.provider] }}</span><p v-if="item.error">{{ item.error }}</p></div>
+          <div class="batch-item-name"><strong>{{ item.title }}</strong><span>{{ item.artist }} · {{ providers[item.provider] }}</span><p v-if="item.status === 'running' && item.message">{{ item.message }}</p><progress v-if="item.status === 'running' && item.transfer" :value="item.transfer.phase === 'transferring' && item.transfer.total ? Math.min(99, item.transfer.bytes / item.transfer.total * 100) : undefined" max="100" :aria-label="`${item.title} 保存进度`" /><p v-if="item.error">{{ item.error }}</p></div>
           <span class="batch-item-status">{{ itemStatus(item) }}</span>
-          <div v-if="item.status === 'finished' && item.download_url" class="batch-item-actions"><button type="button" class="track-play" :title="`播放已下载的 ${item.title}`" :aria-label="`播放已下载的 ${item.title}`" @click="playBatchItem(item)"><Play :size="16" /></button><a class="track-play" :href="downloadUrl(item.download_url)" :download="`${item.artist} - ${item.title}.${batch.audio_format}`" :title="`保存 ${item.title}`" :aria-label="`保存 ${item.title}`"><Download :size="16" /></a></div><span v-else class="batch-item-placeholder" />
+          <a v-if="item.status === 'handed_off' && item.download_url" class="secondary-action" :href="downloadUrl(item.download_url)" :download="item.filename || item.title" :aria-label="`保存歌曲 ${item.title}`">保存此歌曲</a><div v-else-if="item.status === 'finished' && item.download_url" class="batch-item-actions"><button type="button" class="track-play" :title="`播放已下载的 ${item.title}`" :aria-label="`播放已下载的 ${item.title}`" @click="playBatchItem(item)"><Play :size="16" /></button><a class="track-play" :href="downloadUrl(item.download_url)" :download="`${item.artist} - ${item.title}.${batch.audio_format}`" @click.prevent="saveRemoteFile(item.download_url, item.filename || `${item.artist} - ${item.title}.${batch.audio_format}`).catch(failure => batchError = failure.message)" :title="`保存 ${item.title}`" :aria-label="`保存 ${item.title}`"><Download :size="16" /></a></div><span v-else class="batch-item-placeholder" />
         </li>
       </ol>
     </section>
@@ -534,7 +542,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
     <div v-if="selected && !queueOnly" ref="audioResult" class="audio-result">
       <div class="audio-cover"><img v-if="trackArtwork(selected) && !failedCover" :src="trackArtwork(selected) || undefined" :alt="selected.title" @error="failedCover = true" /><Music2 v-else :size="32" /></div>
       <div class="audio-meta"><span class="status-chip">{{ selected.provider ? providers[selected.provider] : '视频音轨' }}</span><h2>{{ selected.title }}</h2><div class="meta-row"><span>{{ selected.artist || selected.uploader }}</span><time>{{ duration(selected.duration) }}</time><span v-if="selected.access">{{ selected.access }}</span><a :href="selected.webpage_url" target="_blank" rel="noreferrer">原始页面<ExternalLink :size="13" /></a></div></div>
-      <div class="audio-selected-actions"><button class="track-play track-favorite" :class="{ liked: isLiked(selected) }" type="button" :title="isLiked(selected) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(selected) ? '取消喜欢' : '喜欢'} ${selected.title}`" :aria-pressed="isLiked(selected)" @click="toggleFavorite(selected)"><Heart :size="17" :fill="isLiked(selected) ? 'currentColor' : 'none'" /></button><button v-if="embedded" class="track-play" type="button" title="更多操作" :aria-label="`更多操作 ${selected.title}`" @click="emit('track-menu', selected, $event)"><MoreHorizontal :size="18" /></button><button class="composer-submit" :disabled="activeTask || busy" @click="download"><LoaderCircle v-if="activeTask" :size="18" class="spin" /><Download v-else :size="18" />{{ activeTask ? '处理中' : `下载 ${audioFormat.toUpperCase()}` }}</button></div>
+      <div class="audio-selected-actions"><button class="track-play track-favorite" :class="{ liked: isLiked(selected) }" type="button" :title="isLiked(selected) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(selected) ? '取消喜欢' : '喜欢'} ${selected.title}`" :aria-pressed="isLiked(selected)" @click="toggleFavorite(selected)"><Heart :size="17" :fill="isLiked(selected) ? 'currentColor' : 'none'" /></button><button v-if="embedded" class="track-play" type="button" title="更多操作" :aria-label="`更多操作 ${selected.title}`" @click="emit('track-menu', selected, $event)"><MoreHorizontal :size="18" /></button><span v-if="isDownloaded(selected)" class="status-chip">{{ downloadLabel(selected) }}</span><select v-if="!isDownloaded(selected)" v-model="downloadDestination" aria-label="单曲保存目标" :disabled="activeTask"><option value="device">保存到本机</option><option value="library">保存到云端资料库</option></select><button v-if="!isDownloaded(selected)" class="composer-submit" :disabled="activeTask || busy" @click="download()"><LoaderCircle v-if="activeTask" :size="18" class="spin" /><Download v-else :size="18" />{{ activeTask ? '处理中' : `下载 ${audioFormat.toUpperCase()}` }}</button></div>
     </div>
     <div v-if="task" class="audio-task" :class="{ failed: task.status === 'failed' }" aria-live="polite">
       <div class="task-head"><span>{{ task.error || task.message }}</span><strong>{{ Math.round(task.progress) }}%</strong></div>
@@ -544,13 +552,13 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
     </div>
     <div v-if="tracks.length && !queueOnly" class="track-results">
       <div class="results-heading"><h2>搜索结果</h2><span>{{ tracks.length }} 首</span></div>
-      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ tracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ tracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首</span><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
+      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ downloadableTracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ downloadableTracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首 · 跳过 {{ tracks.length - downloadableTracks.length }} 首已下载</span><select v-model="batchMode" aria-label="批量保存方式"><option value="files">浏览器下载（逐首）</option><option v-if="supportsDirectorySave" value="directory">保存到本机文件夹</option><option value="library">保存到云端资料库</option></select><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
       <div v-for="(track, index) in tracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">
-        <label class="track-check" @click.stop><input type="checkbox" :checked="checked.has(trackKey(track))" :disabled="checkedTracks.length >= 100 && !checked.has(trackKey(track))" :aria-label="`勾选 ${track.title} ${track.artist || ''}`" @change="toggleChecked(track, $event)" /></label>
-        <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><TrackCover v-if="embedded" class="search-track-cover" :src="trackArtwork(track)" :title="track.title" /><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}<span v-if="embedded" class="search-track-provider"> · {{ localFor(track) ? '已下载' : providers[track.provider || ''] }}</span></span></span></button>
+        <label class="track-check" @click.stop><input type="checkbox" :checked="checked.has(trackKey(track))" :disabled="isDownloaded(track) || (checkedTracks.length >= 100 && !checked.has(trackKey(track)))" :aria-label="`勾选 ${track.title} ${track.artist || ''}`" @change="toggleChecked(track, $event)" /></label>
+        <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><TrackCover v-if="embedded" class="search-track-cover" :src="trackArtwork(track)" :title="track.title" /><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}<span v-if="embedded" class="search-track-provider"> · {{ downloadLabel(track) || providers[track.provider || ''] }}</span></span></span></button>
         <button type="button" class="track-play" :class="{ active: isPlaybackTrack(track) }" :title="playbackLabel(track)" :aria-label="playbackLabel(track)" :aria-pressed="isPlaybackTrack(track) && playbackState === 'playing'" :aria-busy="isPlaybackTrack(track) && playbackState === 'loading'" @click.stop="playSearchTrack(track)"><LoaderCircle v-if="isPlaybackTrack(track) && playbackState === 'loading'" :size="17" class="spin" /><Pause v-else-if="isPlaybackTrack(track) && playbackState === 'playing'" :size="17" /><Play v-else :size="17" /></button>
-        <span class="track-provider">{{ localFor(track) ? '已下载' : providers[track.provider || ''] }}</span>
-        <div class="track-actions" @click.stop><button type="button" class="track-play track-favorite" :class="{ liked: isLiked(track) }" :title="isLiked(track) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(track) ? '取消喜欢' : '喜欢'} ${track.title}`" :aria-pressed="isLiked(track)" @click="toggleFavorite(track)"><Heart :size="17" :fill="isLiked(track) ? 'currentColor' : 'none'" /></button><button type="button" class="track-play track-download" :disabled="activeTask || busy || saving" :title="isDownloadingTrack(track) ? `正在下载 ${track.title}` : `下载 ${track.title} · ${audioFormat.toUpperCase()}`" :aria-label="`下载单曲 ${track.title} ${track.artist || ''}`" :aria-busy="isDownloadingTrack(track)" @click="downloadTrack(track)"><LoaderCircle v-if="isDownloadingTrack(track)" :size="17" class="spin" /><Download v-else :size="17" /></button><button v-if="embedded" type="button" class="track-play" title="更多操作" :aria-label="`更多操作 ${track.title}`" @click="emit('track-menu', track, $event)"><MoreHorizontal :size="18" /></button></div>
+        <span class="track-provider">{{ downloadLabel(track) || providers[track.provider || ''] }}</span>
+        <div class="track-actions" @click.stop><button type="button" class="track-play track-favorite" :class="{ liked: isLiked(track) }" :title="isLiked(track) ? '取消喜欢' : '喜欢'" :aria-label="`${isLiked(track) ? '取消喜欢' : '喜欢'} ${track.title}`" :aria-pressed="isLiked(track)" @click="toggleFavorite(track)"><Heart :size="17" :fill="isLiked(track) ? 'currentColor' : 'none'" /></button><button v-if="!isDownloaded(track)" type="button" class="track-play track-download" :disabled="activeTask || busy || saving" :title="isDownloadingTrack(track) ? `正在下载 ${track.title}` : `下载 ${track.title} · ${audioFormat.toUpperCase()}`" :aria-label="`下载单曲 ${track.title} ${track.artist || ''}`" :aria-busy="isDownloadingTrack(track)" @click="downloadTrack(track)"><LoaderCircle v-if="isDownloadingTrack(track)" :size="17" class="spin" /><Download v-else :size="17" /></button><button v-if="embedded" type="button" class="track-play" title="更多操作" :aria-label="`更多操作 ${track.title}`" @click="emit('track-menu', track, $event)"><MoreHorizontal :size="18" /></button></div>
         <time>{{ duration(track.duration) }}</time><ArrowRight :size="16" aria-hidden="true" />
       </div>
       <div v-if="hasMore" class="music-load-more"><button type="button" class="secondary-action" :disabled="loadingMore || busy" @click="loadMore"><LoaderCircle v-if="loadingMore" :size="16" class="spin" /><ChevronDown v-else :size="16" />{{ loadingMore ? '加载中' : '加载更多' }}</button></div>
@@ -568,6 +576,12 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
 .music-format-toolbar label { display: inline-flex; align-items: center; gap: 10px; color: #637086; font-size: 12px; }
 .music-format-toolbar select { height: 32px; padding: 0 26px 0 10px; border: 1px solid #dce2ec; border-radius: 5px; color: #354760; background: #fff; font-size: 12px; }
 .music-batch .batch-items li { grid-template-columns: 18px minmax(0, 1fr) 76px 76px; }
+.music-batch .batch-items { flex-basis: 100%; min-width: 0; width: 100%; }
+.batch-item-name p, .batch-heading p { overflow-wrap: anywhere; }
+.batch-item-name strong { color: var(--music-text, #233249); }
+.batch-item-name progress { display: block; width: 100%; max-width: 100%; height: 5px; margin-top: 6px; accent-color: var(--music-accent, #228c74); }
+.batch-item-status { white-space: normal; }
+.batch-items > li > .secondary-action { min-width: 0; padding: 6px; white-space: normal; text-align: center; font-size: 12px; color: var(--music-highlight, #109b6d); background: var(--music-soft, #eef1ec); border-color: var(--music-line, #dce2ec); }
 .batch-item-actions { display: flex; align-items: center; gap: 4px; }
 .batch-quick-select { height: 34px; min-width: 106px; max-width: 100%; padding: 0 26px 0 10px; border: 1px solid var(--music-line, #dce2ec); border-radius: 5px; color: var(--music-text, #354760); background: var(--music-surface, #fff); font: inherit; font-size: 12px; }
 .music-batch.batch-complete { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; padding: 14px 0; }
@@ -604,7 +618,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
   .music-workspace .audio-result { display: grid; grid-template-columns: 64px minmax(0, 1fr); }
   .audio-selected-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .audio-selected-actions .composer-submit { flex: 1; }
-  .music-batch .batch-items li { grid-template-columns: 18px minmax(0, 1fr) 55px 64px; gap: 8px; }
+  .music-batch .batch-items li { grid-template-columns: 18px minmax(0, 1fr) 64px 80px; gap: 8px; }
   .batch-item-actions .track-play { width: 30px; height: 32px; }
 }
 @media (max-width: 760px) {

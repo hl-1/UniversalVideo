@@ -33,6 +33,7 @@ from backend.modules.video import preview as video_preview
 from backend.modules.video import preview_assets
 from backend.modules.video import tasks as video_tasks
 from backend.modules.video import bilibili_session
+from backend.modules.delivery.api import router as delivery_router
 app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan)
 
 
@@ -63,6 +64,7 @@ app.include_router(video_api.router)
 app.include_router(video_preview.router)
 app.include_router(video_files.router)
 app.include_router(music_batch.router)
+app.include_router(delivery_router)
 app.add_middleware(accounts.AuthenticationMiddleware)
 
 
@@ -98,10 +100,14 @@ accounts.cancel_callbacks.append(bilibili_session.disconnect)
 accounts.cancel_callbacks.append(browser_session_store.sessions.cancel_user)
 accounts.cancel_callbacks.append(music_agent_runtime.cancel_user)
 accounts.cancel_callbacks.append(preview_assets.cancel_user)
+from backend.modules.delivery import service as delivery_service
+accounts.cancel_callbacks.append(delivery_service.cancel_user)
 
 
 @app.on_event("shutdown")
 def close_browser_sessions():
+    from backend.modules.delivery import service as delivery
+    delivery.stop_maintenance()
     preview_assets.stop()
     browser_session_store.sessions.shutdown()
     video_history.stop_worker()
@@ -109,6 +115,8 @@ def close_browser_sessions():
 
 @app.on_event("startup")
 def restore_task_state():
+    from backend.modules.delivery import service as delivery
+    delivery.start_maintenance()
     preview_assets.start()
     video_history.start_worker()
     try:

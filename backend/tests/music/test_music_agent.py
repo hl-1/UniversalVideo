@@ -5,11 +5,14 @@ import asyncio
 import json
 import runpy
 import secrets
+import sys
 import tempfile
+import threading
 import time
 import unittest
 import wave
-from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
@@ -26,7 +29,7 @@ from backend.core.paths import ROOT_DIR as PROJECT_ROOT
 from backend.modules.accounts import service as accounts
 from backend.modules.admin import api as administration
 from backend.modules.music import library
-from backend.modules.music.agent import auth, budget, features, mcp, model, runtime, service, skill, store, validation
+from backend.modules.music.agent import auth, budget, features, mcp, model, runtime, service, skill, store, validation, work
 
 
 class SettingsTests(unittest.TestCase):
@@ -152,6 +155,40 @@ class MatchTests(unittest.TestCase):
         self.assertGreaterEqual(value["energy"],0)
         self.assertNotIn("vocals",value)
 
+    def test_cancel_stops_and_reaps_decoder_process(self):
+        started = time.monotonic()
+        def check():
+            if time.monotonic()-started > .15:
+                raise work.Stopped('cancel decoder')
+        processes = []
+        original = work.subprocess.Popen
+        def launch(*args, **kwargs):
+            process = original(*args, **kwargs)
+            processes.append(process)
+            return process
+        with patch.object(work.subprocess, 'Popen', side_effect=launch):
+            with self.assertRaises(work.Stopped):
+                work.run_process([sys.executable, '-c', 'import time; time.sleep(30)'], check=check,
+                                 capture_output=True)
+        self.assertLess(time.monotonic()-started, 1)
+        self.assertIsNotNone(processes[0].poll())
+
+    def test_task_media_resources_are_isolated_and_cleaned_on_failure(self):
+        row = {'user_id':1, 'run_id':'test-resource-run', 'worker_id':'first-worker'}
+        track = {'user_id':1, 'key':'same-song', 'provider':'netease', 'identifier':'1'}
+        folder = tempfile.TemporaryDirectory()
+        path = Path(folder.name)/'audio.media'
+        path.write_bytes(b'audio')
+        with self.assertRaisesRegex(RuntimeError, 'test abort'):
+            with work.task(row), work.operation(row, lambda:None) as first:
+                self.assertTrue(first.resources.retain_audio(track, folder, path, 'test'))
+                changed_lease = row | {'worker_id':'replacement-worker'}
+                with work.operation(changed_lease, lambda:None) as second:
+                    self.assertIsNone(second.resources.cached_audio(track))
+                self.assertIsNone(first.resources.cached_audio(track | {'user_id':2}))
+                raise RuntimeError('test abort')
+        self.assertFalse(path.exists())
+
 
 class AgentIntegrationTests(unittest.TestCase):
     @classmethod
@@ -218,6 +255,24 @@ class AgentIntegrationTests(unittest.TestCase):
             row = store.get(cursor,row["run_id"],lock=True)
             row = store.update(cursor,row,request=row["request"] | {"parsed":model.offline_parse("放松",preferences or {})})
         return row
+
+    @contextmanager
+    def real_mcp_transport(self):
+        """Use the real MCP client, HTTP protocol, routing and tools in TestClient."""
+        import httpx
+        original = mcp.streamablehttp_client
+        test_client = self.client
+        class ApplicationTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                response = await asyncio.to_thread(test_client.request, request.method, str(request.url),
+                    headers=dict(request.headers), content=await request.aread())
+                return httpx.Response(response.status_code, headers=response.headers,
+                                      content=response.content, request=request)
+        def factory(headers=None, timeout=None, auth=None):
+            return httpx.AsyncClient(transport=ApplicationTransport(), headers=headers, timeout=timeout, auth=auth)
+        with patch.object(mcp, 'streamablehttp_client',
+                          side_effect=lambda *args, **kwargs: original(*args, **kwargs, httpx_client_factory=factory)):
+            yield
 
     def test_fill_keeps_parent_and_refreshes_expired_validation(self):
         row = self.running()
@@ -288,6 +343,10 @@ class AgentIntegrationTests(unittest.TestCase):
         headers = {"Authorization":"Bearer "+token,"Accept":"application/json, text/event-stream"}
         response = self.client.post("/api/music/mcp",headers=headers,json={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})
         self.assertEqual(response.status_code,200,response.text)
+        response = self.client.post('/api/music/mcp', headers=headers,
+            json={'jsonrpc':'2.0', 'method':'notifications/initialized'})
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.content, b'')
         response = self.client.post("/api/music/mcp",headers=headers,json={"jsonrpc":"2.0","id":2,"method":"tools/list"})
         self.assertEqual(len(response.json()["result"]["tools"]),8)
         response = self.client.post("/api/music/mcp",headers=headers,json={"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_music_categories","arguments":{}}})
@@ -454,6 +513,56 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(totals['reserved'], 0)
         self.assertGreater(totals['unconfirmed'], 4000)
 
+    def test_event_loop_misuse_is_rejected_before_reservation(self):
+        row = self.running()
+        async def invoke():
+            with self.assertRaisesRegex(model.ModelFault, '请求尚未发送'):
+                model.complete(row['run_id'], [{'role':'user', 'content':'test'}])
+        with patch.object(budget, 'reserve', wraps=budget.reserve) as reserve, \
+             patch.object(model, '_request') as request:
+            asyncio.run(invoke())
+        reserve.assert_not_called()
+        request.assert_not_called()
+        current = service.current_run(row['run_id'])
+        self.assertEqual(budget.usage(current['context']), {'actual':0, 'reserved':0, 'unconfirmed':0})
+        self.assertEqual(current['context']['budget'].get('model_calls', 0), 0)
+
+    def test_sdk_failure_before_dispatch_releases_reservation_and_redacts_logs(self):
+        row = self.running()
+        config = {'api_key':'test-secret', 'base_url':'https://model.test/v1', 'model':'test'}
+        with patch.object(model.ai, 'load_config', return_value=config), \
+             patch.object(model, 'AsyncOpenAI', side_effect=ValueError('test-secret')), \
+             self.assertLogs(model.logger, level='WARNING') as logs:
+            with self.assertRaisesRegex(model.ModelFault, '发送前失败'):
+                model.complete(row['run_id'], [{'role':'user', 'content':'test'}])
+        current = service.current_run(row['run_id'])
+        self.assertEqual(budget.usage(current['context']), {'actual':0, 'reserved':0, 'unconfirmed':0})
+        request = current['context']['model_requests'][0]
+        self.assertEqual((request['state'], request['actual'], request['dispatched']), ('settled', 0, False))
+        self.assertTrue(current['context']['model_stop'])
+        self.assertIn('ValueError', '\n'.join(logs.output))
+        self.assertNotIn('test-secret', '\n'.join(logs.output))
+
+    def test_transport_failure_after_dispatch_retains_unknown_usage(self):
+        import httpx
+        row = self.running()
+        requests = []
+        async def fail(request):
+            requests.append(request)
+            raise httpx.RemoteProtocolError('Peer closed without response')
+        def factory(**kwargs):
+            return httpx.AsyncClient(transport=httpx.MockTransport(fail), **kwargs)
+        config = {'api_key':'fake', 'base_url':'https://model.test/v1', 'model':'test'}
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'AsyncClient', side_effect=factory):
+            with self.assertRaisesRegex(model.ModelFault, '用量待确认'):
+                model.complete(row['run_id'], [{'role':'user', 'content':'test'}])
+            with self.assertRaises(model.ModelFault):
+                model.complete(row['run_id'], [{'role':'user', 'content':'do not retry'}])
+        self.assertEqual(len(requests), 1)
+        current = service.current_run(row['run_id'])
+        self.assertTrue(current['context']['model_requests'][0]['dispatched'])
+        self.assertGreater(budget.usage(current['context'])['unconfirmed'], 0)
+
     def test_provider_excess_is_recorded_truthfully_and_blocks_new_requests(self):
         row = self.running()
         request = budget.reserve(row['run_id'], 1000, 'semantic', 'unexpected-usage', time.time()+90)
@@ -469,6 +578,7 @@ class AgentIntegrationTests(unittest.TestCase):
         config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
         closed = []
         async def pending(*args):
+            await model._mark_dispatched(None)
             await asyncio.sleep(.03)
             model.cancel(row['run_id'])
             try:
@@ -587,7 +697,7 @@ class AgentIntegrationTests(unittest.TestCase):
                 asyncio.run(model._drive(row['run_id'], time.time()+.05))
         self.assertEqual(closed, [True])
 
-    def test_model_fault_in_tool_stops_runtime_and_keeps_local_partial(self):
+    def test_model_fault_without_qualified_songs_is_failed(self):
         public, _, _ = self.create()
         with library.database() as cursor:
             row = store.get(cursor, public['run_id'], lock=True)
@@ -603,9 +713,27 @@ class AgentIntegrationTests(unittest.TestCase):
              patch.object(validation, 'validate', side_effect=AssertionError('Must stop downloads')):
             runtime.run(row['run_id'])
         current = service.current_run(row['run_id'])
-        self.assertEqual(current['status'], 'partial')
+        self.assertEqual(current['status'], 'failed')
         self.assertIn('模型格式错误', current['result']['notice'])
         self.assertFalse(current['result']['tracks'])
+
+    def test_model_fault_preserves_qualified_songs_as_partial(self):
+        row = self.running()
+        track = library.TrackInput(title='Qualified song', artist='Artist', provider='netease', identifier='990',
+            webpage_url='https://music.163.com/song?id=990', duration=180).model_dump() | {
+            'key':'qualified', 'source':{'kind':'personal', 'label':'个人库'},
+            'analysis':{'features':{'vocal_role':'lead', 'language':'中文', 'scene_scores':{'放松':.9}},
+                'evidence':{'fields':{field:{'confidence':.9} for field in ('vocal_role','language','scene_scores')}}},
+            'validation':{'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}}
+        with library.database() as cursor:
+            row = store.get(cursor, row['run_id'], lock=True)
+            store.update(cursor, row, context=row['context'] | {'candidates':[track],
+                'model_stop':'模型已停止调用', 'stop_reason':'模型已停止调用'})
+        runtime.finish(row['run_id'], None, row['worker_id'])
+        current = service.current_run(row['run_id'])
+        self.assertEqual(current['status'], 'partial')
+        self.assertEqual(len(current['result']['tracks']), 1)
+        self.assertIn('模型已停止调用', current['result']['notice'])
 
     def test_concurrent_reservations_admit_only_one_request(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -626,7 +754,6 @@ class AgentIntegrationTests(unittest.TestCase):
 
     def test_real_async_sdk_closes_transport_on_cancel(self):
         import httpx
-        from openai import AsyncOpenAI
         row = self.running()
         state = {'closed':False, 'requests':0, 'interrupted':False}
         class HoldingTransport(httpx.AsyncBaseTransport):
@@ -639,13 +766,62 @@ class AgentIntegrationTests(unittest.TestCase):
                     state['interrupted'] = True
             async def aclose(self):
                 state['closed'] = True
-        client = AsyncOpenAI(api_key='fake', base_url='https://model.test/v1', max_retries=0,
-                             http_client=httpx.AsyncClient(transport=HoldingTransport()))
+        def factory(**kwargs):
+            return httpx.AsyncClient(transport=HoldingTransport(), **kwargs)
         config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
-        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'AsyncOpenAI', return_value=client):
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'AsyncClient', side_effect=factory):
             with self.assertRaisesRegex(model.ModelFault, '取消'):
                 model.complete(row['run_id'], [{'role':'user','content':'test'}])
         self.assertEqual(state, {'closed':True, 'requests':1, 'interrupted':True})
+        self.assertGreater(budget.usage(service.current_run(row['run_id'])['context'])['unconfirmed'], 0)
+
+    def test_real_mcp_can_cancel_while_sdk_transport_is_waiting(self):
+        import httpx
+        row = self.running()
+        payload = library.TrackInput(title='Song', artist='Artist', provider='netease', identifier='991',
+            webpage_url='https://music.163.com/song?id=991', duration=180)
+        with library.database() as cursor:
+            key = library.save_track(cursor, payload)
+            library.write_lyrics(cursor, key, {'text':'[00:01]与你相爱的每一天', 'source':'本地 LRC',
+                'signature':'', 'checked_at':time.time(), 'updated_at':time.time(), 'manual':True})
+        service.add_candidates(row['run_id'], [payload.model_dump()], {'kind':'personal', 'label':'测试'})
+        started = threading.Event()
+        closed = threading.Event()
+        class HoldingTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                started.set()
+                await asyncio.sleep(30)
+            async def aclose(self):
+                closed.set()
+        def factory(**kwargs):
+            return httpx.AsyncClient(transport=HoldingTransport(), **kwargs)
+        config = {'api_key':'fake', 'base_url':'https://model.test/v1', 'model':'test'}
+        with self.real_mcp_transport(), patch.object(model.ai, 'load_config', return_value=config), \
+             patch.object(model, 'AsyncClient', side_effect=factory), ThreadPoolExecutor(max_workers=1) as worker:
+            future = worker.submit(mcp.LocalClient(auth.issue(row)).call, 'get_track_features', {'keys':[key]})
+            ready = started.wait(3)
+            before = time.monotonic()
+            self.client.get('/api/health').raise_for_status()
+            self.client.post(f"/api/music/recommendations/{row['run_id']}/cancel").raise_for_status()
+            self.assertTrue(ready, 'Real MCP tool must reach the SDK HTTP transport')
+            self.assertTrue(closed.wait(1), 'Cancel must close the SDK transport without blocking the server loop')
+            self.assertLess(time.monotonic()-before, 1)
+            try:
+                response = future.result(timeout=3)
+            except Exception as exc:
+                # The SDK can wrap cancellation/409 from MCP cleanup in a task group.
+                def expected(error):
+                    if isinstance(error, BaseExceptionGroup):
+                        return all(expected(item) for item in error.exceptions)
+                    return isinstance(error, model.ModelFault) or (
+                        isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 409)
+                self.assertTrue(expected(exc), repr(exc))
+            else:
+                self.assertEqual(response['error']['code'], 'MODEL_STOP')
+        current = service.current_run(row['run_id'])
+        self.assertEqual(current['status'], 'cancelled')
+        self.assertFalse(current['result'])
+        self.assertGreater(budget.usage(current['context'])['unconfirmed'], 0)
 
     def test_fabricated_batch_key_stops_without_correction(self):
         jobs = [{'key':str(i), 'messages':[{'role':'system','content':'rules'},
@@ -663,6 +839,7 @@ class AgentIntegrationTests(unittest.TestCase):
             runtime.record_attempt(row['run_id'], 'search_online_tracks', {'query':'情歌','provider':'qq'}, attempted)
 
     def test_complete_romance_run_uses_shared_ledger_and_stops_at_goal(self):
+        import httpx
         tracks = []
         for i in range(3):
             payload = library.TrackInput(title=f'甜蜜歌曲{i}', artist=f'歌手{i}', provider='netease', identifier=str(500+i),
@@ -676,24 +853,29 @@ class AgentIntegrationTests(unittest.TestCase):
             'preferences':{'target_count':3, 'source_mode':'discover'}}, headers={'Idempotency-Key':secrets.token_hex(16)})
         response.raise_for_status()
         rid = response.json()['run_id']
-        class InProcessClient:
-            def __init__(self, token): self.token = token
-            def tools(self): return [{'type':'function','function':{'name':'search_online_tracks',
-                'description':'Search songs','parameters':{'type':'object','properties':{}}}}]
-            def call(self, name, args): return service.execute(self.token, name, args)
         semantic = {'vocal_role':'lead', 'language':'中文', 'themes':['甜蜜'], 'moods':['浪漫'],
                     'scene_scores':{'情歌':.9}, 'confidence':.9}
-        async def provider(config, mode, messages, tools, max_output, structured):
-            if tools:
-                return {'role':'assistant','content':'','finish_reason':'stop','tool_calls':[{
+        requests = []
+        async def provider(request):
+            requests.append(request)
+            body = json.loads(request.content)
+            if body.get('tools'):
+                message = {'role':'assistant','content':None,'tool_calls':[{
                     'id':'recall', 'type':'function', 'function':{'name':'search_online_tracks',
-                    'arguments':'{"provider":"netease","query":"情歌","page":1}'}}]}, 100
-            body = model.json_value(messages[1]['content'])
-            value = semantic if 'lyrics' in body else {key:semantic for key in body}
-            return {'role':'assistant','content':json.dumps(value),'finish_reason':'stop'}, 500
+                    'arguments':'{"provider":"netease","query":"情歌","page":1}'}}]}
+                tokens = 100
+            else:
+                evidence = model.json_value(body['messages'][1]['content'])
+                value = semantic if 'lyrics' in evidence else {key:semantic for key in evidence}
+                message, tokens = {'role':'assistant','content':json.dumps(value)}, 500
+            return httpx.Response(200, json={'id':'mock', 'object':'chat.completion', 'created':0, 'model':'fake',
+                'choices':[{'index':0, 'message':message, 'finish_reason':'tool_calls' if body.get('tools') else 'stop'}],
+                'usage':{'prompt_tokens':tokens-10, 'completion_tokens':10, 'total_tokens':tokens}})
+        def factory(**kwargs):
+            return httpx.AsyncClient(transport=httpx.MockTransport(provider), **kwargs)
         config = {'api_key':'fake','base_url':'https://model.test/v1','model':'fake'}
-        with patch.object(mcp, 'LocalClient', InProcessClient), patch.object(model.ai, 'load_config', return_value=config), \
-             patch.object(model, '_request', side_effect=provider) as calls, \
+        with self.real_mcp_transport(), patch.object(model.ai, 'load_config', return_value=config), \
+             patch.object(model, 'AsyncClient', side_effect=factory), \
              patch.object(service.music, '_search', return_value=[SimpleNamespace(model_dump=lambda t=t:t) for t in tracks]), \
              patch.object(validation, 'validate', return_value={'checked_at':time.time(), 'identity':True,
                  'playable':True, 'full':True, 'duration':180, 'reason':'mock full playback'}):
@@ -703,11 +885,295 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(row['request']['parsed']['scene'], '情歌')
         self.assertEqual(len(row['result']['tracks']), 3)
         self.assertEqual(row['result']['gap']['count'], 0)
-        self.assertEqual(calls.await_count, 3)
-        self.assertEqual(row['context']['budget']['model_calls'], 3)
-        self.assertEqual(row['context']['budget']['tokens'], 1100)
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(all(not json.loads(r.content).get('tools') for r in requests))
+        self.assertEqual(row['context']['budget']['model_calls'], 2)
+        self.assertEqual(row['context']['budget']['tokens'], 1000)
         self.assertEqual(row['context']['budget']['search_rounds'], 1)
-        self.assertEqual(budget.usage(row['context']), {'actual':1100, 'reserved':0, 'unconfirmed':0})
+        self.assertEqual(budget.usage(row['context']), {'actual':1000, 'reserved':0, 'unconfirmed':0})
+        self.assertTrue(all(r['dispatched'] for r in row['context']['model_requests']))
+
+    def performance_candidates(self, row, count, analyzed=0):
+        tracks = [library.TrackInput(provider='netease', identifier=str(8000+i), title=f'并发歌曲{i}',
+            artist='歌手', duration=180, webpage_url=f'https://music.163.com/song?id={8000+i}').model_dump()
+            for i in range(count)]
+        service.add_candidates(row['run_id'], tracks, {'kind':'online_search', 'label':'test', 'provider':'netease'})
+        analysis = {'features':{'vocal_role':'lead', 'vocals':True, 'language':'中文', 'themes':['甜蜜'],
+                                'scene_scores':{'放松':.9, '情歌':.9}},
+                    'evidence':{'fields':{k:{'confidence':.9} for k in ('vocals','vocal_role','language','scene_scores')}}}
+        current = service.current_run(row['run_id'])
+        tracks = current['context']['candidates']
+        for track in tracks[:analyzed]:
+            service.replace_candidate(row['run_id'], track['key'], analysis=analysis)
+        return service.current_run(row['run_id'])['context']['candidates']
+
+    def test_lyrics_workers_keep_identity_lease_and_shared_network_budget(self):
+        row = self.running({'scene':'情歌'})
+        tracks = self.performance_candidates(row, 3)
+        barrier = threading.Barrier(3)
+        observed = []
+        lock = threading.Lock()
+        def lyrics(track, charge, check=None):
+            check()
+            service.network.charge_request()
+            with lock:
+                observed.append((accounts.current().id, accounts.owner_id(), store.execution_lease.get()))
+            barrier.wait(timeout=2)
+            return {'text':'[00:01]与你相爱的每一天', 'source':'test', 'document_complete':True, 'instrumental':None}
+        def semantic(run_id, jobs):
+            return {j['key']:{'vocal_role':'lead', 'language':'中文', 'themes':['甜蜜'], 'moods':['浪漫'],
+                'scene_scores':{'情歌':.9}, 'confidence':.9} for j in jobs}
+        with patch.object(features.platforms, 'track_lyrics', side_effect=lyrics), \
+             patch.object(features, '_semantic', side_effect=semantic) as semantic_call:
+            response = service.execute(auth.issue(row), 'get_track_features', {'keys':[t['key'] for t in tracks]})
+        self.assertIsNone(response['error'], response)
+        self.assertEqual(len(response['data']['tracks']), 3)
+        self.assertEqual(observed, [(self.user_id, self.user_id, (row['run_id'],row['worker_id']))]*3)
+        semantic_call.assert_called_once()
+        context = service.current_run(row['run_id'])['context']
+        self.assertEqual(context['budget']['network_requests'], 3)
+        self.assertEqual(context['budget']['analysis'], 3)
+        self.assertEqual(context['performance']['stages']['lyrics']['count'], 3)
+        with patch.object(features.platforms, 'track_lyrics', side_effect=AssertionError('Cached features must skip lyrics')), \
+             patch.object(features, '_semantic', side_effect=AssertionError('Cached features must skip model')):
+            cached = service.execute(auth.issue(row), 'get_track_features', {'keys':[t['key'] for t in tracks]})
+        self.assertTrue(all(t['cached'] for t in cached['data']['tracks']))
+
+    def test_explicit_metadata_exclusion_skips_analysis_download_and_model(self):
+        row = self.running({'exclusions':['歌手']})
+        track = self.performance_candidates(row, 1)[0]
+        with patch.object(features, 'analyze_many', side_effect=AssertionError('Excluded tracks must skip analysis')), \
+             patch.object(validation, 'validate', side_effect=AssertionError('Excluded tracks must skip media')):
+            response = service.execute(auth.issue(row), 'get_track_features', {'keys':[track['key']]})
+        self.assertIsNone(response['error'], response)
+        current = service.current_run(row['run_id'])
+        self.assertFalse(service.qualified(current))
+        self.assertNotIn('analysis', current['context']['budget'])
+        self.assertNotIn('model_calls', current['context']['budget'])
+        self.assertIn('排除项', current['context']['candidates'][0]['validation']['reason'])
+
+    def test_cached_candidates_are_prioritized_without_changing_stored_order(self):
+        row = self.running()
+        tracks = self.performance_candidates(row, 2)
+        with library.database() as cursor:
+            cursor.execute('INSERT INTO music_track_features (user_id,track_key,track_snapshot,features,evidence,'
+                'content_signature,analyzer_version,checked_at,expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',
+                (self.user_id, tracks[1]['key'], '{}', '{}', '{}', 'a'*64, features.ANALYZER_VERSION,
+                 time.time(), time.time()+600))
+        self.assertEqual([t['key'] for t in features.prioritize_cached(tracks)], [tracks[1]['key'], tracks[0]['key']])
+        self.assertEqual([t['key'] for t in service.current_run(row['run_id'])['context']['candidates']], [t['key'] for t in tracks])
+
+    def test_completed_validation_is_visible_while_other_source_is_waiting(self):
+        row = self.running()
+        tracks = self.performance_candidates(row, 3, analyzed=3)
+        slow_started, release, fast_returned = threading.Event(), threading.Event(), threading.Event()
+        active = maximum = 0
+        lock = threading.Lock()
+        def verify(track, charge, allow_network, check=None):
+            nonlocal active, maximum
+            check()
+            service.network.charge_request()
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            try:
+                if track['key'] == tracks[1]['key']:
+                    slow_started.set()
+                    self.assertTrue(release.wait(3))
+                elif track['key'] == tracks[0]['key']:
+                    self.assertTrue(slow_started.wait(2))
+                    fast_returned.set()
+                return {'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}
+            finally:
+                with lock:
+                    active -= 1
+        with patch.object(validation, 'validate', side_effect=verify), ThreadPoolExecutor(max_workers=1) as pool:
+            future = work.submit(pool, service.execute, auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks]})
+            try:
+                self.assertTrue(fast_returned.wait(2))
+                deadline = time.monotonic()+2
+                while time.monotonic() < deadline:
+                    public = store.public(service.current_run(row['run_id']))
+                    if any(t['key'] == tracks[0]['key'] for t in public['progress']['preview']):
+                        break
+                    release.wait(.01)
+                self.assertTrue(any(t['key'] == tracks[0]['key'] for t in public['progress']['preview']))
+                self.assertFalse(future.done())
+                self.assertIn('first_qualified_seconds', service.current_run(row['run_id'])['context']['performance'])
+            finally:
+                release.set()
+            response = future.result(timeout=3)
+        self.assertIsNone(response['error'], response)
+        self.assertEqual(maximum, 2)
+        self.assertEqual(len(response['data']['tracks']), 3)
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['network_requests'], 3)
+
+    def test_next_lyrics_prefetch_overlaps_validation_without_model_calls(self):
+        row = self.running({'target_count':8})
+        tracks = self.performance_candidates(row, 6, analyzed=3)
+        entered, prefetched = threading.Event(), threading.Event()
+        warmed = []
+        lock = threading.Lock()
+        def prefetch(track, charge, check):
+            self.assertTrue(entered.wait(2))
+            check()
+            self.assertTrue(work.prefetching.get())
+            service.network.charge_request()
+            with lock:
+                warmed.append(track['key'])
+                if len(warmed) == 3:
+                    prefetched.set()
+        def verify(track, charge, allow_network, check=None):
+            entered.set()
+            self.assertTrue(prefetched.wait(2))
+            check()
+            return {'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}
+        with patch.object(features, 'prefetch_lyrics', side_effect=prefetch), \
+             patch.object(validation, 'validate', side_effect=verify), \
+             patch.object(model, 'complete', side_effect=AssertionError('Prefetch must never call model')):
+            response = service.execute(auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks[:3]]})
+        self.assertIsNone(response['error'], response)
+        self.assertEqual(set(warmed), {t['key'] for t in tracks[3:]})
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['network_requests'], 3)
+        self.assertTrue(all(not t.get('analysis') for t in service.current_run(row['run_id'])['context']['candidates'][3:]))
+
+    def test_prefetch_does_not_consume_playback_network_reserve(self):
+        row = self.running({'target_count':8})
+        tracks = self.performance_candidates(row, 6, analyzed=3)
+        with library.database() as cursor:
+            row = store.get(cursor, row['run_id'], lock=True)
+            used = row['context']['limits']['network_requests']*3//4
+            row = store.update(cursor, row, context=row['context'] | {'budget':{'network_requests':used}})
+        def verify(track, charge, allow_network, check=None):
+            service.network.charge_request()
+            return {'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}
+        with patch.object(features, 'prefetch_lyrics', side_effect=AssertionError('Reserve forbids prefetch')), \
+             patch.object(validation, 'validate', side_effect=verify):
+            response = service.execute(auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks[:3]]})
+        self.assertIsNone(response['error'], response)
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['network_requests'], used+3)
+
+    def test_duration_goal_stops_other_validation_and_does_not_publish_it(self):
+        row = self.running({'goal':'duration', 'target_duration_minutes':1})
+        tracks = self.performance_candidates(row, 2, analyzed=2)
+        entered, stopped = threading.Event(), threading.Event()
+        def verify(track, charge, allow_network, check=None):
+            if track['key'] == tracks[0]['key']:
+                self.assertTrue(entered.wait(2))
+                return {'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}
+            entered.set()
+            try:
+                while not stopped.wait(.02):
+                    check()
+            finally:
+                stopped.set()
+        with patch.object(validation, 'validate', side_effect=verify):
+            response = service.execute(auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks]})
+        self.assertIsNone(response['error'], response)
+        self.assertTrue(stopped.is_set())
+        self.assertEqual(len(response['data']['tracks']), 1)
+        current = service.current_run(row['run_id'])
+        self.assertEqual(sum(bool(t.get('validation')) for t in current['context']['candidates']), 1)
+
+    def test_concurrent_prefetch_admission_cannot_cross_reserve_boundary(self):
+        row = self.running({'target_count':8})
+        tracks = self.performance_candidates(row, 6, analyzed=3)
+        with library.database() as cursor:
+            row = store.get(cursor, row['run_id'], lock=True)
+            boundary = row['context']['limits']['network_requests']*3//4
+            row = store.update(cursor, row, context=row['context'] | {'budget':{'network_requests':boundary-1}})
+        barrier = threading.Barrier(3)
+        finished = threading.Event()
+        admitted, completed = [], []
+        lock = threading.Lock()
+        def prefetch(track, charge, check):
+            barrier.wait(timeout=2)
+            try:
+                service.network.charge_request()
+                with lock:
+                    admitted.append(track['key'])
+            finally:
+                with lock:
+                    completed.append(track['key'])
+                    if len(completed) == 3:
+                        finished.set()
+        def verify(track, charge, allow_network, check=None):
+            self.assertTrue(finished.wait(2))
+            service.network.charge_request()
+            return {'checked_at':time.time(), 'identity':True, 'playable':True, 'full':True, 'duration':180}
+        with patch.object(features, 'prefetch_lyrics', side_effect=prefetch), \
+             patch.object(validation, 'validate', side_effect=verify):
+            response = service.execute(auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks[:3]]})
+        self.assertIsNone(response['error'], response)
+        self.assertEqual(len(admitted), 1)
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['network_requests'], boundary+3)
+
+    def test_audio_is_reused_between_tools_and_cleaned_after_validation(self):
+        row = self.running()
+        track = self.performance_candidates(row, 1)[0]
+        seen = []
+        class AudioResponse:
+            headers = {'Content-Length':'5'}
+            def __enter__(self): return self
+            def __exit__(self, *args): self.close()
+            def raise_for_status(self): pass
+            def close(self): pass
+            def iter_content(self, size): yield b'audio'
+        def audio(path, check=None):
+            check()
+            seen.append(path)
+            return {'duration':180, 'signature':'full', 'tempo':80, 'energy':.1, 'variation':.1, 'rhythm_stability':.9}
+        with work.task(row), \
+             patch.object(features.platforms, 'track_lyrics', return_value={'text':'纯音乐', 'instrumental':True,
+                 'source':'test', 'document_complete':True}), patch.object(features, 'audio_features', side_effect=audio), \
+             patch.object(validation.music, 'resolve', return_value=('https://audio.test/full', {}, 'test')), \
+             patch.object(validation.network, 'public_get', return_value=AudioResponse()) as download, \
+             patch.object(validation.music, 'parse_url', return_value=SimpleNamespace(model_dump=lambda:track)), \
+             patch.object(work, 'probe', return_value={'duration':180}), \
+             patch.object(work, 'run_process', return_value=SimpleNamespace(returncode=0)):
+            analyzed = service.execute(auth.issue(row), 'get_track_features', {'keys':[track['key']]})
+            self.assertIsNone(analyzed['error'], analyzed)
+            self.assertTrue(seen[0].is_file())
+            validated = service.execute(auth.issue(row), 'validate_tracks', {'keys':[track['key']]})
+            self.assertIsNone(validated['error'], validated)
+            self.assertTrue(validated['data']['tracks'][0]['full'])
+            self.assertEqual(download.call_count, 1)
+            self.assertFalse(seen[0].exists())
+        context = service.current_run(row['run_id'])['context']
+        self.assertEqual(context['performance']['stages']['audio_download']['cache_hits'], 1)
+
+    def test_cancelled_prefetch_cannot_write_lyrics_or_publish_validation(self):
+        from backend.modules.music import lyric_lookup
+        row = self.running({'target_count':8})
+        tracks = self.performance_candidates(row, 6, analyzed=3)
+        entered, release = threading.Event(), threading.Event()
+        def remote(track):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return {'text':'未经取消允许不能写入', 'source':'test', 'document_complete':True, 'instrumental':None}
+        def verify(track, charge, allow_network, check=None):
+            entered.wait(2)
+            while not release.wait(.02):
+                check()
+            check()
+            raise AssertionError('Cancelled validation must not return a result')
+        with patch.object(lyric_lookup, 'remote', side_effect=remote), \
+             patch.object(validation, 'validate', side_effect=verify), ThreadPoolExecutor(max_workers=1) as pool:
+            future = work.submit(pool, service.execute, auth.issue(row), 'validate_tracks', {'keys':[t['key'] for t in tracks[:3]]})
+            try:
+                self.assertTrue(entered.wait(2))
+                with library.database() as cursor:
+                    current = store.get(cursor, row['run_id'], lock=True)
+                    store.update(cursor, current, status='cancelled', worker_id=None, lease_until=None)
+            finally:
+                release.set()
+            with self.assertRaises(HTTPException):
+                future.result(timeout=3)
+        current = service.current_run(row['run_id'])
+        self.assertTrue(all(not t.get('validation') for t in current['context']['candidates']))
+        with library.database() as cursor:
+            cursor.execute('SELECT COUNT(*) AS n FROM music_lyrics WHERE user_id=%s', (self.user_id,))
+            self.assertEqual(cursor.fetchone()['n'], 0)
 
     def test_feature_cache_invalidates_on_network_model_and_lyrics_changes(self):
         row = self.running()

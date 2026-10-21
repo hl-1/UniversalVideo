@@ -3,6 +3,7 @@ import { extractHttpUrl } from '../../shared/utils/downloadInput.ts'
 import { readApiError } from '../../shared/api/client.ts'
 import { safeFilename } from './format.ts'
 import { saveResponseToFile, waitForFileSave } from './fileSave.ts'
+import { downloadFilename, downloadMedia, nativeDownload, progressText, saveMessage as deliveryMessage } from '../../shared/downloads.ts'
 import { downloadedPreviewUrl } from './videoPreview.ts'
 import type { ParseResult, TaskResult, FilePickerHandle } from './types'
 
@@ -57,13 +58,14 @@ export function useVideoDownload(context: DownloadContext) {
     try { return window.localStorage?.getItem(`videodream.video.saved.${id}`) === '1' } catch { return false }
   })
   const saveProgress = ref('')
+  const downloadDestination = ref<'device' | 'library'>('device')
 
   async function chooseSaveHandle(file?: TaskResult) {
     if (!window.showSaveFilePicker) return null
     const savedExtension = file?.filename?.split('.').pop()?.toLowerCase()
     const ext = savedExtension && ['mp4', 'webm', 'mkv', 'm4a', 'mp3'].includes(savedExtension) ? savedExtension : suggestedExtension()
     return window.showSaveFilePicker({
-      suggestedName: file?.filename || safeFilename(parseResult.value?.title || 'VideoDream', ext),
+      suggestedName: downloadFilename(file?.filename || safeFilename(parseResult.value?.title || 'VideoDream', ext)),
       types: [
         {
           description: ['m4a', 'mp3'].includes(ext) ? 'Audio file' : 'Video file',
@@ -89,38 +91,39 @@ export function useVideoDownload(context: DownloadContext) {
     handledTaskId = ''
     task.value = null
 
+    const controller = new AbortController()
+    activeSave = controller
     try {
+      // The picker must run during the click, before format refresh or parsing.
+      const handle = downloadDestination.value === 'device' ? await chooseSaveHandle() : null
       if (!await prepareFormats() || revision !== revisions.record) return
-      if (window.showSaveFilePicker) {
-        try {
-          const handle = await chooseSaveHandle()
+      savingFile.value = downloadDestination.value === 'device'
+      task.value = { task_id: `local-${Date.now()}`, status: 'running', progress: 0, message: '正在准备下载', destination: downloadDestination.value }
+      const result = await downloadMedia({ url: target, title: parseResult.value?.title, format_id: selectedFormat.value || undefined,
+        parse_record_id: recordId || undefined, destination: downloadDestination.value }, {
+        handle, controller,
+        onTask(data) { if (revision === revisions.record) task.value = data },
+        onProgress(progress) {
           if (revision !== revisions.record) return
-          saveHandle.value = handle
-        } catch (error) {
-          if (error instanceof DOMException && error.name === 'AbortError') return
-          throw error
-        }
-      }
-
-      const response = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: target,
-          format_id: selectedFormat.value || undefined,
-          parse_record_id: recordId || undefined,
-        }),
+          saveProgress.value = progressText(progress)
+          if (task.value) task.value.progress = progress.total ? Math.min(99, progress.bytes / progress.total * 100) : 0
+        },
       })
-      if (!response.ok) throw new Error(await readApiError(response))
-      const data: { task_id: string } = await response.json()
       if (revision !== revisions.record) return
-      await startPolling(data.task_id)
-      if (revision !== revisions.record) return
-      await refreshTaskReferences()
+      task.value = { task_id: result.plan.task_id || result.plan.download_id, status: 'finished', progress: 100,
+        message: deliveryMessage(result), filename: result.plan.filename, destination: downloadDestination.value,
+        download_url: result.status === 'library' ? result.plan.url : undefined }
+      if (result.status === 'saved') savedTasks.add(task.value.task_id)
+      saveMessage.value = deliveryMessage(result)
+      void refreshTaskReferences().catch(() => {})
     } catch (error) {
-      if (revision === revisions.record) errorMessage.value = error instanceof Error ? error.message : '下载任务创建失败。'
+      if (revision === revisions.record && !(error instanceof DOMException && error.name === 'AbortError')) {
+        errorMessage.value = error instanceof Error ? error.message : '下载失败。'
+        if (task.value) { task.value.status = 'failed'; task.value.error = errorMessage.value }
+      } else if (task.value && revision === revisions.record) { task.value.status = 'cancelled'; task.value.message = '下载已取消' }
     } finally {
-      if (revision === revisions.record) loadingDownload.value = false
+      if (activeSave === controller) activeSave = null
+      if (revision === revisions.record) { loadingDownload.value = false; savingFile.value = false; saveProgress.value = '' }
     }
   }
 
@@ -186,6 +189,11 @@ export function useVideoDownload(context: DownloadContext) {
       const targetHandle = usePicker ? handle || (await chooseSaveHandle(snapshot)) : null
       if (!current() || controller.signal.aborted) return
       if (usePicker && !targetHandle) return
+      if (!targetHandle) {
+        nativeDownload(snapshot.download_url!, filename)
+        saveMessage.value = '已交给浏览器下载，请在浏览器下载列表中查看保存结果。'
+        return
+      }
       saveProgress.value = '正在读取视频文件…'
       const response = await waitForFileSave(() => fetch(snapshot.download_url!, { signal: controller.signal }), controller)
       if (!response.ok) throw new Error(await waitForFileSave(() => readApiError(response), controller))
@@ -205,17 +213,7 @@ export function useVideoDownload(context: DownloadContext) {
         return
       }
 
-      const blob = await waitForFileSave(() => response.blob(), controller)
-      if (!current() || controller.signal.aborted) return
-      const objectUrl = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = filename
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
-      saveMessage.value = '已交给浏览器下载，请在浏览器下载列表中查看保存结果。'
+
     } catch (error) {
       if (current() && !(error instanceof DOMException && error.name === 'AbortError')) {
         errorMessage.value = error instanceof Error ? error.message : '保存文件失败，请重试另存为。'
@@ -253,5 +251,5 @@ export function useVideoDownload(context: DownloadContext) {
     saveHandle.value = null
   }
 
-  return { chooseSaveHandle, startDownload, startPolling, pollTask, saveFinishedFile, stopPolling, resetDownload, cancelSave, fileSaved, saveProgress }
+  return { chooseSaveHandle, startDownload, startPolling, pollTask, saveFinishedFile, stopPolling, resetDownload, cancelSave, fileSaved, saveProgress, downloadDestination }
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { saveRemoteFile } from '../../shared/downloads'
 import MindMapCanvas from './components/MindMapCanvas.vue'
 import ExecutionTiming from './components/ExecutionTiming.vue'
 import BilibiliLoginDialog from './components/BilibiliLoginDialog.vue'
@@ -18,6 +19,7 @@ const {
   browserBusy,
   browserSession,
   canDownload,
+  downloadDestination,
   canPreview,
   canSummarize,
   cancelSave,
@@ -235,8 +237,9 @@ defineExpose({ open })
                   </option>
                 </select>
               </label>
+              <select v-model="downloadDestination" :disabled="loadingDownload || savingFile" aria-label="下载保存目标"><option value="device">保存到本机</option><option value="library">保存到云端资料库</option></select>
               <button class="primary-action" :disabled="!canDownload" @click="startDownload">
-                {{ loadingDownload ? '准备文件中' : '选择位置并下载' }}
+                {{ loadingDownload ? '下载处理中' : downloadDestination === 'library' ? '保存到云端资料库' : '选择位置并下载' }}
               </button>
               <button class="secondary-action full-width" :disabled="!canSummarize" @click="startSummary">
                 {{ loadingSummary ? '启动生成中' : generateMindMap ? '生成总结与思维导图' : '生成 AI 总结' }}
@@ -270,8 +273,8 @@ defineExpose({ open })
                 <span>{{ summaryTask.result.transcript.length }} 段文本</span>
               </div>
               <div v-if="summaryTask.result" class="summary-actions">
-                <a v-if="summaryTask.result.markdown_url" :href="summaryTask.result.markdown_url" download>下载 Markdown</a>
-                <a v-if="summaryTask.result.json_url" :href="summaryTask.result.json_url" download>下载 JSON</a>
+                <a v-if="summaryTask.result.markdown_url" :href="summaryTask.result.markdown_url" download @click.prevent="saveRemoteFile(summaryTask.result.markdown_url!, 'summary.md').catch(e => errorMessage = e.message)">下载 Markdown</a>
+                <a v-if="summaryTask.result.json_url" :href="summaryTask.result.json_url" download @click.prevent="saveRemoteFile(summaryTask.result.json_url!, 'summary.json').catch(e => errorMessage = e.message)">下载 JSON</a>
               </div>
               <div class="summary-tabs" role="tablist" aria-label="总结视图">
                 <button type="button" role="tab" :aria-selected="summaryTab === 'summary'" @click="summaryTab = 'summary'">总结</button>
@@ -339,14 +342,14 @@ defineExpose({ open })
             </button>
             <button v-if="fileSaved && !savingFile" class="secondary-action compact" @click="saveFinishedFile()">再次另存为</button>
             <button v-if="savingFile" class="secondary-action compact" @click="cancelSave">取消保存</button>
-            <a v-if="task.status === 'finished' && task.filename" class="secondary-action compact watermark-entry" href="#watermark"><Eraser :size="16" aria-hidden="true" />去水印</a>
+            <a v-if="task.status === 'finished' && task.filename && task.destination !== 'device'" class="secondary-action compact watermark-entry" href="#watermark"><Eraser :size="16" aria-hidden="true" />去水印</a>
           </div>
           </div>
           </div>
         </section>
       </section>
 
-      <WatermarkEditor :preferred-filename="task?.status === 'finished' ? task.filename : null" />
+      <WatermarkEditor :preferred-filename="task?.status === 'finished' && task.destination !== 'device' ? task.filename : null" />
 
       <section id="platforms" class="platform-band">
         <div class="section-title">

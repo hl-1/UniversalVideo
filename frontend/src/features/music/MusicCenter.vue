@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { downloadUrl } from '../../shared/media'
+import { saveRemoteFile, saveMessage } from '../../shared/downloads'
+import { isMusicDownloaded, savedMusicHistory, unverifiedMusicHistory, unverifiedMusicCount } from './musicDownloads'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, LayoutGrid, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, Palette, RefreshCw } from 'lucide-vue-next'
 import MusicWorkspace from './MusicWorkspace.vue'
@@ -109,7 +110,8 @@ async function loadContent() {
       local.value = downloaded.slice(0, 6)
     } else {
       const result = await getTracks(view.value, playlistId.value)
-      if (revision === generation) tracks.value = result
+      if (revision === generation) tracks.value = view.value === 'downloads'
+        ? [...new Map([...savedMusicHistory.value, ...result].map(track => [trackKey(track), track])).values()] : result
     }
     if (revision === generation) error.value = ''
   } catch (failure) {
@@ -130,15 +132,13 @@ async function search(text = query.value, provider = source.value) {
 function failTheme(key: string) { failedThemes.value = new Set([...failedThemes.value, key]) }
 async function download(track: MusicTrack) {
   if (track.local_url) {
-    const anchor = document.createElement('a')
-    anchor.href = downloadUrl(track.local_url)
-    anchor.download = track.filename || track.title
-    anchor.click()
+    try { message(saveMessage(await saveRemoteFile(track.local_url, track.filename || track.title))) }
+    catch (failure) { if (!(failure instanceof DOMException && failure.name === 'AbortError')) error.value = failure instanceof Error ? failure.message : '保存失败。' }
     return
   }
   go('search')
   await nextTick()
-  await searchWorkspace.value?.downloadTrack(track)
+  await searchWorkspace.value?.downloadTrack(track, true)
 }
 async function radio() {
   try {
@@ -326,7 +326,7 @@ defineExpose({ download, search })
         <MusicImportWorkspace v-show="view === 'bulk'" :active="view === 'bulk'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" />
         <ScenePlaylist v-if="view === 'scene'" :active="props.active && view === 'scene'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" @open-playlist="go('playlist', $event)" />
         <section v-show="view === 'search' || view === 'bulk' || view === 'scene'" class="mc-search-workspace"><MusicWorkspace ref="searchWorkspace" :active="view === 'search' || view === 'bulk' || view === 'scene'" :queue-only="view === 'bulk' || view === 'scene'" :embedded="true" :provider="source" @source-change="source = $event" @track-menu="showMenu" /></section>
-        <template v-if="!['home', 'search', 'bulk', 'scene', 'profile', 'appearance', 'resources', 'tools', 'mine'].includes(view)"><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
+        <template v-if="!['home', 'search', 'bulk', 'scene', 'profile', 'appearance', 'resources', 'tools', 'mine'].includes(view)"><details v-if="view === 'downloads' && unverifiedMusicCount" class="mc-unverified-saves"><summary>待核实的旧保存记录 · {{ unverifiedMusicCount }} 首</summary><p>这些记录缺少逐首保存确认，已恢复下载入口，不计为本机保存成功。</p><MusicTrackList v-if="unverifiedMusicHistory.length" :tracks="unverifiedMusicHistory" @more="showMenu" /></details><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
         <section v-if="view === 'tools'" class="mc-hub" aria-label="工具入口"><button @click="go('resources')"><FolderOpen :size="23" /><span><strong>任务与文件</strong><small>查看任务进度与已生成文件</small></span><ChevronRight :size="18" /></button><button @click="emit('openTools', 'video')"><Video :size="23" /><span><strong>视频下载</strong><small>解析链接并下载视频</small></span><ChevronRight :size="18" /></button><button @click="emit('openTools', 'watermark')"><Eraser :size="23" /><span><strong>视频去水印</strong><small>编辑视频并处理水印</small></span><ChevronRight :size="18" /></button></section>
         <section v-if="view === 'mine'" aria-label="我的音乐入口">
           <div class="mc-mine-profile"><span class="mc-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt="头像" /><UserRound v-else :size="26" /></span><div><strong>{{ profile.nickname }}</strong><small>我的音乐空间</small></div></div>
@@ -346,7 +346,13 @@ defineExpose({ download, search })
     <div v-if="toast" class="mc-toast" role="status">{{ toast }}</div>
   </div>
   <Teleport to="body">
-    <div v-if="menuTrack" class="mc-menu-backdrop" @click.self="menuTrack = null" @keydown.esc="menuTrack = null"><div ref="menuElement" class="mc-track-menu" :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }"><button @click="toggleFavorite(menuTrack!); menuTrack = null"><Heart :size="17" />{{ isLiked(menuTrack) ? '取消喜欢' : '喜欢' }}</button><button @click="queueSong"><ListMusic :size="17" />加入播放队列</button><button @click="selectPlaylist"><Plus :size="17" />加入歌单</button><button @click="openAppearance(menuTrack!)"><Palette :size="17" />外观设置</button><button @click="download(menuTrack!); menuTrack = null"><Download :size="17" />{{ menuTrack.local_url ? '保存音频' : '下载歌曲' }}</button><a v-if="!menuTrack.webpage_url.startsWith('/api/')" :href="menuTrack.webpage_url" target="_blank" rel="noreferrer" @click="menuTrack = null"><ArrowRight :size="17" />原始页面</a><button v-if="view === 'playlist' || view === 'history' || view === 'trials'" class="danger" @click="removeSong"><Trash2 :size="17" />{{ view === 'playlist' ? '移出歌单' : '移除记录' }}</button></div></div>
+    <div v-if="menuTrack" class="mc-menu-backdrop" @click.self="menuTrack = null" @keydown.esc="menuTrack = null"><div ref="menuElement" class="mc-track-menu" :style="{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }"><button @click="toggleFavorite(menuTrack!); menuTrack = null"><Heart :size="17" />{{ isLiked(menuTrack) ? '取消喜欢' : '喜欢' }}</button><button @click="queueSong"><ListMusic :size="17" />加入播放队列</button><button @click="selectPlaylist"><Plus :size="17" />加入歌单</button><button @click="openAppearance(menuTrack!)"><Palette :size="17" />外观设置</button><button v-if="view !== 'search' || !(searchWorkspace?.isDownloaded(menuTrack) || isMusicDownloaded(menuTrack))" @click="download(menuTrack!); menuTrack = null"><Download :size="17" />{{ menuTrack.local_url ? '保存音频' : '下载歌曲' }}</button><a v-if="!menuTrack.webpage_url.startsWith('/api/')" :href="menuTrack.webpage_url" target="_blank" rel="noreferrer" @click="menuTrack = null"><ArrowRight :size="17" />原始页面</a><button v-if="view === 'playlist' || view === 'history' || view === 'trials'" class="danger" @click="removeSong"><Trash2 :size="17" />{{ view === 'playlist' ? '移出歌单' : '移除记录' }}</button></div></div>
     <div v-if="modal" class="mc-modal-backdrop" @click.self="closeModal"><section ref="dialogElement" class="mc-modal" role="dialog" aria-modal="true" aria-labelledby="music-modal-title" @keydown="modalKey"><header><h2 id="music-modal-title">{{ modal === 'add' ? '加入歌单' : editingPlaylist ? '编辑歌单' : '创建歌单' }}</h2><button class="mc-icon" :disabled="modalBusy" title="关闭" aria-label="关闭" @click="closeModal"><X :size="21" /></button></header><p v-if="modalError" class="mc-modal-error" role="alert">{{ modalError }}</p><form v-if="modal === 'playlist'" @submit.prevent="savePlaylist"><label>歌单名称<input v-model="modalName" maxlength="80" required /></label><label>简介<textarea v-model="modalDescription" maxlength="300" rows="3" /></label><footer><button type="button" class="mc-command" :disabled="modalBusy" @click="closeModal">取消</button><button class="mc-command primary" :disabled="modalBusy || !modalName.trim()" type="submit"><LoaderCircle v-if="modalBusy" :size="17" class="spin" />保存</button></footer></form><div v-else class="mc-add-playlists"><button v-for="playlist in playlists" :key="playlist.id" :disabled="modalBusy" @click="addToPlaylist(playlist.id)"><ListMusic :size="21" /><span>{{ playlist.name }}<small>{{ playlist.count }} 首歌曲</small></span><Plus :size="17" /></button><button :disabled="modalBusy" @click="openModal('playlist')"><Plus :size="21" />新建歌单</button></div></section></div>
   </Teleport>
 </template>
+
+<style scoped>
+.mc-unverified-saves { margin-bottom: 20px; padding: 14px; border: 1px solid var(--music-line); border-radius: 10px; color: var(--music-text); }
+.mc-unverified-saves summary { cursor: pointer; font-size: 14px; }
+.mc-unverified-saves > p { margin: 10px 0; color: var(--music-muted); font-size: 12px; line-height: 1.6; }
+</style>

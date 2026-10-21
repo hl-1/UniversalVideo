@@ -13,9 +13,10 @@ from fastapi import HTTPException
 
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
-from backend.modules.music.agent import auth, budget, features, mcp, model, service, skill, store
+from backend.modules.music.agent import auth, budget, features, mcp, model, service, skill, store, work
 from backend.modules.music.agent.faults import ModelFault
 from backend.modules.music.agent.models import POLICY_VERSION
+from backend.modules.music.agent.scenes import SCENES, normalize_scene
 
 
 logger = logging.getLogger("videodream.music-agent")
@@ -231,8 +232,11 @@ def pending_tool(row, attempted):
     for name, field in (("validate_tracks", "validation"), ("get_track_features", "analysis")):
         if name == "get_track_features" and budget.validation_only(row):
             continue
-        keys = [t["key"] for t in candidates if not t.get(field)
-                and (name != "validate_tracks" or t.get("analysis"))]
+        pending = [t for t in candidates if not t.get(field)]
+        if name == "get_track_features":
+            pending = features.prioritize_cached(pending)
+        keys = [t["key"] for t in pending
+                if name != "validate_tracks" or t.get("analysis")]
         for start in range(0, len(keys), size):
             call = available(name, {"keys": keys[start:start+size]})
             if call:
@@ -258,6 +262,15 @@ def pending_tool(row, attempted):
                                                  "offset": (checked or {}).get("checked_until", 0), "limit": 20})
         if call:
             return call
+    # A plain scene already has versioned recall keywords; no paid planner is needed.
+    parsed = row["request"]["parsed"]
+    if (normalize_scene(row["request"].get("need", "")) in SCENES and not parsed.get("preferred_artists")
+            and ctx.get("budget", {}).get("search_rounds", 0) < ctx["limits"]["search_rounds"]):
+        query = skill.load()["categories"]["scenes"][parsed["scene"]][0]
+        for provider in ctx["limits"].get("sources", [])[:2]:
+            call = available("search_online_tracks", {"provider":provider, "query":query, "page":1})
+            if call:
+                return call
     return None
 
 
@@ -320,6 +333,11 @@ def prioritize_adjustment(row, name, response, client, attempted):
 
 
 def execute_run(row, last):
+    with work.task(row):
+        return _execute_run(row, last)
+
+
+def _execute_run(row, last):
     run_id = row["run_id"]
     if row["policy_version"] != POLICY_VERSION:
         raise ModelFault("旧版任务不能继续执行，请重新生成")
@@ -469,10 +487,15 @@ def finish(run_id,last,worker=None):
         counts = {"candidates":len(candidates), "analyzed":sum(bool(t.get("analysis")) for t in candidates),
                   "evaluated":sum(bool(t.get("analysis") and t.get("validation")) for t in candidates),
                   "qualified":len(service.deduplicated(service.qualified(row)))}
-        store.update(cursor,row,status="finished" if success else "partial",result=result,result_version=row["result_version"]+1,
+        status = "finished" if success else "partial" if result["tracks"] else "failed"
+        message = {"finished":"歌单已生成", "partial":"已结束生成，请查看部分结果和停止原因",
+                   "failed":"未生成合格歌曲，请查看停止原因后重新生成"}[status]
+        performance = row["context"].get("performance", {}) | {"completion_seconds":round(
+            row["context"].get("base_seconds", 0)+max(0, time.time()-row["context"].get("active_started_at", time.time())), 3)}
+        store.update(cursor,row,status=status,result=result,result_version=row["result_version"]+1,
                      worker_id=None,lease_until=None,context=row["context"] | {"candidates":[],
                          "counts":counts, "stage":"done", "current_song":None,
-                         "message":"歌单已生成" if success else "已结束生成，请查看部分结果和停止原因"})
+                         "message":message, "performance":performance})
 
 
 def submit(run_id):

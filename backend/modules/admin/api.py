@@ -167,8 +167,8 @@ def delete_user(uid: int):
     return {"ok": True}
 DATA_TABLES = {"favorites": ("music_favorites", "track_id"), "history": ("music_history", "track_id"),
                "playlists": ("music_playlists", "id"), "tracks": ("music_tracks", "id"), "downloads": ("music_downloads", "id")}
-ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
-DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
+ResourceKind = Literal["file", "image", "thumbnail", "summary_file", "download", "delivery", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
+DataKind = Literal["favorites", "history", "playlists", "tracks", "downloads", "file", "image", "thumbnail", "summary_file", "download", "delivery", "summary", "mind_map", "watermark", "batch", "music_import", "music_recommendation", "video_search", "video_parse", "video_view"]
 
 
 @router.get("/data")

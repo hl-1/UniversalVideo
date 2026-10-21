@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Download, ImagePlus, ListMusic, LoaderCircle, Pause, Play, Plus, RefreshCw, Search, Square, Trash2, TriangleAlert, X } from 'lucide-vue-next'
+import { createMusicBatch } from './musicBatch'
+import { hasLibraryFile, isMusicDownloaded, refreshMusicDownloadStatus } from './musicDownloads'
 import { account } from '../accounts/auth'
 import { duration, getTracks, libraryRevision, providers, trackKey, type MusicTrack } from './musicLibrary'
 import { api, jsonRequest } from '../../shared/api/client'
@@ -23,7 +25,7 @@ const mode = ref<'screenshots' | 'text'>('screenshots')
 const text = ref('')
 const order = ref('title_artist')
 const source = ref('all')
-const format = ref('mp3')
+const format = ref<'original' | 'mp3' | 'm4a'>('mp3')
 const screenshots = ref<Screenshot[]>([])
 const imageInput = ref<HTMLInputElement | null>(null)
 const dragActive = ref(false)
@@ -46,7 +48,7 @@ const processing = computed(() => ['recognizing', 'searching'].includes(job.valu
 const locked = computed(() => busy.value || processing.value || downloading.value)
 const dirty = computed(() => rows.value.some(row => row.dirty))
 const canDownload = computed(() => job.value?.status === 'finished' && !dirty.value && !locked.value && !props.downloadActive)
-const selected = computed(() => rows.value.filter(row => row.checked && candidate(row) && !(skipDownloaded.value && localFor(candidate(row)!))))
+const selected = computed(() => rows.value.filter(row => row.checked && candidate(row) && !(skipDownloaded.value && isMusicDownloaded(localFor(candidate(row)!) || candidate(row)!))))
 const counts = computed(() => ({ matched: rows.value.filter(row => row.selected_id).length,
   pending: rows.value.filter(row => !row.selected_id && row.candidates.length).length,
   missing: rows.value.filter(row => ['not_found', 'error'].includes(row.status)).length }))
@@ -66,7 +68,7 @@ function localFor(track: MusicTrack) {
 }
 async function loadLocal() {
   const current = ++localRevision
-  try { const tracks = await getTracks('downloads'); if (!disposed && current === localRevision) localTracks.value = tracks }
+  try { const candidates = rows.value.flatMap(row => row.candidates); const statuses = await refreshMusicDownloadStatus(candidates); if (!disposed && current === localRevision) { for (const track of candidates) Object.assign(track, statuses.get(trackKey(track))); localTracks.value = candidates.filter(hasLibraryFile) } }
   catch { /* Import and search remain usable while the library is unavailable. */ }
 }
 function remember(id?: string) {
@@ -207,9 +209,7 @@ async function download() {
   downloading.value = true
   error.value = ''
   try {
-    const data = await api<{ batch_id: string }>(`/api/music/imports/${job.value.import_id}/download`, jsonRequest('POST', {
-      selections: selected.value.map(row => ({ row_id: row.row_id, candidate_id: row.selected_id })), audio_format: format.value,
-    }))
+    const data = await createMusicBatch(selected.value.map(row => candidate(row)!), format.value)
     if (!disposed) emit('batch-created', data.batch_id)
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '批量下载创建失败。' }
   finally { downloading.value = false }

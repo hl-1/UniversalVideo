@@ -414,6 +414,8 @@ def media_read(path: str, method: str) -> bool:
         r"/api/library/images/[^/]+", r"/api/image-proxy", r"/api/music/playback/[^/]+/content",
         r"/api/previews/[^/]+/content", r"/api/watermarks/videos/[^/]+",
         r"/api/music/batches/[^/]+/archive",
+        r"/api/downloads/[^/]+/content", r"/api/downloads/tasks/[^/]+/file",
+        r"/api/downloads/batches/[^/]+/archive",
     ))
 
 
@@ -671,10 +673,15 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             if user.role != "super_admin" and response.status_code < 400 and response.headers.get("content-type", "").startswith("application/json"):
                 raw = b"".join([chunk async for chunk in response.body_iterator])
-                data = json.loads(raw)
-                filtered = await run_in_threadpool(platform_access.filter_response, data)
-                headers = {key: value for key, value in response.headers.items() if key.lower() not in {"content-length", "content-type"}}
-                response = JSONResponse(filtered, status_code=response.status_code, headers=headers, background=response.background)
+                if raw:
+                    data = json.loads(raw)
+                    filtered = await run_in_threadpool(platform_access.filter_response, data)
+                    headers = {key: value for key, value in response.headers.items() if key.lower() not in {"content-length", "content-type"}}
+                    response = JSONResponse(filtered, status_code=response.status_code, headers=headers, background=response.background)
+                else:
+                    # MCP notifications return an empty 202 with a JSON content type.
+                    response = Response(content=raw, status_code=response.status_code,
+                                        headers=dict(response.headers), background=response.background)
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Request-ID"] = request_id

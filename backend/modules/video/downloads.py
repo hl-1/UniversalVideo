@@ -137,7 +137,7 @@ def _run_domestic_download(task: video_tasks.DownloadTask) -> None:
         video_tasks._set_task(task, status="running", progress=1, message="正在通过海外代理连接视频源" if platform_access.platform(task.url) else "正在直连国内视频源")
         for attempt in range(2):
             try:
-                with tempfile.TemporaryDirectory(prefix=f"video-{task.task_id}-", dir=storage.directory("temp", uid=task.user_id or None)) as temporary, \
+                with tempfile.TemporaryDirectory(prefix=f"video-{task.task_id}-", dir=task.directory("temp")) as temporary, \
                      preview_sources.PreviewYoutubeDL(options, check, lambda size: None) as ydl:
                     work = Path(temporary)
                     title, members, duration = resolve(ydl)
@@ -177,7 +177,7 @@ def _run_domestic_download(task: video_tasks.DownloadTask) -> None:
                         downloader = get_suitable_downloader(media, options)
                         if downloader is HttpFD:
                             video_transfer.download(media["url"], source, referer=task.url, headers=media_headers,
-                                root=storage.directory("temp", uid=task.user_id or None) / "transfers", owner=task.user_id,
+                                root=task.directory("temp") / "transfers", owner=task.user_id,
                                 key=f"{task.url}:{task.media_type}:{task.audio_format}:{task.format_id or 'best'}:{getattr(task, 'route_revision', '')}:{index}",
                                 task_id=task.task_id, progress=hook, check=check, cancel=task.cancel)
                         elif downloader in {HlsFD, DashSegmentsFD}:
@@ -203,16 +203,16 @@ def _run_domestic_download(task: video_tasks.DownloadTask) -> None:
                         files.append(source)
                     stem = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:80] or "video"
                     if task.media_type == "audio":
-                        target = storage.directory(uid=task.user_id or None) / f"{task.task_id}.{stem}.{task.audio_format}"
+                        target = task.directory() / f"{task.task_id}.{stem}.{task.audio_format}"
                         video_tasks._set_task(task, progress=98, message="下载完成，正在提取并校验音轨")
                         audio.export_audio(files[-1], target, paths.FFMPEG_DIR, duration)
-                        _remember_audio_download(target, {"title": title, "provider": "video", "webpage_url": task.url})
+                        _remember_audio_download(target, {"title": title, "provider": "video", "webpage_url": task.url}, task=task)
                     elif len(files) == 1 and not native_media and files[0].suffix.lower() in {".mp4", ".webm", ".mkv", ".flv"}:
-                        target = storage.directory(uid=task.user_id or None) / f"{task.task_id}.{stem}{files[0].suffix}"
+                        target = task.directory() / f"{task.task_id}.{stem}{files[0].suffix}"
                         check()
                         files[0].replace(target)
                     else:
-                        target = storage.directory(uid=task.user_id or None) / f"{task.task_id}.{stem}.mp4"
+                        target = task.directory() / f"{task.task_id}.{stem}.mp4"
                         video_tasks._set_task(task, progress=98, message="下载完成，正在本地合并音视频")
                         command = [str(paths.FFMPEG_DIR / runtime.executable_name("ffmpeg")), "-y", "-nostdin", "-loglevel", "error"]
                         for source in files:
@@ -256,7 +256,7 @@ def _run_domestic_download(task: video_tasks.DownloadTask) -> None:
                         raise RuntimeError("原格式已失效，请重新解析后选择清晰度。")
                     selection = matched.format_id
     except Exception as exc:
-        for partial in storage.directory(uid=task.user_id or None).glob(f"{task.task_id}.*"):
+        for partial in task.directory().glob(f"{task.task_id}.*"):
             if partial.is_file():
                 partial.unlink(missing_ok=True)
         error = re.sub(r'https?://[^\s\x27"<>]+', '[视频源地址]', video_urls._clean_error(exc, task.url))
@@ -272,7 +272,7 @@ def _run_douyin_public_download(task: video_tasks.DownloadTask) -> bool:
         media_url = video_douyin._douyin_media_url(item)
         title = str(item.get("desc") or f"douyin_{video_id}")
         safe_title = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:80] or f"douyin_{video_id}"
-        target_path = storage.directory(uid=task.user_id or None) / f"{task.task_id}.{safe_title}.mp4"
+        target_path = task.directory() / f"{task.task_id}.{safe_title}.mp4"
         temp_path = storage.path("temp", target_path.name + ".part", uid=task.user_id or None)
 
         headers = {
@@ -339,7 +339,7 @@ def _run_sniffed_download(task: video_tasks.DownloadTask, media_url: str) -> Non
     ext = video_sniffing._media_ext(media_url)
     output_ext = "mp4" if ext == "m3u8" else ext
     url_hash = hashlib.sha1(media_url.encode("utf-8")).hexdigest()[:8]
-    target_path = storage.directory(uid=task.user_id or None) / f"{task.task_id}.sniffed-{url_hash}.{output_ext}"
+    target_path = task.directory() / f"{task.task_id}.sniffed-{url_hash}.{output_ext}"
     temp_path = storage.path("temp", target_path.stem + f".partial.{output_ext}", uid=task.user_id or None)
     video_tasks._set_task(task, status="running", progress=2.0, message="正在下载嗅探到的视频资源")
 
@@ -454,7 +454,7 @@ def _run_sniffed_download(task: video_tasks.DownloadTask, media_url: str) -> Non
 
 
 def _run_sniffed_pair_download(task: video_tasks.DownloadTask, video_url: str, audio_url: str) -> None:
-    target_path = storage.directory(uid=task.user_id or None) / f"{task.task_id}.sniffed-merged.mp4"
+    target_path = task.directory() / f"{task.task_id}.sniffed-merged.mp4"
     temporary = storage.path("temp", target_path.stem + ".partial.mp4", uid=task.user_id or None)
     video_tasks._set_task(task, status="running", progress=2.0, message="正在合并网页视频和音频")
     try:
@@ -522,11 +522,17 @@ def _run_audio_download(task: video_tasks.DownloadTask) -> None:
     try:
         if task.format_id and task.format_id.startswith("music:"):
             track = task.music_track or music.get_track(task.format_id.removeprefix("music:"), task.url)
+            from backend.modules.accounts import service as accounts
+            if task.destination == "library" and accounts.principal.get():
+                known = library.downloaded_status([library.TrackInput.model_validate(track.model_dump())])[0]
+                if known["file_available"] and (task.audio_format == "original" or Path(known["filename"]).suffix == "." + task.audio_format):
+                    video_tasks._set_task(task, status="finished", progress=100, message="已复用资料库中的音频", filename=known["filename"])
+                    return
             source_url, options, source_name = music.resolve(track, video_parsing._ydl_base_options(task.url))
             def download_track():
                 return audio.download_audio(
                     url=source_url, title=track.title, task_id=task.task_id, output_format=task.audio_format,
-                    download_dir=storage.directory(uid=task.user_id or None), work_dir=storage.directory("temp", uid=task.user_id or None), ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=True,
+                    download_dir=task.directory(), work_dir=task.directory("temp"), ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=True,
                     expected_duration=track.duration, progress=lambda value, message: video_tasks._set_task(task, progress=value, message=message),
                 )
             try:
@@ -538,7 +544,7 @@ def _run_audio_download(task: video_tasks.DownloadTask) -> None:
                 source_url, options, source_name = music.resolve(track, video_parsing._ydl_base_options(task.url), public_only=True)
                 target = download_track()
             video_tasks._set_task(task, progress=98, message="正在保存音频索引")
-            _remember_audio_download(target, track.model_dump())
+            _remember_audio_download(target, track.model_dump(), task=task)
             video_tasks._set_task(task, status="finished", progress=100, message=f"音频已准备好 · {source_name}", filename=target.name)
             return
         result = video_parse_cache._get_sniff_cache(task.url) or video_parsing.parse_video(task.url)
@@ -560,18 +566,20 @@ def _run_audio_download(task: video_tasks.DownloadTask) -> None:
         options["http_headers"]["Referer"] = task.url
         target = audio.download_audio(
             url=source_url, title=result.title, task_id=task.task_id, output_format=task.audio_format,
-            download_dir=storage.directory(uid=task.user_id or None), work_dir=storage.directory("temp", uid=task.user_id or None), ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=direct,
+            download_dir=task.directory(), work_dir=task.directory("temp"), ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=direct,
             expected_duration=result.duration, progress=lambda value, message: video_tasks._set_task(task, progress=value, message=message),
         )
         video_tasks._set_task(task, progress=98, message="正在保存音频索引")
         _remember_audio_download(target, {"title": result.title, "artist": result.uploader or "", "provider": "video",
-                                         "webpage_url": task.url, "thumbnail": result.thumbnail, "duration": result.duration})
+                                         "webpage_url": task.url, "thumbnail": result.thumbnail, "duration": result.duration}, task=task)
         video_tasks._set_task(task, status="finished", progress=100, message="音轨已准备好", filename=target.name)
     except Exception as exc:
         video_tasks._set_task(task, status="failed", message="音轨下载失败", error=video_urls._clean_error(exc, task.url))
 
 
-def _remember_audio_download(target: Path, metadata: dict) -> None:
+def _remember_audio_download(target: Path, metadata: dict, *, task=None) -> None:
+    if task is not None and task.destination == "device":
+        return
     try:
         library.record_download(target.name, metadata)
         start_cover_backfill()
@@ -589,6 +597,13 @@ def _run_download(task: video_tasks.DownloadTask) -> None:
                 _run_legacy_download(task)
     except Exception as exc:
         video_tasks._set_task(task, status="failed", message="下载失败", error=video_urls._clean_error(exc, task.url))
+    finally:
+        if task.destination == "device":
+            if task.status in {"failed", "cancelled"} or task.cancel.is_set():
+                from backend.modules.delivery.service import cleanup_task
+                cleanup_task(task.task_id, task.user_id)
+            else:
+                task.directory().parent.touch()
 
 
 def _run_legacy_download(task: video_tasks.DownloadTask) -> None:
@@ -609,7 +624,7 @@ def _run_legacy_download(task: video_tasks.DownloadTask) -> None:
         return
 
     video_tasks._set_task(task, status="running", progress=1.0, message="正在连接视频源")
-    workspace = storage.directory("temp", uid=task.user_id or None) / storage.filename(task.task_id)
+    workspace = task.directory("temp") / storage.filename(task.task_id)
     workspace.mkdir(exist_ok=True)
     output_template = str(workspace / f"{task.task_id}.%(title).80s.%(ext)s")
     format_value = task.format_id or "bestvideo+bestaudio/best"
@@ -629,7 +644,7 @@ def _run_legacy_download(task: video_tasks.DownloadTask) -> None:
         files = sorted((path for path in (after - before or after) if path.is_file() and path.suffix not in {".part", ".ytdl", ".json"}), key=lambda path: path.stat().st_mtime, reverse=True)
         if not files:
             raise RuntimeError("下载已结束，但没有找到生成的文件。")
-        target = storage.path("file", files[0].name, uid=task.user_id or None)
+        target = task.directory() / files[0].name
         files[0].replace(target)
         video_tasks._set_task(
             task,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { chooseFile, saveBlob } from '../../../shared/downloads'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MindElixir, { type MindElixirInstance, type Theme } from 'mind-elixir'
 import 'mind-elixir/style.css'
@@ -290,6 +291,8 @@ async function exportImage(format: MindMapImageFormat) {
   exportError.value = ''
   const result = props.result
   try {
+    const exportName = mindMapImageFilename(`${result.title}-${exportScope.value === 'overview' ? '概览' : '完整'}`, format)
+    const handle = await chooseFile(exportName)
     const collapsed: string[] = []
     if (mind && displayMode.value === 'overview') {
       const visit = (node: ReturnType<typeof toMindElixirData>['nodeData']) => {
@@ -302,16 +305,9 @@ async function exportImage(format: MindMapImageFormat) {
       ? { mode: 'detail', depth: 4, layout: resolvedLayout.value } : { mode: 'overview', layout: resolvedLayout.value,
         depth: displayMode.value === 'overview' ? 4 : defaultOverviewDepth(), collapsed })
     if (disposed) return
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = mindMapImageFilename(`${result.title}-${exportScope.value === 'overview' ? '概览' : '完整'}`, format)
-    document.body.appendChild(anchor)
-    try { anchor.click() } finally {
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    }
-  } catch {
+    await saveBlob(blob, exportName, handle)
+  } catch (failure) {
+    if (failure instanceof DOMException && failure.name === 'AbortError') return
     if (!disposed) exportError.value = `${format.toUpperCase()} 导出失败，请重试。`
   } finally {
     exporting.value = false

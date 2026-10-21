@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { saveRemoteFile } from '../../shared/downloads'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, KeyRound, LoaderCircle, Search, Settings2, ShieldCheck, Trash2, UserPlus, Users, Files, ScrollText, Activity, X, Save, Eye } from 'lucide-vue-next'
 import { account, type Account } from '../accounts/auth'
@@ -38,6 +39,7 @@ const stats = ref<any>(null)
 const kinds: Record<string, string> = { file: '文件', image: '图片', thumbnail: '封面', summary_file: '总结文件', download: '下载任务', summary: 'AI 总结', mind_map: '思维导图', watermark: '去水印任务', batch: '批量任务', music_import: '批量找歌', favorites: '收藏', history: '历史', playlists: '歌单', tracks: '歌曲', downloads: '音乐下载', video_parse: '视频解析', video_search: '视频搜索记录', video_view: '视频预览状态' }
 const pages = computed(() => Math.max(1, Math.ceil(total.value / 20)))
 kinds.music_recommendation = '场景歌单任务'
+kinds.delivery = '下载与保存记录'
 let revision = 0
 function fail(failure: unknown) { error.value = failure instanceof Error ? failure.message : '操作失败。' }
 async function load() {
@@ -92,12 +94,7 @@ function remove(row: any) {
 }
 async function download(row: any) {
   try {
-    const response = await fetch(row.download_url)
-    if (!response.ok) throw new Error((await response.json()).detail || '下载失败。')
-    const url = URL.createObjectURL(await response.blob())
-    const link = document.createElement('a')
-    link.href = url; link.download = row.filename || row.resource_key; link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 10000)
+    await saveRemoteFile(row.download_url, row.filename || row.resource_key)
   } catch (failure) { fail(failure) }
 }
 function saveSettings() {

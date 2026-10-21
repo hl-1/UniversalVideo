@@ -19,7 +19,7 @@ from backend.modules.music.agent.faults import ModelFault
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
 from backend.infrastructure.audio import probe_audio
-from backend.modules.music.agent import model, platforms, store, validation
+from backend.modules.music.agent import model, platforms, store, validation, work
 from backend.infrastructure.runtime import executable_name
 
 
@@ -59,21 +59,26 @@ def base_input(track):
     return identity, lyrics
 
 
-def audio_features(path):
+def audio_features(path, check=None):
     import librosa
     import numpy as np
     import soundfile as sf
-    info = probe_audio(path, library.FFMPEG_DIR)
+    info = work.probe(path, library.FFMPEG_DIR, check) if check else probe_audio(path, library.FFMPEG_DIR)
     if not info.get("duration") or info["duration"] > 1200:
         raise RuntimeError("音频分析上限为 20 分钟")
     import tempfile
     temporary = tempfile.TemporaryDirectory(prefix="videodream-analysis-")
     wav = Path(temporary.name)/"audio.wav"
     try:
-        subprocess.run([str(library.FFMPEG_DIR/executable_name("ffmpeg")), "-v", "error", "-nostdin", "-y",
-                        "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", str(wav)], check=True, capture_output=True, timeout=30)
+        work.run_process([str(library.FFMPEG_DIR/executable_name("ffmpeg")), "-v", "error", "-nostdin", "-y",
+                          "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", str(wav)],
+                         check=check, require_success=True, capture_output=True, timeout=30)
         y, sr = sf.read(wav)
+        if check:
+            check()
         onset = librosa.onset.onset_strength(y=y, sr=sr)
+        if check:
+            check()
         tempo, beats = librosa.beat.beat_track(onset_envelope=onset, sr=sr)
         rms = librosa.feature.rms(y=y)[0]
         energy = float(np.clip(np.mean(rms)*4, 0, 1))
@@ -88,6 +93,8 @@ def audio_features(path):
 
 
 def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None):
+    if check:
+        check()
     base, local_lyrics = base_input(track)
     base["network_analysis"] = allow_network
     if allow_network:
@@ -103,6 +110,9 @@ def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None)
         if (cache["expires_at"] > now and cache["analyzer_version"] == ANALYZER_VERSION
                 and evidence.get("base_signature") == base_signature
                 and (not need_audio or evidence.get("audio", {}).get("coverage") == "full")):
+            batch = work.current.get()
+            if batch:
+                batch.resources.record("features", cached=True)
             return {"features": json.loads(cache["features"]) if isinstance(cache["features"], str) else cache["features"],
                     "evidence": evidence, "checked_at": cache["checked_at"], "cached": True}
     charge(analysis=1)
@@ -117,7 +127,8 @@ def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None)
                   "document_complete": len(local_lyrics["text"])<=24000, "signature": local_lyrics.get("signature", "")}
     elif allow_network:
         try:
-            lyrics = platforms.track_lyrics(track, charge)
+            with work.timing("lyrics"):
+                lyrics = platforms.track_lyrics(track, charge, check=check)
         except (RuntimeError, ValueError, requests.RequestException, HTTPException) as exc:
             from backend.modules.music.agent.budget import BudgetExceeded
             if isinstance(exc, BudgetExceeded) or getattr(exc, "agent_policy_error", False):
@@ -181,7 +192,8 @@ def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None)
     if need_audio:
         try:
             with validation.audio_file(track, charge, allow_network, check) as (path, source):
-                info = audio_features(path)
+                with work.timing("audio_features"):
+                    info = audio_features(path, check=check)
             duration = track.get("duration")
             full = bool(duration and abs(info["duration"]-duration)<=max(3, duration*.03))
             signature_data["audio"] = info.pop("signature")
@@ -236,15 +248,22 @@ def _semantic(run_id, jobs):
 
 def analyze_many(run_id, tracks, charge, allow_network, need_audio=False, check=None):
     pending, ready = [], []
-    for track in tracks:
-        if check:
-            check()
+    def prepare(track):
         generator = _analyze(run_id, track, charge, allow_network, need_audio, check)
         try:
             job = next(generator)
-            pending.append((track, generator, job))
+            return generator, job, None
         except StopIteration as done:
-            ready.append((track, done.value))
+            return generator, None, done.value
+    # Copy every security/budget ContextVar into each I/O worker.
+    for track, (generator, job, value) in work.parallel(tracks, prepare, 3, check):
+        if job is not None:
+            pending.append((track, generator, job))
+        else:
+            ready.append((track, value))
+    # Completion order is deliberately independent; model inputs retain stable order.
+    order = {t["key"]: i for i, t in enumerate(tracks)}
+    pending.sort(key=lambda item: order[item[0]["key"]])
     # Bound aggregate input, isolate long lyrics, and never truncate evidence here.
     while pending:
         batch = []
@@ -258,16 +277,48 @@ def analyze_many(run_id, tracks, charge, allow_network, need_audio=False, check=
             tokens += cost
             if cost > 15000:
                 break
-        values = _semantic(run_id, [item[2] for item in batch])
-        for track, generator, job in batch:
+        with work.timing("semantic"):
+            values = _semantic(run_id, [item[2] for item in batch])
+        def finish(item):
+            track, generator, job = item
             if check:
                 check()
             try:
                 generator.send(values[job["key"]])
                 raise AssertionError("Analyzer yielded twice")
             except StopIteration as done:
-                ready.append((track, done.value))
-    return ready
+                return done.value
+        for (track, _, _), value in work.parallel(batch, finish, 2, check):
+            ready.append((track, value))
+    return sorted(ready, key=lambda item: order[item[0]["key"]])
+
+
+def prioritize_cached(tracks):
+    """Cheap scheduling hint only; _analyze still verifies every signature."""
+    if len(tracks) < 2:
+        return tracks
+    with library.database() as cursor:
+        keys = [t["key"] for t in tracks]
+        cursor.execute("SELECT track_key FROM music_track_features WHERE user_id=%s AND analyzer_version=%s "
+                       "AND expires_at>%s AND track_key IN ("+",".join(["%s"]*len(keys))+")",
+                       (accounts.current().id, ANALYZER_VERSION, time.time(), *keys))
+        cached = {r["track_key"] for r in cursor.fetchall()}
+    return sorted(tracks, key=lambda t: t["key"] not in cached)
+
+
+def prefetch_lyrics(track, charge, check):
+    """Warm the existing identity-checked lyric cache without any model call."""
+    check()
+    _, lyrics = base_input(track)
+    if lyrics and lyrics.get("manual"):
+        return
+    with work.timing("lyrics_prefetch"):
+        platforms.track_lyrics(track, charge, check=check)
+
+
+def metadata_excluded(track, parsed):
+    identity = (track["title"]+" "+track["artist"]).casefold()
+    return any(term.casefold() in identity for term in parsed["exclusions"])
 
 
 def analyze(run_id, track, charge, allow_network, need_audio=False, check=None):
@@ -315,8 +366,7 @@ def match(track, parsed):
             allowed = {normalize.casefold() for lang in parsed["languages"] for normalize in aliases.get(lang, {lang})}
             if not proven("language") or str(f.get("language", "")).casefold() not in allowed:
                 reasons.append("未满足人声歌曲的语言条件")
-    identity = (track["title"]+" "+track["artist"]).casefold()
-    if any(term.casefold() in identity for term in parsed["exclusions"]):
+    if metadata_excluded(track, parsed):
         reasons.append("命中歌曲或歌手排除项")
     if parsed.get("excluded_themes") and f.get("vocals") is not False:
         if not proven("themes") or (data.get("evidence") or {}).get("lyrics", {}).get("coverage") != "full_document":

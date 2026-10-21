@@ -480,3 +480,6 @@ docker compose -f deploy/compose.yml run --rm --no-deps app \
 ```
 
 反向迁移先备份当前数据，再恢复全部当前用户文件到旧布局，包含新版上线后新增的文件；冲突时停止，不覆盖不同内容。成功后删除完成标记，再切换到事先保存的旧镜像并启动。不要只回滚镜像，也不要直接覆盖升级前备份而丢失新增文件。
+# 已有文件的 Nginx 交付
+
+应用保留默认 FastAPI 文件响应。需要启用 Nginx 文件交付时，先应用 `nginx/compose.override.yml` 中下载目录的只读挂载与 `nginx/xianyue.huanliyu.cn.conf` 中 `/_protected_downloads/` 的 `internal` 配置，再在生产配置中设置 `VIDEODREAM_X_ACCEL_PREFIX=/_protected_downloads` 并重启原服务。该变量只能在经此 Nginx 访问时启用；直接访问后端端口时应保持为空。认证仍由应用完成，不能把下载目录暴露为公开静态目录。

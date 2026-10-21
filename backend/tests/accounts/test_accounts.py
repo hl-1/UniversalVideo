@@ -193,6 +193,72 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertIn('attachment', self.a.get(url + '?download=1').headers['content-disposition'])
         self.assertEqual(self.a.get(url, headers={'Range': 'bytes=999999-'}).status_code, 416)
 
+    def device_download(self):
+        response = self.a.post('/api/downloads/plan', json={
+            'url': 'https://example.com/song', 'title': 'Here For It All',
+            'media_type': 'audio', 'audio_format': 'mp3', 'compatibility': True,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        plan = response.json()
+        task = video_tasks.tasks[plan['task_id']]
+        name = task.task_id + '.Here For It All.mp3'
+        data = b'complete validated audio fixture'
+        (task.directory() / name).write_bytes(data)
+        video_tasks._set_task(task, status='finished', progress=100, filename=name)
+        return [plan['url'], f"/api/downloads/tasks/{task.task_id}/file"], plan['download_id'], data
+
+    def test_native_download_cookie_delivers_prepared_file_with_head_and_range(self):
+        urls, identity, data = self.device_download()
+        self.a.headers.pop('Authorization')
+        self.b.headers.pop('Authorization')
+        anonymous = self.anonymous()
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.a.get(url)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.content, data)
+                self.assertIn('attachment', response.headers['content-disposition'])
+                from urllib.parse import unquote
+                self.assertIn('Here For It All.mp3', unquote(response.headers['content-disposition']))
+                self.assertNotRegex(unquote(response.headers['content-disposition']), r"[a-f0-9]{12}\.Here For It All")
+                self.assertEqual(response.headers['content-length'], str(len(data)))
+                self.assertEqual(self.a.head(url).status_code, 200)
+                self.assertEqual(self.a.head(url).content, b'')
+                partial = self.a.get(url, headers={'Range': 'bytes=3-8'})
+                self.assertEqual(partial.status_code, 206, partial.text)
+                self.assertEqual(partial.content, data[3:9])
+                self.assertEqual(self.a.get(url, headers={'Authorization': 'Bearer invalid'}).status_code, 401)
+                self.assertEqual(anonymous.get(url).status_code, 401)
+                self.assertIn(self.b.get(url).status_code, (404, 410))
+        self.assertEqual(self.a.get(f'/api/downloads/{identity}/state').status_code, 401)
+        self.assertEqual(self.a.post(f'/api/downloads/{identity}/complete', json={'status': 'completed', 'completion_source': 'filesystem'}).status_code, 401)
+        self.assertEqual(self.a.post('/api/downloads/plan', json={'url': 'https://example.com/song'}).status_code, 401)
+        sid = self.a.cookies.get(accounts.COOKIE).split('.')[0]
+        accounts.redis_client().delete(accounts.session_key(sid))
+        for url in urls:
+            self.assertEqual(self.a.get(url).status_code, 401)
+
+    def test_native_legacy_archive_uses_media_cookie_without_authorizing_other_download_routes(self):
+        from backend.modules.delivery import api as delivery_api
+        response = self.a.post('/api/downloads/batches', json={'tracks': [self.track]})
+        self.assertEqual(response.status_code, 200, response.text)
+        url = response.json()['url']
+        self.a.headers.pop('Authorization')
+        self.b.headers.pop('Authorization')
+        with patch.object(delivery_api, 'zip_chunks', return_value=iter([b'archive fixture'])) as stream:
+            response = self.a.get(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.content, b'archive fixture')
+            self.assertEqual(response.headers['content-type'], 'application/zip')
+            self.assertIn('attachment', response.headers['content-disposition'])
+            self.assertEqual(self.a.head(url).status_code, 200)
+            stream.assert_called_once()
+            self.assertIn(self.b.get(url).status_code, (404, 410))
+            self.assertEqual(self.anonymous().get(url).status_code, 401)
+        self.assertEqual(self.a.post('/api/downloads/batches', json={'tracks': [self.track]}).status_code, 401)
+        for path in ('/api/downloads/anything/state', '/api/downloads/tasks/anything', '/api/downloads/batches/anything'):
+            self.assertEqual(self.a.get(path).status_code, 401)
+
     def test_media_jwt_has_separate_audience_and_refresh_does_not_extend_session(self):
         token = self.a.cookies.get(accounts.MEDIA_COOKIE)
         claims = jwt.decode(token, accounts.signing_key(), algorithms=['HS256'], audience=accounts.MEDIA_AUDIENCE, issuer='videodream')

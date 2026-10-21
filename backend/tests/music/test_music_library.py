@@ -103,6 +103,53 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         self.favorite(False)
         self.assertEqual(self.client.get("/api/library").json()["counts"]["favorites"], 0)
 
+    def test_download_status_checks_real_files_aliases_and_owner(self):
+        name = secrets.token_hex(8) + ".mp3"
+        self.addCleanup((self.directory / name).unlink, missing_ok=True)
+        (self.directory / name).write_bytes(b"status fixture")
+        library.record_download(name, self.track)
+        track = library.TrackInput.model_validate(self.track)
+        alias = track.model_copy(update={"provider": "netease", "identifier": "alias-status", "webpage_url": "https://music.163.com/song?id=123"})
+        with library.database() as cursor:
+            cursor.execute("INSERT INTO music_track_aliases VALUES (%s,%s)", (library.track_id(alias), library.track_id(track)))
+        result = library.downloaded_status([track, alias])
+        self.assertTrue(all(item["file_available"] for item in result))
+        self.assertEqual(result[1]["filename"], name)
+        marker = accounts.principal.set(accounts.Principal(2, "other", "super_admin"))
+        try:
+            self.assertFalse(library.downloaded_status([track])[0]["file_available"])
+        finally:
+            accounts.principal.reset(marker)
+        (self.directory / name).unlink()
+        self.assertFalse(library.downloaded_status([track])[0]["file_available"])
+
+    def test_download_status_is_not_limited_to_first_thousand_downloads(self):
+        name = secrets.token_hex(8) + ".mp3"
+        self.addCleanup((self.directory / name).unlink, missing_ok=True)
+        (self.directory / name).write_bytes(b"oldest fixture")
+        library.record_download(name, self.track)
+        with library.database() as cursor:
+            for index in range(1001):
+                track = library.TrackInput.model_validate(self.track | {"identifier": f"large-{index}"})
+                identifier = library.save_track(cursor, track)
+                cursor.execute("INSERT INTO music_downloads (id,track_id,filename,created_at,user_id) VALUES (%s,%s,%s,%s,1)",
+                    (secrets.token_hex(12), identifier, f"missing-large-{index}.mp3", 9999999999 + index))
+        with patch.object(storage, "owned_path", wraps=storage.owned_path) as stat:
+            result = library.downloaded_status([library.TrackInput.model_validate(self.track)])
+        self.assertTrue(result[0]["file_available"])
+        self.assertEqual(stat.call_count, 1)
+
+    def test_deleted_file_resource_is_not_advertised_as_downloaded(self):
+        name = secrets.token_hex(8) + ".mp3"
+        self.addCleanup((self.directory / name).unlink, missing_ok=True)
+        (self.directory / name).write_bytes(b"deleted fixture")
+        library.record_download(name, self.track)
+        with library.database() as cursor:
+            cursor.execute("UPDATE resources SET deleted=TRUE WHERE kind='file' AND resource_key=%s", (name,))
+        result = self.client.post('/api/library/download-status', json={"tracks": [self.track]})
+        self.assertEqual(result.status_code, 200)
+        self.assertFalse(result.json()["tracks"][0]["file_available"])
+
     def test_temporary_tokens_and_source_urls_are_not_persisted(self):
         self.track.update(token="temporary-secret", playback_url="https://cdn.example.com/expiring")
         self.favorite()

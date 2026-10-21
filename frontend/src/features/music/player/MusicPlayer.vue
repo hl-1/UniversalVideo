@@ -4,7 +4,7 @@ import { Heart, ListMusic, LoaderCircle, Music2, Pause, Play, Repeat, Repeat1, S
 import TrackCover from '../components/TrackCover.vue'
 import LyricsView from '../components/LyricsView.vue'
 import { duration, isLiked, providers, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from '../musicLibrary'
-import { audio, currentTrack, elapsed, total, muted, volume, playMode, playbackError, playbackWarning, playbackState, playbackUrl, queue,
+import { audio, currentTrack, elapsed, total, muted, volume, playMode, playbackError, playbackState, playbackUrl, queue,
   togglePlayback, playTrack, nextTrack, seek, setVolume, toggleMute, stopPlayback, isPlaybackTrack,
   onMetadata, onTime, onPlaying, onPause, onWaiting, onError, onEnded } from './musicPlayer'
 
@@ -38,9 +38,8 @@ function volumeClick() {
       <TrackCover :src="trackArtwork(currentTrack)" :title="currentTrack?.title" /><ChevronUp v-if="currentTrack" :size="18" />
     </button>
     <div class="player-track-info">
-      <button class="player-track-details" aria-label="展开完整播放页" @click="showLyrics = true"><strong>{{ currentTrack.title }}</strong><span v-if="!playbackError && !playbackWarning">{{ currentTrack.artist || providers[currentTrack.provider || 'video'] }}</span></button>
+      <button class="player-track-details" aria-label="展开完整播放页" @click="showLyrics = true"><strong>{{ currentTrack.title }}</strong><span v-if="!playbackError">{{ currentTrack.artist || providers[currentTrack.provider || 'video'] }}</span></button>
       <small v-if="playbackError" class="player-error" role="alert">{{ playbackError }}</small>
-      <small v-else-if="playbackWarning" class="player-warning">{{ playbackWarning }}</small>
     </div>
     <button class="mc-icon player-favorite" :class="{ liked: currentTrack && isLiked(currentTrack) }" :disabled="!currentTrack" :title="currentTrack && isLiked(currentTrack) ? '取消喜欢' : '喜欢'" :aria-label="currentTrack && isLiked(currentTrack) ? '取消喜欢' : '喜欢'" @click="currentTrack && toggleFavorite(currentTrack)"><Heart :size="20" :fill="currentTrack && isLiked(currentTrack) ? 'currentColor' : 'none'" /></button>
     <div class="player-center">
@@ -69,7 +68,7 @@ function volumeClick() {
   </aside>
   <LyricsView v-if="showLyrics && lyricTrack" :track="lyricTrack" :current-time="elapsed" @close="showLyrics = false" @seek="seek">
     <template #controls>
-      <p v-if="playbackError || playbackWarning" class="player-full-feedback" :role="playbackError ? 'alert' : 'status'">{{ playbackError || playbackWarning }}</p>
+      <p v-if="playbackError" class="player-full-feedback" role="alert">{{ playbackError }}</p>
       <div class="lyrics-player-controls"><button class="mc-icon" :title="modeNames[playMode]" :aria-label="modeNames[playMode]" @click="cycleMode"><component :is="modeIcon" :size="20" /></button><button class="mc-icon" title="上一首" aria-label="上一首" @click="nextTrack(-1)"><SkipBack :size="23" /></button><button class="player-main-button" :aria-label="playLabel" @click="togglePlayback()"><Pause v-if="playbackState === 'playing'" :size="23" fill="currentColor" /><LoaderCircle v-else-if="playbackState === 'loading'" :size="23" class="spin" /><Play v-else :size="23" fill="currentColor" /></button><button class="mc-icon" title="下一首" aria-label="下一首" @click="nextTrack()"><SkipForward :size="23" /></button><button class="mc-icon" :aria-label="currentTrack && isLiked(currentTrack) ? '取消喜欢' : '喜欢'" :class="{ liked: currentTrack && isLiked(currentTrack) }" @click="currentTrack && toggleFavorite(currentTrack)"><Heart :size="20" :fill="currentTrack && isLiked(currentTrack) ? 'currentColor' : 'none'" /></button></div>
       <div class="player-progress"><time>{{ duration(elapsed) }}</time><input type="range" min="0" :max="total || 1" step="0.1" :value="elapsed" :disabled="!playbackUrl || !total" aria-label="歌词页播放进度" @input="seek(Number(($event.target as HTMLInputElement).value))" /><time>{{ duration(total) }}</time></div>
       <div class="player-full-actions"><label><Volume2 :size="18" /><input type="range" min="0" max="1" step="0.01" :value="muted ? 0 : volume" aria-label="完整播放页音量" @input="setVolume(Number(($event.target as HTMLInputElement).value))" /></label><button class="mc-icon" aria-label="下载当前歌曲" @click="currentTrack && $emit('download', currentTrack); showLyrics = false"><Download :size="19" /></button></div>

@@ -15,7 +15,7 @@ from backend.infrastructure.ytdlp import YoutubeDL
 from backend.infrastructure import video_network
 
 
-AudioFormat = Literal["m4a", "mp3"]
+AudioFormat = Literal["original", "m4a", "mp3"]
 Progress = Callable[[float, str], None]
 
 
@@ -36,7 +36,7 @@ def probe_audio(path: Path, ffmpeg_dir: Path) -> dict:
     duration = float(data.get("format", {}).get("duration") or (audio or {}).get("duration") or 0)
     if not audio or not math.isfinite(duration) or duration <= 0:
         raise RuntimeError("资源中没有有效音轨。")
-    return {"codec": audio.get("codec_name"), "duration": duration, "streams": streams}
+    return {"codec": audio.get("codec_name"), "duration": duration, "streams": streams, "format": data.get("format", {}).get("format_name", "")}
 
 
 def export_audio(source: Path, target: Path, ffmpeg_dir: Path, expected_duration: float | None = None) -> None:
@@ -137,6 +137,23 @@ def download_audio(
         if phase:
             phase("audio_convert", "音轨转换与校验")
         staged = work / target.name
-        export_audio(source, staged, ffmpeg_dir, expected_duration)
+        if output_format == "original":
+            info = probe_audio(source, ffmpeg_dir)
+            if expected_duration and abs(info["duration"] - expected_duration) > max(3, expected_duration * .03):
+                raise IncompleteAudioError("音源时长与原内容不符，未保存为完整音频。")
+            if any(stream.get("codec_type") == "video" for stream in info["streams"]):
+                target = target.with_suffix(".m4a")
+                staged = staged.with_suffix(".m4a")
+                export_audio(source, staged, ffmpeg_dir, expected_duration)
+            else:
+                source_format = info.get("format", "").split(",")[0]
+                extension = {"mov": "m4a", "matroska": "webm"}.get(source_format, source_format)
+                if extension not in {"mp3", "m4a", "aac", "flac", "ogg", "wav", "webm"}:
+                    raise RuntimeError("源音频封装暂不支持保留，请选择 MP3 或 M4A。")
+                target = target.with_suffix("." + extension)
+                staged = work / target.name
+                source.replace(staged)
+        else:
+            export_audio(source, staged, ffmpeg_dir, expected_duration)
         staged.replace(target)
     return target

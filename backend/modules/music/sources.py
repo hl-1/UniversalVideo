@@ -7,18 +7,17 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Callable, Literal
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from fastapi import Request, Response, APIRouter, Header, HTTPException, Query
-from backend.infrastructure import video_network
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
-from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 
 from backend.modules.accounts import service as accounts
+from backend.modules.music import full_playback
 
 
 Provider = Literal["qq", "netease", "kugou"]
@@ -43,6 +42,9 @@ class Track(BaseModel):
     identifier: str
     token: str = ""
     access: str = "权限未核实"
+    filename: str | None = None
+    local_url: str | None = None
+    file_available: bool = False
 
 
 @dataclass
@@ -58,10 +60,8 @@ class PlaybackRequest(BaseModel):
 
 @dataclass
 class PlaybackSession:
-    media_url: str
-    headers: dict[str, str]
+    audio: full_playback.PreparedAudio
     expires_at: float
-    referer: str = ""
 sessions: dict[str, TrackSession] = {}
 playback_sessions: dict[str, PlaybackSession] = {}
 search_cache: dict[tuple[str, str, int], tuple[float, list[Track]]] = {}
@@ -255,6 +255,10 @@ def search(q: str = Query(min_length=1, max_length=100), source: Literal["all", 
             statuses.append({"provider": provider, "available": True, "message": f"找到 {len(found)} 首歌曲" if found else "未找到歌曲或平台未返回结果。"})
         except Exception:
             statuses.append({"provider": provider, "available": False, "message": "搜索接口暂不可用，可能需要登录或触发了平台限制。"})
+    if accounts.principal.get():
+        from backend.modules.music import library
+        personal = library.downloaded_status([library.TrackInput.model_validate(track.model_dump()) for track in tracks])
+        tracks = [track.model_copy(update=status) for track, status in zip(tracks, personal)]
     return {"tracks": tracks, "sources": statuses, "page": page, "has_more": has_more and page < 20}
 
 
@@ -287,8 +291,14 @@ def _at38_url(track: Track) -> str:
     raise RuntimeError("at38 未返回音源，请稍后重试。")
 
 
-def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[str, dict, str]:
+def resolve(track: Track, options: dict, *, public_only: bool = False,
+            validate_source: Callable[[str, dict, str], None] | None = None) -> tuple[str, dict, str]:
     options = {**options, "http_headers": {**options.get("http_headers", {}), "Referer": track.webpage_url}}
+    def accept(url, resolved, source):
+        if validate_source:
+            validate_source(url, resolved, source)
+        return url, resolved, source
+
     try:
         if track.provider == "kugou" and not public_only:
             data = _json("https://www.kugou.com/yy/index.php", params={"r": "play/getdata", "hash": track.identifier}, referer="https://www.kugou.com/")
@@ -297,19 +307,21 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
                 mobile = _json("https://m.kugou.com/app/i/getSongInfo.php", params={"cmd": "playInfo", "hash": track.identifier}, referer="https://m.kugou.com/")
                 media_url = mobile.get("url")
             if media_url:
-                return media_url, options, "酷狗音乐"
+                return accept(media_url, options, "酷狗音乐")
         elif not public_only:
             with YoutubeDL({**options, "skip_download": True}) as ydl:
                 info = ydl.extract_info(track.webpage_url, download=False)
             formats = [item for item in (info or {}).get("formats", []) if item.get("url") and not item.get("has_drm") and item.get("vcodec") == "none"]
             if formats:
                 best = max(formats, key=lambda item: item.get("abr") or item.get("tbr") or 0)
-                return best["url"], {**options, "http_headers": {**options["http_headers"], **best.get("http_headers", {})}}, "原平台"
+                return accept(best["url"], {**options, "http_headers": {**options["http_headers"], **best.get("http_headers", {})}}, "原平台")
+    except full_playback.PreparationExpired:
+        raise
     except Exception as exc:
         from backend.infrastructure.network import raise_if_guarded
         raise_if_guarded(exc)
         pass
-    # Public parsing services can disappear; their output still goes through audio and duration checks.
+    # An incomplete recording is a failed candidate, so the backup is tried too.
     try:
         if track.provider == "netease":
             data = _json(GD_API, params={"types": "url", "source": "netease", "id": track.identifier, "br": 320})
@@ -322,7 +334,9 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
             media_url = data.get("data") if data.get("code") == 1 else None
             source = "LZM 音乐 · music.lzmhhh.com"
         if isinstance(media_url, str) and urlparse(media_url).scheme in ("http", "https"):
-            return media_url, options, source
+            return accept(media_url, options, source)
+    except full_playback.PreparationExpired:
+        raise
     except Exception as exc:
         from backend.infrastructure.network import raise_if_guarded
         raise_if_guarded(exc)
@@ -330,7 +344,9 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
     if track.provider in {"qq", "netease"}:
         try:
             media_url = _at38_url(track)
-            return media_url, {**options, "http_headers": {**options["http_headers"], "Referer": AT38_URL}}, "51ape音乐 · at38.cn"
+            return accept(media_url, {**options, "http_headers": {**options["http_headers"], "Referer": AT38_URL}}, "51ape音乐 · at38.cn")
+        except full_playback.PreparationExpired:
+            raise
         except Exception as exc:
             from backend.infrastructure.network import raise_if_guarded
             raise_if_guarded(exc)
@@ -344,68 +360,40 @@ def resolve(track: Track, options: dict, *, public_only: bool = False) -> tuple[
 def create_playback(payload: PlaybackRequest) -> dict:
     track = get_track(payload.token, str(payload.webpage_url))
     try:
-        media_url, options, source = resolve(track, {"http_headers": HEADERS}, public_only=True)
+        prepared = full_playback.prepare(track)
     except RuntimeError as exc:
         raise HTTPException(422, str(exc)) from exc
-    parsed = urlparse(media_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise HTTPException(422, "音源地址无效，请重新搜索后播放。")
     token = secrets.token_urlsafe(24)
+    try:
+        accounts.register_resource("playback", token, {"source_url": track.webpage_url,
+            "resolved_source_url": prepared.source_url, "media_url": prepared.media_url})
+    except BaseException:
+        prepared.close()
+        raise
     now = time.time()
     with lock:
         for expired in [key for key, session in playback_sessions.items() if session.expires_at <= now]:
-            del playback_sessions[expired]
+            playback_sessions.pop(expired).audio.close()
         if len(playback_sessions) >= 200:
-            del playback_sessions[next(iter(playback_sessions))]
-        playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL, track.webpage_url)
-    accounts.register_resource("playback", token, {"source_url": track.webpage_url, "media_url": media_url})
-    return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL, "source": source}
+            playback_sessions.pop(next(iter(playback_sessions))).audio.close()
+        playback_sessions[token] = PlaybackSession(prepared, now + TOKEN_TTL)
+    return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL,
+            "source": prepared.source, "duration": prepared.duration, "full": True}
 
 
 @router.api_route("/playback/{token}/content", methods=["GET", "HEAD"])
-def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None, request: Request = None):
+def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None):
     if accounts.principal.get():
         accounts.resource("playback", token)
     with lock:
         session = playback_sessions.get(token)
         if session and session.expires_at <= time.time():
             del playback_sessions[token]
+            session.audio.close()
             session = None
-    if not session:
+    if not session or not session.audio.path.is_file():
         raise HTTPException(410, "播放链接已过期，请重新点击播放。")
     if range_header and not RANGE_PATTERN.fullmatch(range_header.strip()):
         raise HTTPException(416, "仅支持单段音频范围请求。")
-    headers = {**session.headers, "Accept-Encoding": "identity"}
-    if range_header:
-        headers["Range"] = range_header.strip()
-    if request and request.headers.get("if-range"):
-        headers["If-Range"] = request.headers["if-range"]
-    try:
-        upstream = video_network.get(session.media_url, referer=session.referer, headers=headers, stream=True, timeout=(10, 30))
-    except requests.RequestException as exc:
-        raise HTTPException(502, "连接音源失败，请重新点击播放。") from exc
-    content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()
-    if upstream.status_code == 416:
-        content_range = upstream.headers.get("Content-Range")
-        upstream.close()
-        raise HTTPException(416, "播放位置超出音源范围。", headers={"Content-Range": content_range} if content_range else None)
-    if upstream.status_code not in {200, 206} or not (
-        content_type.startswith("audio/") or content_type in {"video/mp4", "application/octet-stream", "application/ogg"}
-    ):
-        upstream.close()
-        raise HTTPException(502, "音源暂时无法播放，请重新点击播放或尝试其他平台。")
-    response_headers = {key: value for key, value in upstream.headers.items() if key.lower() in {
-        "content-type", "content-length", "content-range", "accept-ranges",
-    }}
-    response_headers["Cache-Control"] = "private, no-store"
-    if request and request.method == "HEAD":
-        upstream.close()
-        return Response(status_code=upstream.status_code, headers=response_headers)
-
-    def body():
-        try:
-            yield from upstream.iter_content(chunk_size=64 * 1024)
-        finally:
-            upstream.close()
-
-    return StreamingResponse(body(), status_code=upstream.status_code, headers=response_headers, background=BackgroundTask(upstream.close))
+    return FileResponse(session.audio.path, media_type=session.audio.media_type,
+                        content_disposition_type="inline", headers={"Cache-Control": "private, no-store"})

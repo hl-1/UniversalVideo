@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { downloadUrl } from '../../shared/media'
+import { saveRemoteFile } from '../../shared/downloads'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { AlignLeft, Download, ChevronDown, ChevronLeft, ChevronRight, CircleStop, History, LoaderCircle, Play, RefreshCw, Save, Settings2, Sparkles, Trash2, X } from 'lucide-vue-next'
 import TrackCover from './components/TrackCover.vue'
@@ -7,6 +7,8 @@ import { duration, playlists, providers, refreshLibrary, type MusicTrack } from 
 import { api, jsonRequest } from '../../shared/api/client'
 import { playTrack, currentTrack, elapsed, seek } from './player/musicPlayer'
 import LyricsView from './components/LyricsView.vue'
+import { isMusicDownloaded, refreshMusicDownloadStatus } from './musicDownloads'
+import { libraryRevision } from './musicLibrary'
 import { createMusicBatch } from './musicBatch'
 
 type FeatureEvidence = { source?: string; confidence?: number; coverage?: string }
@@ -73,6 +75,7 @@ const scoreLabels: Record<string, string> = { scene: '场景适配', vocals: '�
 const artistStatuses: Record<string, string> = { qualified: '已有合格候选', no_qualified: '已评估候选均不合格', no_candidates: '本轮检索未找到匹配候选', incomplete: '尚未完成评估（受预算、来源或检索范围限制）' }
 const checked = ref(new Set<string>())
 const downloadBusy = ref(false)
+const cloudSave = ref(false)
 const downloadSelection = ref<RecommendedTrack[] | null>(null)
 const downloadTarget = ref('')
 const downloadName = ref('')
@@ -84,7 +87,7 @@ function openDownload(all = false) {
 const audioFormat = ref<'mp3' | 'm4a'>('mp3')
 const lyricTrack = ref<RecommendedTrack | null>(null)
 const lyricRun = ref<{ id: string; version: number } | null>(null)
-const downloadable = computed(() => tracks.value.filter(t => !t.filename && !t.local_url && t.provider !== 'local'))
+const downloadable = computed(() => tracks.value.filter(t => !isMusicDownloaded(t) && t.provider !== 'local'))
 const lyricTime = computed(() => lyricTrack.value?.webpage_url === currentTrack.value?.webpage_url ? elapsed.value : 0)
 function showLyrics(track: RecommendedTrack) {
   if (!run.value) return
@@ -100,7 +103,7 @@ async function download() {
   if (!selected.length) return
   downloadBusy.value = true; error.value = ''
   try {
-    const result = await createMusicBatch(selected, audioFormat.value, undefined, downloadTarget.value === 'new' ? { playlist_name: downloadName.value.trim() } : downloadTarget.value ? { playlist_id: downloadTarget.value } : {})
+    const result = await createMusicBatch(selected, audioFormat.value, undefined, { ...(downloadTarget.value === 'new' ? { playlist_name: downloadName.value.trim() } : downloadTarget.value ? { playlist_id: downloadTarget.value } : {}), cloud: cloudSave.value })
     downloadSelection.value = null
     void refreshLibrary()
     emit('batchCreated', result.batch_id)
@@ -111,6 +114,7 @@ async function download() {
 function seekLyric(seconds: number) {
   if (lyricTrack.value?.webpage_url === currentTrack.value?.webpage_url) seek(seconds)
 }
+watch([() => run.value?.result_version, libraryRevision], async () => { const candidates = tracks.value; try { const statuses = await refreshMusicDownloadStatus(candidates); for (const track of candidates) Object.assign(track, statuses.get(`${track.provider || 'video'}:${track.identifier || track.webpage_url}`)) } catch { /* Keep existing source states. */ } })
 watch(() => run.value?.run_id, () => { checked.value.clear(); lyricTrack.value = null; downloadSelection.value = null })
 
 function preferencePayload() {
@@ -278,12 +282,12 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
         </div>
         <form v-if="downloadSelection" class="scene-download-panel" @submit.prevent="download" @keydown.esc="!downloadBusy && (downloadSelection = null)">
           <strong>下载 {{ downloadSelection.length }} 首歌曲</strong>
-          <label>保存位置<select v-model="downloadTarget" :disabled="downloadBusy" aria-label="保存位置"><option value="">本地和下载（默认）</option><option v-for="playlist in playlists" :key="playlist.id" :value="playlist.id">{{ playlist.name }}</option><option value="new">＋新建歌单</option></select></label>
+          <label>保存位置<select v-model="downloadTarget" :disabled="downloadBusy" aria-label="保存位置"><option value="">不加入歌单</option><option v-for="playlist in playlists" :key="playlist.id" :value="playlist.id">{{ playlist.name }}</option><option value="new">＋新建歌单</option></select></label>
           <label v-if="downloadTarget === 'new'">歌单名称<input v-model="downloadName" required maxlength="80" :disabled="downloadBusy" placeholder="输入自定义歌单名称" /></label>
-          <small>文件保存到本地和下载；选择歌单后，下载成功的歌曲同时加入该歌单。</small>
+          <label><input v-model="cloudSave" type="checkbox" />保存到云端资料库</label><small>默认保存到本机；选择歌单只添加歌曲引用。</small>
           <div class="scene-actions"><button type="button" class="mc-command" :disabled="downloadBusy" @click="downloadSelection = null">取消</button><button type="submit" class="mc-command primary" :disabled="downloadBusy || downloadActive || !downloadSelection.length || (downloadTarget === 'new' && !downloadName.trim())">{{ downloadBusy ? '正在创建任务…' : '开始下载' }}</button></div>
         </form>
-        <div class="scene-tracks"><div v-for="(track, index) in tracks" :key="track.key" class="scene-track"><input :disabled="!!track.filename || !!track.local_url || track.provider === 'local'" type="checkbox" :aria-label="`选择 ${track.title}`" :checked="checked.has(track.key)" @change="checked.has(track.key) ? checked.delete(track.key) : checked.add(track.key)" /><span class="scene-order">{{ index + 1 }}</span><button class="scene-track-play" :title="`播放 ${track.title}`" :aria-label="`播放 ${track.title}`" @click="play(track)"><TrackCover :src="track.thumbnail" :title="track.title" /><Play :size="16" /></button><div class="scene-track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}</span><small>{{ track.reason }}<span v-if="!track.match?.scoring_version || track.match.scoring_version === 'legacy'"> · 旧版评分，重新生成可应用新规则</span></small></div><span class="scene-provider">{{ providers[track.provider || ''] || track.source.label }}</span><span class="scene-duration">{{ duration(track.validation.duration ?? track.duration) }}</span><span v-if="!track.local_url && !track.filename"></span><a v-if="track.local_url || track.filename" :href="downloadUrl(track.local_url || `/api/files/${encodeURIComponent(track.filename!)}`)" download class="mc-command">已有文件</a><button class="mc-icon" title="搜索歌词" aria-label="搜索歌词" @click="showLyrics(track)"><AlignLeft :size="18" /></button><button class="mc-icon" title="匹配证据" aria-label="匹配证据" @click="detail = track"><ChevronRight :size="18" /></button></div><p v-if="!tracks.length" class="scene-empty">暂无合格曲目</p></div>
+        <div class="scene-tracks"><div v-for="(track, index) in tracks" :key="track.key" class="scene-track"><input :disabled="isMusicDownloaded(track) || track.provider === 'local'" type="checkbox" :aria-label="`选择 ${track.title}`" :checked="checked.has(track.key)" @change="checked.has(track.key) ? checked.delete(track.key) : checked.add(track.key)" /><span class="scene-order">{{ index + 1 }}</span><button class="scene-track-play" :title="`播放 ${track.title}`" :aria-label="`播放 ${track.title}`" @click="play(track)"><TrackCover :src="track.thumbnail" :title="track.title" /><Play :size="16" /></button><div class="scene-track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}</span><small>{{ track.reason }}<span v-if="!track.match?.scoring_version || track.match.scoring_version === 'legacy'"> · 旧版评分，重新生成可应用新规则</span></small></div><span class="scene-provider">{{ providers[track.provider || ''] || track.source.label }}</span><span class="scene-duration">{{ duration(track.validation.duration ?? track.duration) }}</span><span v-if="!track.local_url && !track.filename"></span><a v-if="track.local_url || track.filename" :href="track.local_url || `/api/files/${encodeURIComponent(track.filename!)}`" download @click.prevent="saveRemoteFile(track.local_url || `/api/files/${encodeURIComponent(track.filename!)}`, track.filename || track.title).catch(failure => error = failure.message)" class="mc-command">已有文件</a><button class="mc-icon" title="搜索歌词" aria-label="搜索歌词" @click="showLyrics(track)"><AlignLeft :size="18" /></button><button class="mc-icon" title="匹配证据" aria-label="匹配证据" @click="detail = track"><ChevronRight :size="18" /></button></div><p v-if="!tracks.length" class="scene-empty">暂无合格曲目</p></div>
         <details v-if="run.result.coverage" class="scene-steps"><summary>检索范围</summary><p v-for="item in run.result.coverage.artists" :key="item.artist">{{ item.artist }}：已评估 {{ item.evaluated_count }} / {{ item.candidate_count }} 首，合格 {{ item.qualified_count }} 首 · {{ artistStatuses[item.status] || item.status }}<small v-if="item.reasons?.length">{{ item.reasons.join('；') }}</small></p><p v-if="run.result.coverage.personal_total !== undefined">个人库：{{ Math.min(run.result.coverage.personal_checked_until || 0, run.result.coverage.personal_total) }} / {{ run.result.coverage.personal_total }} 首</p><p v-for="(item, key) in run.result.coverage.online_playlists" :key="key">{{ item.name }}：已读取 {{ item.checked_until }} 首<span v-if="item.playlist_total"> / {{ item.playlist_total }} 首</span><span v-if="item.truncated_by_provider"> · 平台仅返回部分曲目</span></p></details>
         <details v-if="run.result.rejected?.length" class="scene-steps"><summary>未通过曲目 · {{ run.result.rejected.length }}</summary><ul><li v-for="item in run.result.rejected" :key="item.key"><span>{{ item.title }} · {{ item.artist }}</span><small>{{ item.reasons.join('；') }}</small></li></ul></details>
         <p class="scene-result-notice">{{ run.result.notice }}</p>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { saveRemoteFile, saveMessage } from '../../shared/downloads'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Crosshair, Download, Eraser, Pause, Play, RefreshCw, ScanEye, Square, Trash2, Undo2 } from 'lucide-vue-next'
 import { clampRegion, regionFromPoints, type Point, type WatermarkRegion } from './watermarkRegions'
@@ -314,23 +315,7 @@ async function saveResult() {
   saving.value = true
   error.value = ''
   try {
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName: job.value.filename, types: [{ description: 'MP4', accept: { 'video/mp4': ['.mp4'] } }] })
-      const response = await fetch(job.value.download_url)
-      if (!response.ok) throw new Error('处理结果读取失败。')
-      const writable = await handle.createWritable()
-      await writable.write(await response.blob())
-      await writable.close()
-      savingMessage.value = '处理结果已保存。'
-    } else {
-      const anchor = document.createElement('a')
-      anchor.href = downloadUrl(job.value.download_url)
-      anchor.download = job.value.filename
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      savingMessage.value = '浏览器已开始下载处理结果。'
-    }
+    savingMessage.value = saveMessage(await saveRemoteFile(job.value.download_url, job.value.filename))
   } catch (reason) {
     if (!(reason instanceof DOMException && reason.name === 'AbortError')) error.value = reason instanceof Error ? reason.message : '保存失败。'
   } finally { saving.value = false }

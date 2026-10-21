@@ -49,9 +49,19 @@ class DownloadTask:
         self.cancel = threading.Event()
         self.process: subprocess.Popen | None = None
         self.parse_record_id: str | None = None
+        self.destination = "library"
+
+    def directory(self, kind="file"):
+        if self.destination == "library":
+            return storage.directory(kind, uid=self.user_id or None)
+        folder = storage.directory("temp", uid=self.user_id or None) / "delivery" / self.task_id / kind
+        storage.contained(folder).mkdir(parents=True, exist_ok=True, mode=0o700)
+        return folder
 
     def to_response(self) -> TaskResponse:
         download_url = f"/api/files/{quote(self.filename, safe='')}" if self.filename else None
+        if self.filename and self.destination == "device":
+            download_url = f"/api/downloads/tasks/{self.task_id}/file"
         return video_schemas.TaskResponse(
             task_id=self.task_id,
             status=self.status,
@@ -61,6 +71,7 @@ class DownloadTask:
             download_url=download_url,
             error=self.error,
             media_type=self.media_type,
+            destination=self.destination,
         )
 
 
@@ -256,8 +267,12 @@ def _persist_task(task, kind, force=False):
                 cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
                                (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now))
-        if task.status == "finished" and getattr(task, "filename", None):
+        if task.status == "finished" and getattr(task, "filename", None) and getattr(task, "destination", "library") == "library":
             path = storage.owned_path("file", task.filename, uid=task.user_id)
+            if path.is_file() and not getattr(task, "_shared_published", False):
+                from backend.core import blobs
+                blobs.publish(path)
+                task._shared_published = True
             accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0,
                 "source_url": getattr(task, "url", None), "source_task_id": task.task_id,
                 "parse_record_id": getattr(task, "parse_record_id", None), "route_revision": getattr(task, "route_revision", None)}, uid=task.user_id)

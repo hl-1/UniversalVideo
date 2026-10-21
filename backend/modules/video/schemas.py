@@ -16,8 +16,9 @@ class DownloadRequest(BaseModel):
     url: HttpUrl
     format_id: str | None = Field(default=None, max_length=4096)
     media_type: Literal["video", "audio"] = "video"
-    audio_format: Literal["m4a", "mp3"] = "m4a"
+    audio_format: Literal["original", "m4a", "mp3"] = "m4a"
     parse_record_id: str | None = Field(default=None, max_length=64)
+    destination: Literal["device", "library"] = "library"
 
 
 class SummaryRequest(BaseModel):
@@ -88,7 +89,7 @@ class MusicBatchRequest(BaseModel):
     playlist_id: str | None = Field(default=None, min_length=1, max_length=24)
     playlist_name: str | None = Field(default=None, min_length=1, max_length=80)
     tracks: list[BatchTrackRequest] = Field(min_length=1, max_length=100)
-    audio_format: Literal["m4a", "mp3"] = "m4a"
+    audio_format: Literal["original", "m4a", "mp3"] = "m4a"
 
 
 class SubtitleSegment(BaseModel):
@@ -167,3 +168,4 @@ class TaskResponse(BaseModel):
     download_url: str | None = None
     error: str | None = None
     media_type: Literal["video", "audio"] = "video"
+    destination: Literal["device", "library"] = "library"

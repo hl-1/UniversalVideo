@@ -2,6 +2,8 @@ import { api, jsonRequest } from '../../shared/api/client'
 import { ref } from 'vue'
 
 export type MusicTrack = {
+  saved_to_device?: boolean
+  save_unverified?: boolean
   id?: string
   title: string
   artist?: string | null

@@ -6,12 +6,14 @@ import hashlib
 import threading
 import time
 import logging
+from contextvars import ContextVar
 from urllib.parse import urlparse
 import re
 
 from pydantic import ValidationError
 import tiktoken
 import httpx
+from httpx import AsyncClient
 from openai import AsyncOpenAI, APIStatusError
 
 from backend.infrastructure import ai
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _inflight = {}
 _inflight_lock = threading.Lock()
+_attempt = ContextVar("scene_playlist_model_attempt", default=None)
 
 
 def cancel(run_id):
@@ -50,10 +53,20 @@ def input_tokens(messages, tools=None):
     return max(len(tokenizer.encode(payload, disallowed_special=())) + 256, len(payload.encode()) // 2)
 
 
+async def _mark_dispatched(request):
+    attempt = _attempt.get()
+    if attempt is not None:
+        # HTTPX calls this immediately before handing the request to its transport.
+        # It proves dispatch began, not that the provider received/billed it.
+        attempt["dispatched"] = True
+
+
 async def _request(config, mode, messages, tools, max_output, structured):
     # No SDK retries or protocol/provider fallback. Cancelling this coroutine closes HTTP.
-    async with AsyncOpenAI(api_key=config["api_key"], base_url=config["base_url"], max_retries=0,
-                           timeout=httpx.Timeout(90, connect=5)) as client:
+    async with AsyncClient(timeout=httpx.Timeout(90, connect=5),
+                           event_hooks={"request": [_mark_dispatched]}) as transport, \
+            AsyncOpenAI(api_key=config["api_key"], base_url=config["base_url"], max_retries=0,
+                        timeout=httpx.Timeout(90, connect=5), http_client=transport) as client:
         if mode == "responses":
             converted = []
             for m in messages:
@@ -132,6 +145,13 @@ async def _drive(run_id, deadline, *args):
 
 def complete(run_id, messages, tools=None, max_output=4000, decision=False, json_output=False,
              phase=None, correction=False, signature=None):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        logger.error("Music model runner called on event loop: run=%s", run_id)
+        raise ModelFault("模型调用执行环境异常，请检查服务日志；请求尚未发送，未消耗模型用量")
     from backend.modules.music.agent.service import check_active
     from backend.modules.accounts import service as accounts
     row = check_active(run_id)
@@ -154,18 +174,30 @@ def complete(run_id, messages, tools=None, max_output=4000, decision=False, json
         mode = "responses" if config["model"].startswith(("gpt-6", "gpt-5.6")) else "chat"
     structured = json_output and urlparse(config["base_url"]).hostname in {
         "api.openai.com", "api.siliconflow.cn", "api.siliconflow.com"}
+    attempt = {"dispatched": False}
+    marker = _attempt.set(attempt)
     try:
         result, actual = asyncio.run(_drive(run_id, deadline, config, mode, messages, tools, max_output, structured))
     except Exception as exc:
-        budget.settle(run_id, request["id"], error="模型请求中断，用量待确认")
+        dispatched = attempt["dispatched"]
+        reason = "模型请求中断，用量待确认" if dispatched else "模型请求在发送前失败，已释放预留用量并停止调用"
+        budget.settle(run_id, request["id"], actual=None if dispatched else 0,
+                      error=reason, dispatched=dispatched)
+        # Exception text/tracebacks may contain endpoints, headers or credentials.
+        logger.warning("Music model failure: run=%s phase=%s error_type=%s dispatched=%s status=%s",
+                       run_id, phase, type(exc).__name__, dispatched, getattr(exc, "status_code", None))
         if isinstance(exc, (budget.BudgetExceeded, ModelFault)) or getattr(exc, "agent_policy_error", False):
             raise
+        if not dispatched:
+            raise ModelFault(reason) from None
         if isinstance(exc, APIStatusError):
             reason = {401: "模型密钥无效", 402: "模型服务余额不足", 403: "模型服务拒绝授权",
                       429: "模型服务请求受限"}.get(exc.status_code, "模型接口或服务异常")
             raise ModelFault(reason+"，已停止调用；请检查配置后手动重试") from None
         raise ModelFault("模型连接或协议异常，已停止调用；用量待确认") from None
-    budget.settle(run_id, request["id"], actual=actual)
+    finally:
+        _attempt.reset(marker)
+    budget.settle(run_id, request["id"], actual=actual, dispatched=True)
     if actual is None:
         raise ModelFault("模型未返回用量，已保留待确认占用并停止调用")
     check_active(run_id)  # Late results can settle accounting, never revive task output.

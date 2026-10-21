@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from functools import partial
 
 from fastapi import HTTPException
@@ -9,7 +11,7 @@ from backend.modules.accounts import service as accounts
 from backend.modules.music import library
 from backend.modules.music import sources as music
 from backend.infrastructure import network
-from backend.modules.music.agent import auth, budget, features, platforms, store, validation
+from backend.modules.music.agent import auth, budget, features, platforms, store, validation, work
 from backend.modules.music.agent.models import RunResult
 from backend.modules.music.agent.faults import ModelFault
 
@@ -105,7 +107,13 @@ def replace_candidate(run_id, key, **changes):
         if row["status"] != "running":
             raise HTTPException(409, "任务已停止")
         candidates = [t | changes if t["key"] == key else t for t in row["context"]["candidates"]]
-        store.update(cursor, row, context=row["context"] | {"candidates": candidates})
+        context = row["context"] | {"candidates": candidates}
+        performance = dict(context.get("performance", {}))
+        if "first_qualified_seconds" not in performance and qualified(row | {"context":context}):
+            performance["first_qualified_seconds"] = round(context.get("base_seconds", 0)
+                + max(0, time.time()-context.get("active_started_at", time.time())), 3)
+            context["performance"] = performance
+        store.update(cursor, row, context=context)
 
 
 def progress(run_id, stage, message, current_song=None):
@@ -286,20 +294,121 @@ def save(run_id, result_version, name=None):
 
 def execute(token, name, arguments):
     with auth.tool_scope(token,name) as (row,_):
-        def guard():
-            current = check_active(row["run_id"])
-            if not network_allowed(current):
-                error = HTTPException(403,"当前任务已禁止新增网络请求")
-                error.agent_policy_error = True
-                raise error
-            if name != "validate_tracks" and budget.validation_only(current):
-                raise budget.BudgetExceeded("剩余网络额度已预留给播放校验", "network_reserve")
-            budget.charge(row["run_id"],network_requests=1)
-        marker = network.request_guard.set(guard)
+        with work.operation(row, lambda:check_active(row["run_id"])) as batch:
+            before = batch.resources.snapshot()
+            def guard():
+                current = batch.check()
+                if not network_allowed(current):
+                    error = HTTPException(403,"当前任务已禁止新增网络请求")
+                    error.agent_policy_error = True
+                    raise error
+                exploration = name != "validate_tracks" or work.prefetching.get()
+                if exploration and budget.validation_only(current):
+                    raise budget.BudgetExceeded("剩余网络额度已预留给播放校验", "network_reserve")
+                budget.charge(row["run_id"], network_requests=1, reserve_playback=exploration)
+            marker = network.request_guard.set(guard)
+            try:
+                with work.timing(name):
+                    return execute_scoped(token,name,arguments)
+            finally:
+                network.request_guard.reset(marker)
+                record_performance(row["run_id"], before, batch.resources.snapshot())
+
+
+def record_performance(run_id, before, after):
+    if not after:
+        return
+    try:
+        with library.database() as cursor:
+            row = store.get(cursor, run_id, lock=True)
+            if row["status"] != "running":
+                return
+            performance = dict(row["context"].get("performance", {}))
+            stages = {k: dict(v) for k, v in performance.get("stages", {}).items()}
+            for name, value in after.items():
+                saved = stages.setdefault(name, {"seconds":0, "count":0, "cache_hits":0})
+                for field, number in value.items():
+                    saved[field] = round(saved[field]+number-before.get(name, {}).get(field, 0), 4)
+            performance["stages"] = stages
+            store.update(cursor, row, context=row["context"] | {"performance":performance})
+    except HTTPException as exc:
+        # Cancellation/lease replacement must never be undone to save diagnostics.
+        if exc.status_code not in {404, 409}:
+            raise
+
+
+def prefetch_candidates(row, tracks):
+    parsed, ctx = row["request"]["parsed"], row["context"]
+    if (not network_allowed(row) or budget.validation_only(row) or parsed.get("preferred_artists")
+            or ctx.get("no_progress", {}).get("count", 0)+len(tracks) >= 10):
+        return []
+    remaining = ctx["limits"].get("tokens", 150000)-sum(budget.usage(ctx).values())
+    if remaining < 20000:
+        return []
+    limit = min(3, batch_size(row), 10-ctx.get("no_progress", {}).get("count", 0)-len(tracks))
+    if parsed["goal"] == "count":
+        limit = min(limit, parsed["target_count"]-len(deduplicated(qualified(row)))-len(tracks))
+    keys = {t["key"] for t in tracks}
+    return [t for t in features.prioritize_cached(ctx.get("candidates", []))
+            if t["key"] not in keys and not t.get("analysis") and not features.metadata_excluded(t, parsed)][:max(0, limit)]
+
+
+def validate_batch(run_id, row, tracks, charge):
+    batch = work.current.get()
+    parsed = row["request"]["parsed"]
+    allow_network = network_allowed(row)
+    def verify(track):
+        batch.check()
+        if track.get("validation"):
+            return track["validation"]
+        if not features.semantic_eligible(track, parsed):
+            batch.resources.discard_audio(track)
+            return {"checked_at":time.time(), "identity":False, "playable":False,
+                    "full":False, "reason":"未满足曲目语义或音频条件，已跳过完整播放下载"}
+        return validation.validate(track, charge, allow_network, check=batch.check)
+    def prefetch(track):
+        marker = work.prefetching.set(True)
         try:
-            return execute_scoped(token,name,arguments)
+            features.prefetch_lyrics(track, charge, batch.check)
+        except budget.BudgetExceeded as exc:
+            if exc.resource != "network_reserve":
+                batch.stop(exc)
+                raise
+        except Exception as exc:
+            if getattr(exc, "agent_policy_error", False):
+                if not isinstance(exc, work.Stopped):
+                    batch.stop(exc)
+                raise
+            # Optional warming never turns an unavailable lyric provider into a task error.
         finally:
-            network.request_guard.reset(marker)
+            work.prefetching.reset(marker)
+    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="scene-prefetch")
+    futures = []
+    values = []
+    try:
+        progress(run_id, "validation", "正在并行校验完整播放", "、".join(t["title"] for t in tracks)[:300])
+        futures = [work.submit(pool, prefetch, t) for t in prefetch_candidates(row, tracks)]
+        with closing(work.parallel(tracks, verify, 2, batch.check)) as completions:
+            for track, value in completions:
+                batch.check()
+                replace_candidate(run_id, track["key"], validation=value)
+                values.append({"key":track["key"], **value})
+                # Persist every completed song immediately, even while another source is slow.
+                if satisfied(check_active(run_id))[0]:
+                    batch.stop()
+                    break
+        for future in futures:
+            try:
+                future.result()
+            except work.Stopped:
+                if not batch.stopped.is_set():
+                    raise
+        return values
+    finally:
+        batch.stop()
+        for future in futures:
+            future.cancel()
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def execute_scoped(token, name, arguments):
@@ -359,24 +468,26 @@ def execute_scoped(token, name, arguments):
                 parsed = row["request"]["parsed"]
                 data = {"tracks":[]}
                 if name == "get_track_features":
+                    eligible = []
+                    for track in tracks:
+                        if features.metadata_excluded(track, parsed):
+                            value = {"features":{}, "evidence":{}, "checked_at":time.time(), "cached":False}
+                            replace_candidate(run_id, track["key"], analysis=value, validation={
+                                "checked_at":time.time(), "identity":False, "playable":False, "full":False,
+                                "reason":"命中歌曲或歌手排除项，已跳过分析和下载"})
+                            work.current.get().resources.record("metadata_reject")
+                            data["tracks"].append({"key":track["key"], **value})
+                        else:
+                            eligible.append(track)
+                    tracks = eligible
                     progress(run_id, "semantic", "正在分析候选歌曲", "、".join(t["title"] for t in tracks)[:300])
                     values = features.analyze_many(run_id, tracks, charge, network_allowed(row),
-                        need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"}, check=lambda:check_active(run_id))
+                        need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"}, check=work.current.get().check) if tracks else []
                     for track, value in values:
                         replace_candidate(run_id, track["key"], analysis=value)
                         data["tracks"].append({"key":track["key"], **value})
-                for track in tracks if name == "validate_tracks" else []:
-                    current = check_active(run_id)
-                    if satisfied(current)[0]:
-                        break
-                    progress(run_id, "validation", "正在校验完整播放", track["title"])
-                    if not features.semantic_eligible(track, parsed):
-                        value = {"checked_at":time.time(), "identity":False, "playable":False,
-                                 "full":False, "reason":"未满足曲目语义或音频条件，已跳过完整播放下载"}
-                    else:
-                        value = validation.validate(track,charge,network_allowed(row),check=lambda:check_active(run_id))
-                    replace_candidate(run_id,track["key"],validation=value)
-                    data["tracks"].append({"key":track["key"],**value})
+                if name == "validate_tracks" and not satisfied(check_active(run_id))[0]:
+                    data["tracks"] = validate_batch(run_id, row, tracks, charge)
             else:
                 raise ValueError("Unknown tool")
         except budget.BudgetExceeded as exc:

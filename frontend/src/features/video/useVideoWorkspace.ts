@@ -154,7 +154,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     requestBilibiliLogin: bilibili.requestBilibiliLogin,
     requestBilibiliSpeechConfirmation: bilibili.requestBilibiliSpeechConfirmation,
   })
-  const { startDownload, startPolling, saveFinishedFile, resetDownload, cancelSave, fileSaved, saveProgress } = useVideoDownload({
+  const { startDownload, startPolling, saveFinishedFile, resetDownload, cancelSave, fileSaved, saveProgress, downloadDestination } = useVideoDownload({
     url,
     parseResult,
     activeRecordId,
@@ -758,6 +758,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     saveFinishedFile,
     saveMessage,
     saveProgress,
+    downloadDestination,
     savePlaybackProgress,
     saveVideoView,
     savingFile,

@@ -69,6 +69,10 @@ class FavoriteRequest(BaseModel):
     liked: bool
 
 
+class DownloadStatusRequest(BaseModel):
+    tracks: list[TrackInput] = Field(max_length=200)
+
+
 class HistoryRequest(BaseModel):
     track: TrackInput
     preview: bool = False
@@ -327,6 +331,40 @@ def serialize_track(row: dict) -> dict:
     return result
 
 
+def downloaded_status(tracks: list[TrackInput]) -> list[dict]:
+    """Lookup only requested identities, including aliases, without a library scan."""
+    if not tracks:
+        return []
+    uid = accounts.owner_id()
+    identities = {track_id(track) for track in tracks}
+    placeholders = ",".join(["%s"] * len(identities))
+    parameters = (uid, uid, *identities)
+    with database() as cursor:
+        cursor.execute(f"""SELECT d.track_id AS requested_id,d.filename,d.created_at
+            FROM music_downloads d JOIN music_tracks t ON t.id=d.track_id
+            JOIN resources r ON r.kind='file' AND r.resource_key=d.filename AND r.user_id=d.user_id AND r.deleted=FALSE
+            WHERE d.user_id=%s AND t.user_id=%s AND d.track_id IN ({placeholders})
+            UNION ALL SELECT a.alias_id AS requested_id,d.filename,d.created_at
+            FROM music_track_aliases a JOIN music_tracks t ON t.id=a.track_id
+            JOIN music_downloads d ON d.track_id=t.id
+            JOIN resources r ON r.kind='file' AND r.resource_key=d.filename AND r.user_id=d.user_id AND r.deleted=FALSE
+            WHERE d.user_id=%s AND t.user_id=%s AND a.alias_id IN ({placeholders})
+            ORDER BY created_at DESC""", parameters + parameters)
+        rows = cursor.fetchall()
+    available = {}
+    for row in rows:
+        if row["requested_id"] not in available and storage.owned_path("file", row["filename"], uid=uid).is_file():
+            available[row["requested_id"]] = row["filename"]
+    return [{"provider": track.provider, "identifier": track.identifier, "webpage_url": track.webpage_url,
+             "file_available": bool(name := available.get(track_id(track))), "filename": name,
+             "local_url": f"/api/files/{quote(name, safe='')}" if name else None} for track in tracks]
+
+
+@router.post("/download-status")
+def download_status_endpoint(payload: DownloadStatusRequest):
+    return {"tracks": downloaded_status(payload.tracks)}
+
+
 def record_download(filename: str, metadata: dict, *, imported: bool = False) -> None:
     safe_name = Path(filename).name
     if safe_name != filename or not (storage.owned_path("file", safe_name)).is_file():
@@ -334,6 +372,8 @@ def record_download(filename: str, metadata: dict, *, imported: bool = False) ->
     track = TrackInput.model_validate(metadata)
     path = storage.owned_path("file", safe_name)
     fingerprint = hash_file(path)
+    from backend.core import blobs
+    blobs.publish(path)
     stat = path.stat()
     accounts.register_resource("file", safe_name, {"filename": safe_name, "size": stat.st_size, "source_url": track.webpage_url})
     with scan_lock, database() as cursor:

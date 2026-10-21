@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ChevronDown, FileMusic, LoaderCircle, Music2, RefreshCw } from 'lucide-vue-next'
+import { ChevronDown, Download, FileMusic, LoaderCircle, Music2, RefreshCw } from 'lucide-vue-next'
 import { activeLyricIndex, audioFilename, type Lyrics } from '../lyrics'
+import { chooseFile, saveBlob, saveMessage } from '../../../shared/downloads'
 
 const props = defineProps<{
   track: { title: string; artist?: string | null; album?: string; thumbnail?: string | null; filename?: string | null; download_url?: string | null; webpage_url?: string; token?: string }
@@ -14,6 +15,7 @@ const lyrics = ref<Lyrics>({ lines: [], plain: '', source: '' })
 const loading = ref(false)
 const importing = ref(false)
 const error = ref('')
+const exportNotice = ref('')
 const coverFailed = ref(false)
 const lyricViewport = ref<HTMLElement | null>(null)
 const dialog = ref<HTMLElement | null>(null)
@@ -103,6 +105,21 @@ async function importLyrics(event: Event) {
     }
   } finally { if (current === generation) importing.value = false }
 }
+async function exportLyrics() {
+  const timed = lyrics.value.lines.length > 0
+  const name = `${props.track.title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')}.${timed ? 'lrc' : 'txt'}`
+  error.value = ''; exportNotice.value = ''
+  try {
+    const handle = await chooseFile(name)
+    const content = timed ? lyrics.value.lines.map(line => {
+      const ticks = Math.max(0, Math.round(line.time * 100))
+      return `[${String(Math.floor(ticks / 6000)).padStart(2, '0')}:${String(Math.floor(ticks / 100) % 60).padStart(2, '0')}.${String(ticks % 100).padStart(2, '0')}]${line.text}`
+    }).join('\n') : lyrics.value.plain
+    exportNotice.value = saveMessage(await saveBlob(new Blob([content], { type: 'text/plain;charset=utf-8' }), name, handle))
+  } catch (failure) {
+    if (!(failure instanceof DOMException && failure.name === 'AbortError')) error.value = failure instanceof Error ? failure.message : '歌词导出失败。'
+  }
+}
 async function followCurrentLine(force = false) {
   if (!force && Date.now() < followAfter) return
   await nextTick()
@@ -153,6 +170,7 @@ onBeforeUnmount(() => {
         <span>正在播放</span>
         <div class="lyrics-tools">
           <span v-if="lyrics.source" class="lyrics-source">{{ lyrics.source }}</span>
+          <button class="lyrics-icon" type="button" :disabled="loading || (!lyrics.lines.length && !lyrics.plain)" title="导出歌词" aria-label="导出歌词" @click="exportLyrics"><Download :size="19" /></button>
           <button class="lyrics-icon" type="button" :disabled="(!filename && !lyricsEndpoint && !track.webpage_url) || loading || importing" title="匹配歌词" aria-label="匹配歌词" @click="loadLyrics()"><LoaderCircle v-if="loading" :size="19" class="spin" /><RefreshCw v-else :size="19" /></button>
           <button class="lyrics-icon" type="button" :disabled="!filename || importing" title="导入 LRC 歌词" aria-label="导入 LRC 歌词" @click="importInput?.click()"><LoaderCircle v-if="importing" :size="20" class="spin" /><FileMusic v-else :size="20" /></button>
           <input ref="importInput" type="file" accept=".lrc" hidden @change="importLyrics" />
@@ -174,6 +192,7 @@ onBeforeUnmount(() => {
           </div>
           <p v-if="lyrics.message && (lyrics.lines.length || lyrics.plain)" class="lyrics-error">{{ lyrics.message }}</p>
           <p v-if="error" class="lyrics-error" role="alert">{{ error }}</p>
+          <p v-if="exportNotice" class="lyrics-error" role="status">{{ exportNotice }}</p>
         </div>
       </div>
       <footer class="lyrics-controls"><slot name="controls" /></footer>

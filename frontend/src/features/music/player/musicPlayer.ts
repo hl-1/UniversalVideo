@@ -1,5 +1,5 @@
 import { nextTick, ref } from 'vue'
-import { duration, libraryError, refreshLibrary, trackKey, trackPayload, type MusicTrack } from '../musicLibrary'
+import { libraryError, refreshLibrary, trackKey, trackPayload, type MusicTrack } from '../musicLibrary'
 import { api, jsonRequest } from '../../../shared/api/client'
 import { mediaFailureMessage, probeMedia } from '../../../shared/media'
 
@@ -9,7 +9,6 @@ export const audio = ref<HTMLAudioElement | null>(null)
 export const playbackUrl = ref('')
 export const playbackState = ref<'idle' | 'loading' | 'playing' | 'paused' | 'ended' | 'error'>('idle')
 export const playbackError = ref('')
-export const playbackWarning = ref('')
 export const elapsed = ref(0)
 export const total = ref(0)
 export const volume = ref(0.7)
@@ -24,6 +23,7 @@ let attachedSource = ''
 let recoveryUsed = false
 let recovering = false
 let pendingSeek = 0
+let fullSourceRecoveryUsed = false
 
 export function isPlaybackTrack(track: MusicTrack) { return Boolean(currentTrack.value && trackKey(currentTrack.value) === trackKey(track)) }
 function clearTimer() { window.clearTimeout(timeout); timeout = undefined }
@@ -32,7 +32,7 @@ function fail(message: string) {
   playbackState.value = 'error'
   playbackError.value = message
 }
-function startTimer(revision: number) {
+function startTimer(revision: number, milliseconds = 30000) {
   clearTimer()
   timeout = window.setTimeout(() => {
     if (revision !== generation) return
@@ -40,7 +40,7 @@ function startTimer(revision: number) {
     audio.value?.pause()
     generation++
     fail('音源连接超时，请重试。')
-  }, 30000)
+  }, milliseconds)
 }
 export function pausePlayback() {
   audio.value?.pause()
@@ -65,7 +65,6 @@ export function stopPlayback() {
   total.value = 0
   playbackState.value = 'idle'
   playbackError.value = ''
-  playbackWarning.value = ''
 }
 async function resume(revision: number) {
   try {
@@ -89,7 +88,7 @@ export async function playTrack(track: MusicTrack, list?: MusicTrack[], retry = 
   controller?.abort()
   audio.value?.pause()
   const revision = ++generation
-  if (!retry) recoveryUsed = false
+  if (!retry) { recoveryUsed = false; fullSourceRecoveryUsed = false }
   recovering = false
   pendingSeek = position
   controller = new AbortController()
@@ -97,10 +96,9 @@ export async function playTrack(track: MusicTrack, list?: MusicTrack[], retry = 
   playbackState.value = 'loading'
   playbackUrl.value = ''
   playbackError.value = ''
-  playbackWarning.value = ''
   elapsed.value = 0
   total.value = track.duration || 0
-  startTimer(revision)
+  startTimer(revision, 150000)
   try {
     let url = track.local_url || (track.provider === 'local' ? track.webpage_url : '')
     expiresAt = Number.POSITIVE_INFINITY
@@ -119,6 +117,7 @@ export async function playTrack(track: MusicTrack, list?: MusicTrack[], retry = 
       if (revision === generation) currentTrack.value = { ...track, ...resolved }
     }
     if (revision !== generation) return
+    startTimer(revision)
     playbackUrl.value = url
     attachedSource = new URL(url, window.location.href).href
     await nextTick()
@@ -149,28 +148,46 @@ function currentEvent(event: Event) {
 }
 export function onMetadata(event: Event) {
   if (!currentEvent(event) || !audio.value) return
-  total.value = Number.isFinite(audio.value.duration) ? audio.value.duration : currentTrack.value?.duration || 0
+  const actual = audio.value.duration
+  if (!Number.isFinite(actual) || actual <= 0) return
+  const expected = currentTrack.value?.duration
+  if (expected && Math.abs(actual - expected) > Math.max(3, expected * 0.03)) {
+    audio.value.pause()
+    const track = currentTrack.value!
+    if (!fullSourceRecoveryUsed && ['qq', 'netease', 'kugou'].includes(track.provider || '')) {
+      fullSourceRecoveryUsed = true
+      void playTrack({ ...track, local_url: null }, undefined, true)
+    } else {
+      playbackUrl.value = ''
+      attachedSource = ''
+      fail('未取得完整歌曲，请稍后重试。')
+    }
+    return
+  }
+  total.value = actual
   if (pendingSeek > 0) {
     audio.value.currentTime = Math.min(pendingSeek, Math.max(0, total.value - 0.1))
     elapsed.value = audio.value.currentTime
     pendingSeek = 0
   }
-  const expected = currentTrack.value?.duration
-  if (expected && total.value < expected - Math.max(3, expected * 0.03)) {
-    playbackWarning.value = `试听片段 ${duration(total.value)} / ${duration(expected)}`
-  }
+  if (playbackState.value === 'playing') recordPlayback()
 }
 export function onTime(event: Event) {
   if (currentEvent(event) && audio.value) elapsed.value = audio.value.currentTime
 }
 export function onPlaying(event: Event) {
   if (!currentEvent(event) || !currentTrack.value) return
+  onMetadata(event)
+  if (!currentEvent(event)) return
   clearTimer()
   playbackState.value = 'playing'
   playbackError.value = ''
-  if (recordedGeneration === generation) return
+  recordPlayback()
+}
+function recordPlayback() {
+  if (!currentTrack.value || !audio.value || !Number.isFinite(audio.value.duration) || audio.value.duration <= 0 || recordedGeneration === generation) return
   recordedGeneration = generation
-  void api('/api/library/history', jsonRequest('POST', { track: trackPayload(currentTrack.value), preview: Boolean(playbackWarning.value) }))
+  void api('/api/library/history', jsonRequest('POST', { track: trackPayload(currentTrack.value), preview: false }))
     .then(() => refreshLibrary())
     .catch(failure => { libraryError.value = failure instanceof Error ? failure.message : '播放记录保存失败。' })
 }

@@ -7,6 +7,7 @@ import uuid
 from fastapi import HTTPException, Response
 from fastapi import APIRouter
 
+from backend.core import storage
 from backend.modules.music import sources as music
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
@@ -172,6 +173,30 @@ def download_endpoint(payload: video_schemas.DownloadRequest) -> video_schemas.D
         cached = video_parse_cache._get_sniff_cache(video_urls.normalize_url(str(payload.url)))
         if not cached or not any(item.format_id == payload.format_id for item in cached.formats):
             raise HTTPException(422, "下载格式与当前账号的解析结果不匹配，请重新解析。")
+    if accounts.principal.get() and payload.destination == 'library':
+        import hashlib
+        from backend.core import blobs
+        selection = payload.format_id
+        if selection and selection.startswith('music:'):
+            track = music.get_track(selection.partition(':')[2], str(payload.url))
+            selection = f"{track.provider}:{track.identifier}"
+        identity = hashlib.sha256(f"{accounts.owner_id()}:{payload.url}:{selection}:{payload.media_type}:{payload.audio_format}".encode()).hexdigest()
+        with blobs.mutex('download:' + identity):
+            try:
+                mapping = json.loads(accounts.resource('download_variant', identity)['payload'])
+                previous = json.loads(accounts.resource('download', mapping['task_id'])['payload'])
+                if previous.get('status') in {'pending', 'running'} or (previous.get('status') == 'finished' and previous.get('filename') and storage.owned_path('file', previous['filename']).is_file()):
+                    return video_schemas.DownloadResponse(task_id=mapping['task_id'])
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            result = _create_download(payload, relation)
+            accounts.register_resource('download_variant', identity, {'task_id': result.task_id})
+            return result
+    return _create_download(payload, relation)
+
+
+def _create_download(payload, relation):
     task_id = uuid.uuid4().hex[:12]
     task = video_tasks.DownloadTask(
         task_id=task_id,
@@ -181,6 +206,7 @@ def download_endpoint(payload: video_schemas.DownloadRequest) -> video_schemas.D
         audio_format=payload.audio_format,
     )
     task.parse_record_id = payload.parse_record_id
+    task.destination = payload.destination
     if relation:
         task.user_id = relation["user_id"]
     with video_tasks.tasks_lock:

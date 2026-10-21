@@ -22,6 +22,7 @@ export type PreviewState = 'idle' | 'loading' | 'ready' | 'error'
 export type SummaryTab = 'summary' | 'transcript' | 'mind-map'
 
 export type TaskResult = {
+  destination?: 'device' | 'library'
   task_id: string
   status: TaskStatus
   progress: number
@@ -62,7 +63,7 @@ export type SummaryTaskResult = {
 }
 
 export type FilePickerWritable = {
-  write(data: Blob | Uint8Array): Promise<void>
+  write(data: Blob | Uint8Array<ArrayBuffer>): Promise<void>
   close(): Promise<void>
   abort?(): Promise<void>
 }
@@ -75,6 +76,7 @@ declare global {
   interface Window {
     showSaveFilePicker?: (options?: {
       suggestedName?: string
+      startIn?: 'downloads'
       types?: Array<{
         description: string
         accept: Record<string, string[]>
