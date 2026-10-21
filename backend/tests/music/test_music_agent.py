@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import json
 import runpy
 import secrets
@@ -10,7 +11,7 @@ import unittest
 import wave
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
 import pymysql
@@ -32,12 +33,12 @@ class SettingsTests(unittest.TestCase):
     def test_token_budget_range_and_default(self):
         payload = dict(accounts.DEFAULT_SETTINGS)
         payload.pop("music_agent_tokens")
-        self.assertEqual(administration.SettingsUpdate.model_validate(payload).music_agent_tokens,200000)
-        for tokens in (2000,80000,200000):
+        self.assertEqual(administration.SettingsUpdate.model_validate(payload).music_agent_tokens,150000)
+        for tokens in (2000,80000,150000):
             with self.subTest(tokens=tokens):
                 settings = administration.SettingsUpdate.model_validate(payload | {"music_agent_tokens":tokens})
                 self.assertEqual(settings.music_agent_tokens,tokens)
-        for tokens in (1999,200001):
+        for tokens in (1999,150001):
             with self.subTest(tokens=tokens), self.assertRaises(ValidationError):
                 administration.SettingsUpdate.model_validate(payload | {"music_agent_tokens":tokens})
 
@@ -62,6 +63,14 @@ class SettingsTests(unittest.TestCase):
 
 
 class NeedParsingTests(unittest.TestCase):
+    def test_romance_alias_negation_and_explicit_scene(self):
+        self.assertEqual(model.offline_parse('谈恋爱', {})['scene'], '情歌')
+        self.assertEqual(model.offline_parse('工作，不要爱情主题', {})['scene'], '工作')
+        self.assertTrue(model.offline_parse('谈恋爱', {'scene':'工作'})['clarification'])
+        with self.assertRaises(ValidationError):
+            from backend.modules.music.agent.models import ParsedNeed
+            ParsedNeed(scene='未实现的场景')
+
     def parse(self, replies):
         request = {'need': '游戏，EXO和BIGBANG优先', 'preferences': {'target_count': 13, 'source_mode': 'discover'}}
         with patch.object(model.library, 'database'), patch.object(model.store, 'get', return_value={'context': {'limits': {'network_enabled': True}}}), patch.object(model, 'complete', side_effect=replies) as call:
@@ -361,36 +370,341 @@ class AgentIntegrationTests(unittest.TestCase):
         row = self.running()
         response = SimpleNamespace(choices=[SimpleNamespace(finish_reason='length', message=SimpleNamespace(tool_calls=[], content=None))], usage=SimpleNamespace(total_tokens=20))
         config = {'api_key': 'test-key', 'base_url': 'https://api.siliconflow.cn/v1', 'model': 'test-model'}
-        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'OpenAI') as constructor:
-            constructor.return_value.chat.completions.create.return_value = response
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'AsyncOpenAI') as constructor:
+            constructor.return_value.__aenter__.return_value.chat.completions.create = AsyncMock(return_value=response)
             result = model.complete(row['run_id'], [{'role':'user','content':'Return JSON'}], json_output=True)
             self.assertEqual(result['content'], '')
             self.assertEqual(result['finish_reason'], 'length')
-            self.assertEqual(constructor.return_value.chat.completions.create.call_args.kwargs['response_format'], {'type':'json_object'})
+            self.assertEqual(constructor.return_value.__aenter__.return_value.chat.completions.create.call_args.kwargs['response_format'], {'type':'json_object'})
         with library.database() as cursor:
             current = store.get(cursor, row['run_id'], lock=True)
             store.update(cursor, current, context=current['context'] | {'limits': current['context']['limits'] | {'api':'responses'}})
-        with patch.object(model.ai, 'load_config', return_value=config | {'base_url':'https://api.openai.com/v1'}), patch.object(model, 'OpenAI') as constructor:
-            constructor.return_value.responses.create.return_value = SimpleNamespace(output=[], output_text='', status='incomplete', usage=SimpleNamespace(total_tokens=20))
-            result = model.complete(row['run_id'], [{'role':'user','content':'Return JSON'}], json_output=True)
+        with patch.object(model.ai, 'load_config', return_value=config | {'base_url':'https://api.openai.com/v1'}), patch.object(model, 'AsyncOpenAI') as constructor:
+            constructor.return_value.__aenter__.return_value.responses.create = AsyncMock(return_value=SimpleNamespace(output=[], output_text='', status='incomplete', usage=SimpleNamespace(total_tokens=20)))
+            result = model.complete(row['run_id'], [{'role':'user','content':'Return JSON using Responses'}], json_output=True)
             self.assertEqual(result['finish_reason'], 'incomplete')
-            self.assertEqual(constructor.return_value.responses.create.call_args.kwargs['text'], {'format':{'type':'json_object'}})
+            self.assertEqual(constructor.return_value.__aenter__.return_value.responses.create.call_args.kwargs['text'], {'format':{'type':'json_object'}})
 
     def test_model_request_reserves_budget_and_uses_existing_connection(self):
         row = self.running()
         response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[],content='{}'))],
                                    usage=SimpleNamespace(total_tokens=15))
         config = {"api_key":"test-key", "base_url":"https://model.test/v1", "model":"test-model"}
-        with patch.object(model.ai,"load_config",return_value=config), patch.object(model,"OpenAI") as constructor:
-            constructor.return_value.chat.completions.create.return_value = response
+        with patch.object(model.ai,"load_config",return_value=config), patch.object(model,"AsyncOpenAI") as constructor:
+            constructor.return_value.__aenter__.return_value.chat.completions.create = AsyncMock(return_value=response)
             answer = model.complete(row["run_id"],[{"role":"user","content":"test"}],max_output=80,decision=True)
             self.assertEqual(answer["content"],'{}')
             self.assertNotIn("model",constructor.call_args.kwargs)
-            constructor.return_value.chat.completions.create.assert_called_once()
+            constructor.return_value.__aenter__.return_value.chat.completions.create.assert_awaited_once()
         with library.database() as cursor:
             changed = store.get(cursor,row["run_id"])
         self.assertEqual(changed["context"]["budget"]["decisions"],1)
-        self.assertGreater(changed["context"]["budget"]["tokens"],80)
+        self.assertEqual(changed["context"]["budget"]["tokens"],15)
+        self.assertEqual(budget.usage(changed["context"]), {"actual":15,"reserved":0,"unconfirmed":0})
+
+    def test_atomic_reservation_actual_refund_and_idempotent_late_settlement(self):
+        row = self.running()
+        rid = row['run_id']
+        request = budget.reserve(rid, 12000, 'semantic', 'song-a', time.time()+90)
+        with self.assertRaises(model.ModelFault):
+            budget.reserve(rid, 1000, 'parse', 'second', time.time()+60)
+        self.assertEqual(budget.usage(service.current_run(rid)['context'])['reserved'], 12000)
+        budget.settle(rid, request['id'], actual=3100)
+        budget.settle(rid, request['id'], actual=3100)
+        self.assertEqual(budget.usage(service.current_run(rid)['context']), {'actual':3100, 'reserved':0, 'unconfirmed':0})
+        second = budget.reserve(rid, 12000, 'semantic', 'song-b', time.time()+90)
+        self.client.post(f'/api/music/recommendations/{rid}/cancel').raise_for_status()
+        with store.worker_scope(rid, 'expired-worker'):
+            budget.settle(rid, second['id'], error='cancelled')
+            budget.settle(rid, second['id'], actual=70)
+            budget.settle(rid, second['id'], actual=70)
+        current = service.current_run(rid)
+        self.assertEqual(current['status'], 'cancelled')
+        self.assertEqual(budget.usage(current['context']), {'actual':3170, 'reserved':0, 'unconfirmed':0})
+        self.assertFalse(current['result'])
+
+    def test_total_budget_calls_and_corrections_are_shared(self):
+        row = self.running()
+        rid = row['run_id']
+        with self.assertRaises(budget.BudgetExceeded):
+            budget.reserve(rid, 145001, 'semantic', 'too-large', time.time()+90)
+        for n in range(40):
+            request = budget.reserve(rid, 1000, 'semantic', str(n), time.time()+90)
+            budget.settle(rid, request['id'], actual=10)
+        with self.assertRaises(budget.BudgetExceeded):
+            budget.reserve(rid, 1000, 'parse', 'new-phase', time.time()+60)
+        self.assertEqual(service.current_run(rid)['context']['budget']['model_calls'], 40)
+        self.assertEqual(service.current_run(rid)['context']['budget']['tokens'], 400)
+
+    def test_unknown_usage_stops_future_paid_dispatch(self):
+        row = self.running()
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request',
+                new=AsyncMock(return_value=({'content':'{}', 'finish_reason':'stop'}, None))) as request:
+            with self.assertRaisesRegex(model.ModelFault, '未返回用量'):
+                model.complete(row['run_id'], [{'role':'user','content':'test'}])
+            with self.assertRaises(model.ModelFault):
+                model.complete(row['run_id'], [{'role':'user','content':'test again'}])
+            self.assertEqual(request.await_count, 1)
+        totals = budget.usage(service.current_run(row['run_id'])['context'])
+        self.assertEqual(totals['actual'], 0)
+        self.assertEqual(totals['reserved'], 0)
+        self.assertGreater(totals['unconfirmed'], 4000)
+
+    def test_provider_excess_is_recorded_truthfully_and_blocks_new_requests(self):
+        row = self.running()
+        request = budget.reserve(row['run_id'], 1000, 'semantic', 'unexpected-usage', time.time()+90)
+        budget.settle(row['run_id'], request['id'], actual=150001)
+        current = service.current_run(row['run_id'])
+        self.assertEqual(current['context']['budget']['tokens'], 150001)
+        self.assertTrue(current['context']['model_stop'])
+        with self.assertRaises(model.ModelFault):
+            budget.reserve(row['run_id'], 1000, 'parse', 'new', time.time()+60)
+
+    def test_inflight_async_request_is_cancelled_and_accounting_retained(self):
+        row = self.running()
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        closed = []
+        async def pending(*args):
+            await asyncio.sleep(.03)
+            model.cancel(row['run_id'])
+            try:
+                await asyncio.sleep(30)
+            finally:
+                closed.append(True)
+        started = time.monotonic()
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request', side_effect=pending):
+            with self.assertRaisesRegex(model.ModelFault, '已取消'):
+                model.complete(row['run_id'], [{'role':'user','content':'test'}])
+        self.assertLess(time.monotonic()-started, 1)
+        self.assertEqual(closed, [True])
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['model_calls'], 1)
+        self.assertGreater(budget.usage(service.current_run(row['run_id'])['context'])['unconfirmed'], 0)
+
+    def test_response_after_cancellation_only_settles_usage(self):
+        row = self.running()
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        async def late(*args):
+            with library.database() as cursor:
+                current = store.get(cursor, row['run_id'], lock=True)
+                store.update(cursor, current, status='cancelled', worker_id=None, lease_until=None)
+            return {'content':'{}', 'finish_reason':'stop'}, 71
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request', side_effect=late):
+            with self.assertRaises(HTTPException):
+                model.complete(row['run_id'], [{'role':'user','content':'test'}])
+        current = service.current_run(row['run_id'])
+        self.assertEqual(current['context']['budget']['tokens'], 71)
+        self.assertEqual(current['status'], 'cancelled')
+        self.assertFalse(current['result'])
+
+    def test_no_gain_diagnoses_once_then_stops_after_next_ten(self):
+        row = self.running()
+        def update(count):
+            with library.database() as cursor:
+                current = store.get(cursor, row['run_id'], lock=True)
+                return store.update(cursor, current, context=current['context'] | {'candidates':[
+                    {'key':str(i), 'title':'Song', 'artist':'Artist', 'source':{'kind':'personal'},
+                     'analysis':{'features':{}}, 'validation':{'identity':False}} for i in range(count)]})
+        self.assertEqual(runtime.no_gain(update(10)), 'adjust')
+        self.assertIsNone(runtime.no_gain(service.current_run(row['run_id'])))
+        with self.assertRaisesRegex(budget.BudgetExceeded, '又有10首'):
+            runtime.no_gain(update(20))
+
+    def test_shared_correction_cap_and_one_correction_per_input(self):
+        row = self.running()
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        valid = ({'content':'{"scene":"放松"}', 'finish_reason':'stop'}, 10)
+        invalid = ({'content':'not-json', 'finish_reason':'stop'}, 10)
+        from backend.modules.music.agent.models import ParsedNeed
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request',
+                new=AsyncMock(side_effect=[invalid, valid, invalid, valid, invalid])) as request:
+            for i in range(2):
+                model.structured(row['run_id'], [{'role':'user','content':f'need-{i}'}],
+                                 ParsedNeed.model_validate, phase='parse')
+            with self.assertRaises(model.ModelOutputError):
+                model.structured(row['run_id'], [{'role':'user','content':'need-2'}],
+                                 ParsedNeed.model_validate, phase='parse')
+            self.assertEqual(request.await_count, 5)
+        used = service.current_run(row['run_id'])['context']['budget']
+        self.assertEqual((used['model_calls'], used['corrections'], used['tokens']), (5, 2, 50))
+
+    def test_three_lyric_candidates_share_one_paid_request(self):
+        row = self.running()
+        tracks = []
+        for i in range(3):
+            payload = library.TrackInput(title=f'歌曲{i}', artist='歌手', provider='netease', identifier=str(200+i),
+                webpage_url=f'https://music.163.com/song?id={200+i}', duration=180)
+            with library.database() as cursor:
+                key = library.save_track(cursor, payload)
+                library.write_lyrics(cursor, key, {'text':'[00:01]今天一起听音乐', 'source':'本地 LRC',
+                    'signature':'', 'checked_at':time.time(), 'updated_at':time.time(), 'manual':True})
+            tracks.append(payload.model_dump() | {'key':key, 'user_id':self.user_id})
+        result = {t['key']:{'vocal_role':'lead', 'language':'中文', 'themes':['甜蜜'], 'moods':['放松'],
+                           'scene_scores':{'放松':.9, '情歌':.8}, 'confidence':.9} for t in tracks}
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request',
+                new=AsyncMock(return_value=({'content':json.dumps(result), 'finish_reason':'stop'}, 1700))) as request:
+            values = features.analyze_many(row['run_id'], tracks, lambda **_:None, True)
+            self.assertEqual(len(values), 3)
+            self.assertEqual(request.await_count, 1)
+            cached = features.analyze_many(row['run_id'], tracks, lambda **_:None, True)
+            self.assertTrue(all(v['cached'] for _, v in cached))
+            self.assertEqual(request.await_count, 1)
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['tokens'], 1700)
+
+    def test_database_cancellation_closes_request_without_local_signal(self):
+        row = self.running()
+        closed = []
+        async def pending(*args):
+            with library.database() as cursor:
+                current = store.get(cursor, row['run_id'], lock=True)
+                store.update(cursor, current, status='cancelled', worker_id=None, lease_until=None)
+            try:
+                await asyncio.sleep(30)
+            finally:
+                closed.append(True)
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        started = time.monotonic()
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, '_request', side_effect=pending):
+            with self.assertRaises(HTTPException):
+                model.complete(row['run_id'], [{'role':'user','content':'test'}])
+        self.assertLess(time.monotonic()-started, 1)
+        self.assertEqual(closed, [True])
+
+    def test_absolute_timeout_cancels_underlying_coroutine(self):
+        row = self.running()
+        closed = []
+        async def pending(*args):
+            try:
+                await asyncio.sleep(30)
+            finally:
+                closed.append(True)
+        with patch.object(model, '_request', side_effect=pending):
+            with self.assertRaisesRegex(model.ModelFault, '超时'):
+                asyncio.run(model._drive(row['run_id'], time.time()+.05))
+        self.assertEqual(closed, [True])
+
+    def test_model_fault_in_tool_stops_runtime_and_keeps_local_partial(self):
+        public, _, _ = self.create()
+        with library.database() as cursor:
+            row = store.get(cursor, public['run_id'], lock=True)
+            store.update(cursor, row, request=row['request'] | {'parsed':model.offline_parse('放松', {})},
+                context=row['context'] | {'personal_searched':True, 'candidates':[{
+                    'key':'candidate', 'title':'Song', 'artist':'Artist', 'source':{'kind':'personal'}, 'duration':180}]})
+        class InProcessClient:
+            def __init__(self, token): self.token = token
+            def tools(self): return []
+            def call(self, name, args): return service.execute(self.token, name, args)
+        with patch.object(mcp, 'LocalClient', InProcessClient), \
+             patch.object(features, 'analyze_many', side_effect=model.ModelOutputError('模型格式错误，已停止调用')), \
+             patch.object(validation, 'validate', side_effect=AssertionError('Must stop downloads')):
+            runtime.run(row['run_id'])
+        current = service.current_run(row['run_id'])
+        self.assertEqual(current['status'], 'partial')
+        self.assertIn('模型格式错误', current['result']['notice'])
+        self.assertFalse(current['result']['tracks'])
+
+    def test_concurrent_reservations_admit_only_one_request(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        row = self.running()
+        barrier = Barrier(2)
+        def admit(index):
+            barrier.wait(timeout=2)
+            try:
+                return budget.reserve(row['run_id'], 10000, 'semantic', str(index), time.time()+90)
+            except model.ModelFault:
+                return None
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(admit, range(2)))
+        self.assertEqual(sum(r is not None for r in results), 1)
+        self.assertEqual(service.current_run(row['run_id'])['context']['budget']['model_calls'], 1)
+        self.assertEqual(budget.usage(service.current_run(row['run_id'])['context'])['reserved'], 10000)
+
+    def test_real_async_sdk_closes_transport_on_cancel(self):
+        import httpx
+        from openai import AsyncOpenAI
+        row = self.running()
+        state = {'closed':False, 'requests':0, 'interrupted':False}
+        class HoldingTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                state['requests'] += 1
+                asyncio.get_running_loop().call_later(.03, model.cancel, row['run_id'])
+                try:
+                    await asyncio.sleep(30)
+                finally:
+                    state['interrupted'] = True
+            async def aclose(self):
+                state['closed'] = True
+        client = AsyncOpenAI(api_key='fake', base_url='https://model.test/v1', max_retries=0,
+                             http_client=httpx.AsyncClient(transport=HoldingTransport()))
+        config = {'api_key':'test', 'base_url':'https://model.test/v1', 'model':'test'}
+        with patch.object(model.ai, 'load_config', return_value=config), patch.object(model, 'AsyncOpenAI', return_value=client):
+            with self.assertRaisesRegex(model.ModelFault, '取消'):
+                model.complete(row['run_id'], [{'role':'user','content':'test'}])
+        self.assertEqual(state, {'closed':True, 'requests':1, 'interrupted':True})
+
+    def test_fabricated_batch_key_stops_without_correction(self):
+        jobs = [{'key':str(i), 'messages':[{'role':'system','content':'rules'},
+            {'role':'user','content':'{"lyrics":"歌词"}'}]} for i in range(3)]
+        with patch.object(model, 'complete', return_value={'content':'{"fabricated":{}}'}) as request:
+            with self.assertRaisesRegex(model.ModelFault, '编造'):
+                features._semantic('unused', jobs)
+        self.assertEqual(request.call_count, 1)
+
+    def test_duplicate_tool_arguments_ignore_json_key_order(self):
+        row = self.running()
+        attempted = set()
+        runtime.record_attempt(row['run_id'], 'search_online_tracks', {'provider':'qq','query':'情歌'}, attempted)
+        with self.assertRaises(model.ModelFault):
+            runtime.record_attempt(row['run_id'], 'search_online_tracks', {'query':'情歌','provider':'qq'}, attempted)
+
+    def test_complete_romance_run_uses_shared_ledger_and_stops_at_goal(self):
+        tracks = []
+        for i in range(3):
+            payload = library.TrackInput(title=f'甜蜜歌曲{i}', artist=f'歌手{i}', provider='netease', identifier=str(500+i),
+                webpage_url=f'https://music.163.com/song?id={500+i}', duration=180)
+            with library.database() as cursor:
+                key = library.save_track(cursor, payload)
+                library.write_lyrics(cursor, key, {'text':'[00:01]与你相爱的每一天', 'source':'本地 LRC',
+                    'signature':'', 'checked_at':time.time(), 'updated_at':time.time(), 'manual':True})
+            tracks.append(payload.model_dump())
+        response = self.client.post('/api/music/recommendations', json={'need':'谈恋爱',
+            'preferences':{'target_count':3, 'source_mode':'discover'}}, headers={'Idempotency-Key':secrets.token_hex(16)})
+        response.raise_for_status()
+        rid = response.json()['run_id']
+        class InProcessClient:
+            def __init__(self, token): self.token = token
+            def tools(self): return [{'type':'function','function':{'name':'search_online_tracks',
+                'description':'Search songs','parameters':{'type':'object','properties':{}}}}]
+            def call(self, name, args): return service.execute(self.token, name, args)
+        semantic = {'vocal_role':'lead', 'language':'中文', 'themes':['甜蜜'], 'moods':['浪漫'],
+                    'scene_scores':{'情歌':.9}, 'confidence':.9}
+        async def provider(config, mode, messages, tools, max_output, structured):
+            if tools:
+                return {'role':'assistant','content':'','finish_reason':'stop','tool_calls':[{
+                    'id':'recall', 'type':'function', 'function':{'name':'search_online_tracks',
+                    'arguments':'{"provider":"netease","query":"情歌","page":1}'}}]}, 100
+            body = model.json_value(messages[1]['content'])
+            value = semantic if 'lyrics' in body else {key:semantic for key in body}
+            return {'role':'assistant','content':json.dumps(value),'finish_reason':'stop'}, 500
+        config = {'api_key':'fake','base_url':'https://model.test/v1','model':'fake'}
+        with patch.object(mcp, 'LocalClient', InProcessClient), patch.object(model.ai, 'load_config', return_value=config), \
+             patch.object(model, '_request', side_effect=provider) as calls, \
+             patch.object(service.music, '_search', return_value=[SimpleNamespace(model_dump=lambda t=t:t) for t in tracks]), \
+             patch.object(validation, 'validate', return_value={'checked_at':time.time(), 'identity':True,
+                 'playable':True, 'full':True, 'duration':180, 'reason':'mock full playback'}):
+            runtime.run(rid)
+        row = service.current_run(rid)
+        self.assertEqual(row['status'], 'finished')
+        self.assertEqual(row['request']['parsed']['scene'], '情歌')
+        self.assertEqual(len(row['result']['tracks']), 3)
+        self.assertEqual(row['result']['gap']['count'], 0)
+        self.assertEqual(calls.await_count, 3)
+        self.assertEqual(row['context']['budget']['model_calls'], 3)
+        self.assertEqual(row['context']['budget']['tokens'], 1100)
+        self.assertEqual(row['context']['budget']['search_rounds'], 1)
+        self.assertEqual(budget.usage(row['context']), {'actual':1100, 'reserved':0, 'unconfirmed':0})
 
     def test_feature_cache_invalidates_on_network_model_and_lyrics_changes(self):
         row = self.running()
@@ -588,7 +902,7 @@ class AgentIntegrationTests(unittest.TestCase):
                     "evidence":{"fields":{"vocals":{"confidence":.9},"language":{"confidence":.9},"scene_scores":{"confidence":.9}}}}
         with patch.object(model,"parse",return_value=model.offline_parse("放松",{"target_count":1})),\
              patch.object(model,"complete",side_effect=decision),patch.object(mcp,"LocalClient",InProcessClient),\
-             patch.object(features,"analyze",return_value=analysis),\
+             patch.object(features,"analyze_many",side_effect=lambda rid, tracks, *a, **kw: [(t, analysis) for t in tracks]),\
              patch.object(validation,"validate",return_value={"checked_at":time.time(),"identity":True,"playable":True,"full":True,"duration":180}):
             runtime.run(row["run_id"])
         with library.database() as cursor:
@@ -616,7 +930,7 @@ class AgentIntegrationTests(unittest.TestCase):
                     'evidence': {'fields': {k: {'confidence': .9} for k in ('vocal_role', 'vocals', 'language', 'scene_scores')}}}
         parsed = model.offline_parse('游戏', prefs)
         with patch.object(model, 'parse', return_value=parsed), patch.object(mcp, 'LocalClient', InProcessClient), \
-             patch.object(service.music, '_search', side_effect=search), patch.object(features, 'analyze', side_effect=analyze), \
+             patch.object(service.music, '_search', side_effect=search), patch.object(features, 'analyze_many', side_effect=lambda rid, tracks, *a, **kw: [(t, analyze(rid, t, *a, **kw)) for t in tracks]), \
              patch.object(validation, 'validate', return_value={'checked_at': time.time(), 'identity': True,
                  'playable': True, 'full': True, 'duration': 180}), \
              patch.object(model, 'complete', side_effect=AssertionError('Artist work should be scheduled before generic discovery')):
@@ -664,7 +978,7 @@ class AgentIntegrationTests(unittest.TestCase):
                     "evidence":{"fields":{k:{"confidence":.9} for k in ('vocals','vocal_role','language','scene_scores')}}}
         playlist = {"playlist":{"name":"new"},"tracks":[track],"next_offset":1,"has_more":False,"coverage":{}}
         with patch.object(mcp,'LocalClient',InProcessClient), patch.object(model,'complete',side_effect=AssertionError('search budget exhausted')), \
-             patch.object(platforms_for_test(),'playlist_tracks',return_value=playlist), patch.object(features,'analyze',return_value=analysis), \
+             patch.object(platforms_for_test(),'playlist_tracks',return_value=playlist), patch.object(features,'analyze_many',side_effect=lambda rid, tracks, *a, **kw: [(t, analysis) for t in tracks]), \
              patch.object(validation,'validate',return_value={"checked_at":time.time(),"identity":True,"playable":True,"full":True,"duration":180}):
             runtime.execute_run(row,time.monotonic())
         result=service.current_run(row['run_id'])

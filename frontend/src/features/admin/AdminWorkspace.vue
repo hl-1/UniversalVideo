@@ -140,12 +140,13 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
           <label class="admin-toggle"><span>允许网络检索与分析</span><input v-model="settings.music_agent_network_enabled" type="checkbox" /></label>
           <label>允许来源<select v-model="settings.music_agent_sources" multiple aria-label="场景歌单允许来源"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option><option value="kugou">酷狗音乐</option></select></label>
           <label>模型接口<select v-model="settings.music_agent_api"><option value="auto">自动</option><option value="chat">Chat Completions</option><option value="responses">Responses</option></select></label>
-          <label>模型决策次数<input v-model.number="settings.music_agent_decisions" type="number" min="2" max="12" required /></label>
+          <label>规划调整次数<input v-model.number="settings.music_agent_decisions" type="number" min="2" max="6" required /></label>
+          <label>每任务模型调用上限<input v-model.number="settings.music_agent_model_calls" type="number" min="1" max="40" required /></label>
           <label>每任务网络请求上限<input v-model.number="settings.music_agent_network_requests" type="number" min="160" max="600" required /></label>
           <label>联网搜索轮数<input v-model.number="settings.music_agent_search_rounds" type="number" min="0" max="5" required /></label>
           <label>候选歌曲上限<input v-model.number="settings.music_agent_candidates" type="number" min="1" max="100" required /></label>
           <label>累计执行秒数<input v-model.number="settings.music_agent_seconds" type="number" min="30" max="600" required /></label>
-          <label>模型 Token 上限<input v-model.number="settings.music_agent_tokens" type="number" min="2000" max="200000" required /></label>
+          <label>完整任务 Token 上限<input v-model.number="settings.music_agent_tokens" type="number" min="2000" max="150000" required /></label>
           <label>全局并发数<input v-model.number="settings.music_agent_concurrency" type="number" min="1" max="8" required /></label>
           <h2>账号与业务</h2><label v-for="(label, key) in { registration_enabled: '公开注册', music_enabled: '音乐功能', video_enabled: '视频下载', summary_enabled: 'AI 总结与思维导图', watermark_enabled: '视频去水印' }" :key="key" class="admin-toggle"><span>{{ label }}</span><input v-model="settings[key]" type="checkbox" :aria-label="label" /></label>
           <template v-for="group in aiGroups" :key="group.id">

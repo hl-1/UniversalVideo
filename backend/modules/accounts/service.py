@@ -167,9 +167,9 @@ AI_GROUPS = {"text": ("ai", "LLM", "文字处理"),
              "vision": ("ai_vision", "LLM_VISION", "截图识别"),
              "speech": ("ai_asr", "LLM_ASR", "语音转写")}
 DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
-                        music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=12,
+                        music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=6,
                         music_agent_network_requests=300, music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
-                        music_agent_tokens=200000, music_agent_concurrency=2, music_agent_api="auto")
+                        music_agent_tokens=150000, music_agent_model_calls=40, music_agent_concurrency=2, music_agent_api="auto")
 
 
 def resolve_ai_settings(saved: dict, *, use_environment: bool = True) -> dict:
@@ -274,6 +274,10 @@ def settings(*, use_environment: bool = True) -> dict:
     config = resolve_ai_settings(saved, use_environment=use_environment)
     if row and "music_agent_network_requests" not in saved:
         config["music_agent_network_requests"] = 160
+    # Old stored settings remain readable; new tasks always obey the current ceiling.
+    config["music_agent_tokens"] = min(150000, config["music_agent_tokens"])
+    config["music_agent_decisions"] = min(6, config["music_agent_decisions"])
+    config["music_agent_model_calls"] = min(40, config["music_agent_model_calls"])
     return config
 
 

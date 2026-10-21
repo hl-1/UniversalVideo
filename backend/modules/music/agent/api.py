@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
-from backend.modules.music.agent import auth, mcp, runtime, skill, store
+from backend.modules.music.agent import auth, mcp, model, runtime, skill, store
+from backend.modules.music.agent.scenes import SCENES
+from backend.modules.music.agent.models import POLICY_VERSION
 from backend.modules.music.agent.models import ContinueRun, CreateRun, RESUMABLE, SaveRun
 
 
@@ -18,7 +20,8 @@ router = APIRouter(prefix="/api/music/recommendations",tags=["scene-playlist"])
 def capabilities():
     config = accounts.settings()
     return {"enabled":config["music_agent_enabled"],"network_enabled":config["music_agent_network_enabled"],
-            "sources":config["music_agent_sources"],"skill_version":skill.load()["version"]}
+            "sources":config["music_agent_sources"],"skill_version":skill.load()["version"], "scenes":SCENES,
+            "limits":{"tokens":config["music_agent_tokens"], "model_calls":config["music_agent_model_calls"]}}
 
 
 @router.post("",status_code=201)
@@ -61,6 +64,8 @@ def continue_run(run_id:str,payload:ContinueRun):
         row = store.get(cursor,run_id,uid,lock=True)
         if row["status"] not in RESUMABLE:
             raise HTTPException(409,"当前任务不可继续，请创建重试任务")
+        if row["policy_version"] != POLICY_VERSION or row["context"].get("model_stop"):
+            raise HTTPException(409,"旧版策略或模型用量待确认的任务不可继续，请重新生成新任务")
         cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE AND status IN ('pending','running')",(uid,))
         if cursor.fetchone()["n"]:
             raise HTTPException(409,"已有任务正在执行")
@@ -83,6 +88,7 @@ def cancel_run(run_id:str):
         row = store.get(cursor,run_id,accounts.current().id,lock=True)
         if row["status"] in {"pending","running",*RESUMABLE}:
             row = store.update(cursor,row,status="cancelled",worker_id=None,lease_until=None,context=row["context"] | {"message":"已取消"})
+    model.cancel(run_id)
     return store.public(row)
 
 
@@ -140,6 +146,7 @@ def delete_run(run_id:str,admin=False):
         row = store.get(cursor,run_id,None if admin else accounts.current().id,lock=True)
         store.update(cursor,row,deleted=True,status="cancelled" if row["status"] in {"pending","running",*RESUMABLE} else row["status"],
                      worker_id=None,lease_until=None)
+    model.cancel(run_id)
     return {"ok":True}
 
 

@@ -15,7 +15,11 @@ type RecommendedTrack = MusicTrack & { key: string; reason: string; source: { la
     evidence: { fields?: Record<string, FeatureEvidence>; lyrics?: FeatureEvidence; audio?: FeatureEvidence } } }
 type Run = { run_id: string; status: string; request: { need: string; preferences: Record<string, unknown>; parsed?: Record<string, any> };
   result_version: number; saved_playlist_id: string | null; saved_at: number | null; created_at: number;
-  progress: { message: string; waiting_reason?: string; budget: Record<string, number> };
+  progress: { message: string; waiting_reason?: string; budget: Record<string, number>; current_song?: string;
+    counts?: { candidates: number; analyzed: number; evaluated: number; qualified: number };
+    usage?: { actual: number; reserved: number; unconfirmed: number; legacy?: boolean };
+    limits?: { tokens: number; model_calls: number; seconds: number };
+    preview?: Array<{ key: string; title: string; artist: string }> };
   steps: Array<{ tool: string; count: number; at: number; error?: { message: string } }>;
   result: { title?: string; tracks?: RecommendedTrack[]; duration_seconds?: number; gap?: { primary: string; count: number; seconds: number };
     coverage?: { artists?: Array<{ artist: string; evaluated_count: number; candidate_count: number; qualified_count: number; status: string; reasons?: string[] }>; personal_total?: number; personal_checked_until?: number; online_playlists?: Record<string, { name: string; checked_until: number; playlist_total?: number; returned_by_provider?: number; truncated_by_provider?: boolean }> };
@@ -24,9 +28,10 @@ const props = defineProps<{ active: boolean; downloadActive?: boolean }>()
 const emit = defineEmits<{ openPlaylist: [id: string]; batchCreated: [id: string] }>()
 const need = ref('')
 const preferencesOpen = ref(false)
-const defaultPreferences = { vocals: 'allowed', language: '', exclusions: '', target_count: 20, target_duration_minutes: 60,
+const defaultPreferences = { scene: '', vocals: 'allowed', language: '', exclusions: '', target_count: 20, target_duration_minutes: 60,
   source_mode: 'personal_first', network_allowed: true, goal: 'count', full_playback_required: true }
 const values = ref({ ...defaultPreferences })
+const effectiveNeed = computed(() => need.value.trim() || values.value.scene)
 const changed = ref(new Set<string>())
 const run = ref<Run | null>(null)
 const history = ref<Run[]>([])
@@ -35,7 +40,7 @@ const page = ref(1)
 const total = ref(0)
 const busy = ref(false)
 const error = ref('')
-const capability = ref<{ enabled: boolean; network_enabled: boolean } | null>(null)
+const capability = ref<{ enabled: boolean; network_enabled: boolean; scenes: string[] } | null>(null)
 const saveDialog = ref<{ version: number; id: string; name: string } | null>(null)
 const detail = ref<RecommendedTrack | null>(null)
 const historyLoading = ref(false)
@@ -110,7 +115,8 @@ watch(() => run.value?.run_id, () => { checked.value.clear(); lyricTrack.value =
 function preferencePayload() {
   const result: Record<string, unknown> = {}
   for (const key of changed.value) {
-    if (key === 'language') result.languages = values.value.language ? [values.value.language] : []
+    if (key === 'scene') result.scene = values.value.scene || null
+    else if (key === 'language') result.languages = values.value.language ? [values.value.language] : []
     else if (key === 'exclusions') result.exclusions = values.value.exclusions.split(/[,，;；\n]/).map(s => s.trim()).filter(Boolean)
     else result[key] = values.value[key as keyof typeof values.value]
   }
@@ -118,6 +124,7 @@ function preferencePayload() {
 }
 function reflectParsedPreferences(parsed: Record<string, any>) {
   for (const key of Object.keys(values.value)) {
+    if (key === 'scene') continue
     if (changed.value.has(key)) continue
     if (key === 'language') values.value.language = parsed.languages?.[0] || ''
     else if (key === 'exclusions') values.value.exclusions = (parsed.exclusions || []).join('，')
@@ -139,7 +146,8 @@ async function selectRun(item: Run) {
   changed.value.clear()
   const saved = item.request.preferences
   for (const key of Object.keys(saved)) {
-    if (key === 'languages') { values.value.language = (saved.languages as string[])[0] || ''; changed.value.add('language') }
+    if (key === 'scene') { values.value.scene = String(saved.scene || ''); changed.value.add('scene') }
+    else if (key === 'languages') { values.value.language = (saved.languages as string[])[0] || ''; changed.value.add('language') }
     else if (key === 'exclusions') { values.value.exclusions = (saved.exclusions as string[]).join('，'); changed.value.add('exclusions') }
     else if (key in values.value) { (values.value as Record<string, unknown>)[key] = saved[key]; changed.value.add(key) }
   }
@@ -148,9 +156,9 @@ async function selectRun(item: Run) {
   catch (failure) { fail(failure) }
 }
 async function create(retry = false) {
-  if (busy.value || active.value || !need.value.trim()) return
+  if (busy.value || active.value || !effectiveNeed.value) return
   busy.value = true; error.value = ''
-  const payload = { need: need.value.trim(), preferences: preferencePayload() }
+  const payload = { need: effectiveNeed.value, preferences: preferencePayload() }
   const signature = JSON.stringify({ payload, parent: retry ? run.value?.run_id : null })
   if (!submission || submission.signature !== signature) submission = { signature, key: crypto.randomUUID() }
   try {
@@ -206,7 +214,7 @@ async function play(track: RecommendedTrack) {
   try { await playTrack(track, tracks.value) } catch (failure) { fail(failure) }
 }
 async function poll() {
-  if (disposed || polling || !props.active || !active.value || !run.value) return
+  if (disposed || polling || !props.active || (!active.value && !run.value?.progress.usage?.reserved) || !run.value) return
   polling = true
   const id = run.value.run_id, revision = selection
   try { const latest = await api<Run>(`/api/music/recommendations/${id}`); if (!disposed && revision === selection) { run.value = latest; if (!['pending', 'running'].includes(latest.status)) await loadHistory() } }
@@ -219,7 +227,7 @@ async function initialize() {
 }
 watch(() => props.active, value => { if (value) { void initialize(); void poll() } })
 watch(() => run.value?.request.parsed, parsed => { if (parsed) reflectParsedPreferences(parsed) })
-onMounted(() => { if (props.active) void initialize(); timer = window.setInterval(() => { void poll() }, 2500) })
+onMounted(() => { if (props.active) void initialize(); timer = window.setInterval(() => { void poll() }, 1000) })
 onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
 </script>
 
@@ -228,8 +236,9 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
     <div class="scene-toolbar"><span v-if="capability && !capability.enabled" class="scene-state">场景歌单已关闭</span><button class="mc-command" @click="historyOpen = !historyOpen; loadHistory()"><History :size="17" />历史记录</button></div>
     <p v-if="error" class="mc-error" role="alert">{{ error }}</p>
     <form class="scene-form" @submit.prevent="create(!!run)">
-      <label class="scene-need">听歌需求<textarea v-model="need" required maxlength="1000" rows="2" placeholder="工作时听" :disabled="active" /></label>
-      <div class="scene-form-actions"><button class="mc-command" type="button" :aria-expanded="preferencesOpen" @click="preferencesOpen = !preferencesOpen"><Settings2 :size="17" />偏好设置<ChevronDown :size="15" /></button><button class="mc-command primary" :disabled="busy || active || !need.trim() || !capability?.enabled"><LoaderCircle v-if="busy || active" class="spin" :size="17" /><Sparkles v-else :size="17" />{{ run ? '重新生成' : '生成歌单' }}</button></div>
+      <label class="scene-need">听歌需求<textarea v-model="need" :required="!values.scene" maxlength="1000" rows="2" placeholder="例如：谈恋爱时听，想要甜蜜的，不要失恋主题" :disabled="active" /></label>
+      <label class="scene-select">场景<select v-model="values.scene" :disabled="active" @change="changed.add('scene')"><option value="">根据描述识别</option><option v-for="scene in capability?.scenes" :key="scene" :value="scene">{{ scene }}</option></select></label>
+      <div class="scene-form-actions"><button class="mc-command" type="button" :aria-expanded="preferencesOpen" @click="preferencesOpen = !preferencesOpen"><Settings2 :size="17" />偏好设置<ChevronDown :size="15" /></button><button class="mc-command primary" :disabled="busy || active || !effectiveNeed || !capability?.enabled"><LoaderCircle v-if="busy || active" class="spin" :size="17" /><Sparkles v-else :size="17" />{{ run ? '重新生成' : '生成歌单' }}</button></div>
       <div v-if="preferencesOpen" class="scene-preferences">
         <label>人声<select v-model="values.vocals" :disabled="active" @change="changed.add('vocals')"><option value="allowed">允许人声</option><option value="instrumental">纯音乐</option></select></label>
         <label>语言<select v-model="values.language" :disabled="active" @change="changed.add('language')"><option>中文</option><option>英文</option><option>日文</option><option>韩文</option><option value="">不限</option></select></label>
@@ -245,14 +254,20 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
     <section v-if="run" class="scene-run">
       <header class="scene-run-header"><div><span class="scene-state" :data-status="run.status">{{ statuses[run.status] }}</span><span class="scene-date">{{ new Date(run.created_at * 1000).toLocaleString() }}</span></div><div class="scene-actions"><button v-if="active" class="mc-command" :disabled="busy" @click="action('cancel')"><CircleStop :size="17" />取消</button><button v-if="resumable" class="mc-command" :disabled="busy || !capability?.enabled" @click="action('continue')"><RefreshCw :size="17" />继续任务</button><button class="mc-icon" title="删除任务" aria-label="删除任务" :disabled="busy" @click="remove(run)"><Trash2 :size="17" /></button></div></header>
       <p class="scene-message" role="status"><LoaderCircle v-if="active" class="spin" :size="16" />{{ run.progress.message }}</p>
-      <p v-if="run.progress.budget" class="scene-budget">已用 {{ duration(run.progress.budget.seconds) }} · {{ run.progress.budget.tools || 0 }} 次操作 · {{ run.progress.budget.network_requests || 0 }} 次网络请求 · {{ run.progress.budget.tokens || 0 }} 模型 tokens</p>
+      <div class="scene-progress" aria-live="polite">
+        <p v-if="run.progress.current_song && active">当前歌曲：{{ run.progress.current_song }}</p>
+        <p v-if="run.progress.counts">候选 {{ run.progress.counts.candidates }} 首 · 已分析 {{ run.progress.counts.analyzed }} 首 · 已评估 {{ run.progress.counts.evaluated }} 首 · 合格 {{ run.progress.counts.qualified }} 首</p>
+        <p v-if="run.progress.usage" class="scene-budget">已确认 {{ run.progress.usage.actual.toLocaleString() }} / {{ (run.progress.limits?.tokens || 150000).toLocaleString() }} tokens · 执行中预留 {{ run.progress.usage.reserved.toLocaleString() }} · 待确认占用 {{ run.progress.usage.unconfirmed.toLocaleString() }}<span v-if="run.progress.usage.legacy"> · 旧版任务记录</span></p>
+        <p v-if="run.progress.budget" class="scene-budget">{{ run.progress.budget.model_calls || 0 }} / {{ run.progress.limits?.model_calls || 40 }} 次模型请求 · {{ run.progress.budget.network_requests || 0 }} 次网络请求 · 已用 {{ duration(run.progress.budget.seconds) }}</p>
+        <div v-if="active && run.progress.preview?.length" class="scene-preview"><strong>已找到合格歌曲，正在补足歌单</strong><p v-for="track in run.progress.preview" :key="track.key">{{ track.title }} · {{ track.artist }}</p></div>
+      </div>
       <div v-if="run.request.parsed" class="scene-parsed"><span>{{ run.request.parsed.scene }}</span><span v-if="run.request.parsed.preferred_artists?.length">优先歌手：{{ run.request.parsed.preferred_artists.join('、') }}</span><span>{{ run.request.parsed.vocals === 'instrumental' ? '纯音乐' : '允许人声' }}</span><span>{{ run.request.parsed.languages.join('、') || '语言不限' }}</span><span>{{ run.request.parsed.target_count }} 首 / {{ run.request.parsed.target_duration_minutes }} 分钟</span><span>{{ ({ personal_first: '个人库优先', personal_only: '仅个人库', discover: '探索新歌' } as Record<string, string>)[run.request.parsed.source_mode] }}</span><span v-if="!run.request.parsed.network_allowed">禁止新增网络请求</span><span v-if="run.request.parsed.exclusions.length">排除：{{ run.request.parsed.exclusions.join('、') }}</span><span v-if="run.request.parsed.excluded_themes?.length">排除主题：{{ run.request.parsed.excluded_themes.join('、') }}</span></div>
       <details v-if="run.steps.length" class="scene-steps"><summary>执行记录 · {{ run.steps.length }}</summary><ol><li v-for="(step, index) in run.steps" :key="index"><time>{{ new Date(step.at * 1000).toLocaleTimeString() }}</time><span>{{ tools[step.tool] || step.tool }} · {{ step.count }} 项</span><small v-if="step.error">{{ step.error.message }}</small></li></ol></details>
       <template v-if="run.result.title">
         <div class="scene-result-heading"><div><h2>{{ run.result.title }}</h2><span>{{ tracks.length }} 首 · {{ duration(run.result.duration_seconds) }}</span></div><div class="scene-actions"><button class="mc-command" :disabled="!tracks.length" @click="play(tracks[0]!)"><Play :size="17" />播放全部</button><button v-if="run.saved_playlist_id" class="mc-command" @click="emit('openPlaylist', run.saved_playlist_id)">查看已保存歌单</button><button v-else class="mc-command primary" :disabled="!tracks.length || !!run.saved_at || busy" @click="saveDialog = { id: run.run_id, version: run.result_version, name: run.result.title || '' }"><Save :size="17" />确认保存</button></div></div>
         <p v-if="run.status === 'partial' && run.result.gap && (run.result.gap.primary === 'duration' ? run.result.gap.seconds > 0 : run.result.gap.count > 0)" class="scene-gap">{{ run.result.gap.primary === 'duration' ? `距离目标时长还差 ${duration(run.result.gap.seconds)}` : `距离目标还差 ${run.result.gap.count} 首` }}</p>
         <p v-if="run.saved_at && !run.saved_playlist_id" class="scene-gap">已保存的歌单已删除</p>
-        <p v-if="run.status === 'partial'" class="scene-gap">{{ run.result.notice }} <button class="mc-command" :disabled="busy" @click="fillMissing">补齐剩余歌曲</button></p>
+        <p v-if="run.status === 'partial'" class="scene-gap">{{ run.result.notice }} <button class="mc-command" :disabled="busy" @click="fillMissing">新建任务补齐</button></p>
         <div class="scene-actions scene-downloads">
           <button class="mc-command" :disabled="!downloadable.length" @click="toggleAll">{{ checked.size === downloadable.length && downloadable.length ? '取消选择' : '全选在线歌曲' }}</button>
           <select v-model="audioFormat" aria-label="下载格式" :disabled="downloadBusy"><option value="mp3">MP3</option><option value="m4a">M4A</option></select>
@@ -287,6 +302,11 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
 .scene-need { display: grid; gap: 9px; font-size: 14px; font-weight: 600; }
 .scene-need textarea { box-sizing: border-box; resize: vertical; width: 100%; min-height: 92px; max-height: 250px; border: 1px solid var(--mc-border, #dce1df); border-radius: 6px; padding: 14px; font: inherit; background: var(--mc-surface, #fff); color: inherit; }
 .scene-form-actions { margin-top: 12px; }
+.scene-select { display: flex; gap: 12px; align-items: center; margin-top: 14px; font-size: 13px; }
+.scene-select select { padding: 8px 12px; color: inherit; background: var(--mc-surface); border: 1px solid var(--mc-border); border-radius: 5px; }
+.scene-progress { padding: 12px 16px; border: 1px solid var(--mc-border); border-radius: 8px; background: var(--mc-surface); font-size: 13px; }
+.scene-progress p { line-height: 1.7; margin: 6px 0; }
+.scene-preview { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--mc-border); }
 .scene-preferences { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-top: 22px; }
 .scene-preferences label { display: grid; gap: 7px; font-size: 13px; }
 .scene-preferences input:not([type=checkbox]),.scene-preferences select { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--mc-border, #dce1df); border-radius: 4px; font: inherit; background: var(--mc-surface, #fff); color: inherit; }
@@ -302,7 +322,7 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
 .scene-state[data-status=failed],.scene-gap { color: #ac542f; }
 .scene-date,.scene-result-heading span,.scene-result-notice { font-size: 12px; opacity: .65; margin-left: 12px; }
 .scene-message { display: flex; align-items: center; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
-.scene-budget { font-size: 12px; opacity: .65; overflow-wrap: anywhere; }
+.scene-budget { font-size: 12px; color: inherit; overflow-wrap: anywhere; }
 .scene-parsed { display: flex; gap: 8px 18px; flex-wrap: wrap; font-size: 12px; opacity: .75; line-height: 1.8; }
 .scene-steps { margin: 18px 0; font-size: 13px; }
 .scene-steps summary { cursor: pointer; }

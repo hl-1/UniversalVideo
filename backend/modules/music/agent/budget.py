@@ -1,11 +1,101 @@
 from __future__ import annotations
 
 import time
+import secrets
 
 from fastapi import HTTPException
 
 from backend.modules.music import library
 from backend.modules.music.agent import store
+from backend.modules.music.agent.faults import ModelFault, ModelOutputError
+from backend.modules.music.agent.models import POLICY_VERSION
+
+
+TOKEN_LIMIT = 150000
+MODEL_CALL_LIMIT = 40
+SAFETY_TOKENS = 5000
+
+
+def usage(context):
+    ledger = context.get("model_requests", [])
+    return {"actual": context.get("actual_tokens", 0),
+            "reserved": sum(r["reserved"] for r in ledger if r["state"] == "in_flight"),
+            "unconfirmed": sum(r["reserved"] for r in ledger if r["state"] == "unconfirmed")}
+
+
+def reserve(run_id, amount, phase, signature, deadline, correction=False):
+    """Serialize admission with every other request and cancellation for this task."""
+    with library.database() as cursor:
+        row = store.get(cursor, run_id, lock=True)
+        if row["status"] != "running" or not row["lease_until"] or row["lease_until"] <= time.time():
+            raise HTTPException(409, "任务已停止")
+        ctx = row["context"]
+        if row["policy_version"] != POLICY_VERSION:
+            raise ModelFault("旧版任务不能继续付费调用，请重新生成")
+        ledger = list(ctx.get("model_requests", []))
+        totals = usage(ctx)
+        if ctx.get("model_stop") or totals["unconfirmed"]:
+            raise ModelFault("模型用量待确认或调用已停止，请查看任务结果")
+        if totals["reserved"]:
+            raise ModelFault("当前任务已有模型请求正在执行")
+        limits = ctx["limits"]
+        used = dict(ctx.get("budget", {}))
+        call_limit = min(MODEL_CALL_LIMIT, limits.get("model_calls", MODEL_CALL_LIMIT))
+        if used.get("model_calls", 0) >= call_limit:
+            raise BudgetExceeded(f"已达到模型调用{call_limit}次上限", "model_calls")
+        if phase == "planning" and used.get("decisions", 0) >= min(6, limits.get("decisions", 6)):
+            raise BudgetExceeded("已达到规划调整次数上限", "decisions")
+        previous = [r for r in ledger if r["signature"] == signature and r["phase"] == phase]
+        if previous and not correction:
+            raise ModelFault("相同输入已执行过模型调用，已阻止重复请求")
+        if correction and (used.get("corrections", 0) >= 2 or any(r.get("correction") for r in previous)):
+            raise ModelOutputError("模型格式纠错次数已用完，已停止调用")
+        limit = min(TOKEN_LIMIT, limits.get("tokens", TOKEN_LIMIT))
+        margin = min(SAFETY_TOKENS, limit // 30)
+        if sum(totals.values()) + amount + margin > limit:
+            raise BudgetExceeded("剩余 token 不足以安全执行下一次模型请求", "tokens")
+        request = {"id": secrets.token_hex(16), "phase": phase, "signature": signature,
+                   "reserved": amount, "started_at": time.time(), "deadline": deadline,
+                   "state": "in_flight", "actual": None, "correction": correction}
+        used["model_calls"] = used.get("model_calls", 0) + 1
+        if phase == "planning":
+            used["decisions"] = used.get("decisions", 0) + 1
+        if correction:
+            used["corrections"] = used.get("corrections", 0) + 1
+        store.update(cursor, row, context=ctx | {"budget": used, "model_requests": ledger + [request],
+                     "stage": phase, "message": {"parse": "正在理解听歌需求", "planning": "正在调整检索方案",
+                         "semantic": "正在分析歌词与场景适配"}.get(phase, "正在执行模型请求")})
+        return request
+
+
+def settle(run_id, request_id, actual=None, error=None):
+    """Accounting alone may finish after cancellation/lease change, exactly once."""
+    marker = store.execution_lease.set(None)
+    try:
+        with library.database() as cursor:
+            row = store.get(cursor, run_id, lock=True, include_deleted=True)
+            ctx = row["context"]
+            ledger = [dict(r) for r in ctx.get("model_requests", [])]
+            request = next((r for r in ledger if r["id"] == request_id), None)
+            if not request or request["state"] == "settled":
+                return
+            if actual is None and request["state"] == "unconfirmed":
+                return
+            request.update(state="settled" if actual is not None else "unconfirmed", actual=actual,
+                           settled_at=time.time(), error=error)
+            confirmed = ctx.get("actual_tokens", 0) + (actual if actual is not None else 0)
+            used = dict(ctx.get("budget", {})) | {"tokens": confirmed}
+            updated = ctx | {"model_requests": ledger, "actual_tokens": confirmed, "budget": used}
+            if actual is None or error:
+                updated["model_stop"] = error or "模型用量未确认，已停止后续调用"
+            elif actual > request["reserved"] or confirmed > min(TOKEN_LIMIT, ctx["limits"].get("tokens", TOKEN_LIMIT)):
+                updated["model_stop"] = "模型实际用量超过预留或任务上限，已如实记账并停止调用"
+            changes = {"context": updated}
+            if row["result"]:
+                changes["result"] = row["result"] | {"budget": used}
+            store.update(cursor, row, **changes)
+    finally:
+        store.execution_lease.reset(marker)
 
 
 class BudgetExceeded(RuntimeError):

@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from backend.modules.music.agent import auth, service
+from backend.modules.music.agent.faults import ModelFault
 
 
 server = FastMCP("VideoDream Music", stateless_http=True, json_response=True,
@@ -127,6 +128,8 @@ class LocalClient:
                 response = await session.call_tool(name,arguments or {})
                 if response.isError:
                     message = " ".join(c.text for c in response.content if c.type=="text")
+                    if name in auth.READ_TOOLS:
+                        raise ModelFault("模型工具参数或执行协议错误，已停止调用")
                     raise RuntimeError(message[:500])
                 if response.structuredContent:
                     return response.structuredContent
