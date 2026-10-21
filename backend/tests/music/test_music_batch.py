@@ -13,7 +13,7 @@ from backend import application
 from backend.infrastructure import audio
 from backend.modules.music import library
 from backend.modules.music import batch as music_batch
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.video import downloads as video_downloads
 from backend.modules.video import tasks as video_tasks
 from backend.modules.music import sources as music
@@ -23,8 +23,13 @@ from backend.tests.support import domain_app
 class MusicBatchTests(unittest.TestCase):
     def setUp(self):
         self.work = tempfile.TemporaryDirectory()
-        self.directory = Path(self.work.name)
-        self.directory_patch = patch.object(paths, 'DOWNLOAD_DIR', self.directory)
+        self.storage_root = Path(self.work.name)
+        self.directory = self.storage_root / "users" / "1" / "files"
+        self.directory.mkdir(parents=True)
+        owner_patch = patch.object(storage, "owner", side_effect=lambda uid=None: uid or 1)
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        self.directory_patch = patch.object(paths, 'DOWNLOAD_DIR', self.storage_root)
         self.directory_patch.start()
         self.executor_patch = patch.object(video_tasks.music_batch_executor, "submit")
         self.submit = self.executor_patch.start()

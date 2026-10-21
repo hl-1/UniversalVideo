@@ -157,7 +157,8 @@ class SpeechSummaryTests(unittest.TestCase):
         info = {"title": "第11集", "duration": 120, "webpage_url": task.url}
         def extract(url, **kwargs):
             return kwargs["speech_fallback"](info)
-        with patch.object(video_subtitles, '_extract_summary_source', side_effect=extract), patch.object(video_parse_cache, '_get_sniff_cache', return_value=None), \
+        with tempfile.TemporaryDirectory() as working, patch.object(video_summary.storage, "directory", return_value=Path(working)), \
+                patch.object(video_subtitles, '_extract_summary_source', side_effect=extract), patch.object(video_parse_cache, '_get_sniff_cache', return_value=None), \
                 patch.object(speech, "transcribe_video", return_value=rows) as transcribe, \
                 patch.object(video_summary, '_generate_ai_summary', return_value="## 概览\n工具安装") as summary, \
                 patch.object(video_summary, '_save_summary_files', side_effect=lambda task, result: result):

@@ -20,7 +20,7 @@ from backend import application
 from backend.infrastructure import browser_sessions as browser_session_store
 from backend.infrastructure import database as database_store
 from backend.infrastructure import network
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.video import tasks as video_tasks
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
@@ -173,6 +173,90 @@ class AccountIntegrationTests(unittest.TestCase):
         a_tracks = self.a.get('/api/library/tracks?view=downloads').json()['tracks']
         b_tracks = self.b.get('/api/library/tracks?view=downloads').json()['tracks']
         self.assertNotEqual(a_tracks[0]['id'], b_tracks[0]['id'])
+
+    def test_media_cookie_supports_native_playback_head_and_range_but_not_business(self):
+        filename = self.import_audio(self.a)
+        self.assertTrue(storage.path('file', filename, uid=self.a_id).is_file())
+        self.a.headers.pop('Authorization')
+        self.b.headers.pop('Authorization')
+        url = '/api/files/' + filename
+        response = self.a.get(url, headers={'Range': 'bytes=0-31'})
+        self.assertEqual(response.status_code, 206, response.text)
+        self.assertEqual(len(response.content), 32)
+        self.assertIn('inline', response.headers['content-disposition'])
+        self.assertEqual(self.a.head(url).status_code, 200)
+        self.assertEqual(self.a.head(url).content, b'')
+        self.assertEqual(self.b.get(url).status_code, 404)
+        self.assertEqual(self.a.get('/api/library').status_code, 401)
+        self.assertEqual(self.a.delete('/api/workspace/resources/file/' + filename).status_code, 401)
+        self.assertEqual(self.a.get(url, headers={'Authorization': 'Bearer invalid'}).status_code, 401)
+        self.assertIn('attachment', self.a.get(url + '?download=1').headers['content-disposition'])
+        self.assertEqual(self.a.get(url, headers={'Range': 'bytes=999999-'}).status_code, 416)
+
+    def test_media_jwt_has_separate_audience_and_refresh_does_not_extend_session(self):
+        token = self.a.cookies.get(accounts.MEDIA_COOKIE)
+        claims = jwt.decode(token, accounts.signing_key(), algorithms=['HS256'], audience=accounts.MEDIA_AUDIENCE, issuer='videodream')
+        self.assertEqual(claims['sub'], str(self.a_id))
+        self.assertEqual(self.a.get('/api/library', headers={'Authorization': 'Bearer ' + token}).status_code, 401)
+        accounts.redis_client().expire(accounts.session_key(claims['sid']), 90)
+        self.a.post('/api/auth/refresh').raise_for_status()
+        refreshed = jwt.decode(self.a.cookies.get(accounts.MEDIA_COOKIE), accounts.signing_key(), algorithms=['HS256'], audience=accounts.MEDIA_AUDIENCE, issuer='videodream')
+        self.assertLessEqual(refreshed['exp'] - int(time.time()), 90)
+        # Rotating the refresh secret does not revoke an already-issued media JWT.
+        accounts.authenticate(token, audience=accounts.MEDIA_AUDIENCE)
+
+    def test_cookie_playback_revokes_on_logout_and_fails_closed_on_redis_outage(self):
+        filename = self.import_audio(self.a)
+        old = self.a.cookies.get(accounts.MEDIA_COOKIE)
+        self.a.headers.pop('Authorization')
+        with patch.object(accounts, 'redis_client', side_effect=redis.ConnectionError('offline')):
+            self.assertEqual(self.a.get('/api/files/' + filename).status_code, 503)
+        self.a.post('/api/auth/logout').raise_for_status()
+        self.assertIsNone(self.a.cookies.get(accounts.MEDIA_COOKIE))
+        replay = self.anonymous()
+        replay.cookies.set(accounts.MEDIA_COOKIE, old, path='/api/')
+        self.assertEqual(replay.get('/api/files/' + filename).status_code, 401)
+
+    def test_admin_deletion_removes_original_user_file_only(self):
+        first, second = self.import_audio(self.a), self.import_audio(self.b)
+        self.admin.delete('/api/admin/data/file/' + first).raise_for_status()
+        self.assertFalse(storage.path('file', first, uid=self.a_id).exists())
+        self.assertTrue(storage.path('file', second, uid=self.b_id).exists())
+
+    def test_storage_migration_cli_and_rollback_preserve_new_files_and_urls(self):
+        import runpy
+        import sys
+        from backend.infrastructure import storage_migration
+        original = self.import_audio(self.a)
+        storage.path('file', original, uid=self.a_id).replace(self.root / original)
+        script = paths.ROOT_DIR / 'scripts' / 'migrate-user-storage.py'
+        with tempfile.TemporaryDirectory() as working, patch.object(paths, 'RUN_DIR', Path(working)):
+            manifest = Path(working) / 'manifest.json'
+            def command(action, name=manifest):
+                arguments = [str(script), action, '--manifest', str(name)]
+                if action in {'apply', 'rollback'}:
+                    arguments.append('--offline-confirmed')
+                with patch.object(sys, 'argv', arguments):
+                    runpy.run_path(str(script), run_name='__main__')
+            command('plan')
+            command('apply')
+            self.assertEqual(self.a.get('/api/files/' + original).status_code, 200)
+            data = json.loads(manifest.read_text())
+            backup = Path(data['backup_path'])
+            self.assertTrue((backup / 'database.sql').is_file())
+            self.assertTrue((backup / 'downloads.zip').is_file())
+            newer = self.import_audio(self.b)
+            command('rollback')
+            self.assertTrue((self.root / original).is_file())
+            self.assertTrue((self.root / newer).is_file())
+            with accounts.database() as cursor:
+                cursor.execute('SELECT id FROM account_migrations WHERE id=%s', (storage_migration.VERSION,))
+                self.assertIsNone(cursor.fetchone())
+            replacement = Path(working) / 'reapply.json'
+            command('plan', replacement)
+            command('apply', replacement)
+            self.assertEqual(self.a.get('/api/files/' + original).status_code, 200)
+            self.assertEqual(self.b.get('/api/files/' + newer).status_code, 200)
 
     def test_profile_theme_and_images_are_private(self):
         from PIL import Image

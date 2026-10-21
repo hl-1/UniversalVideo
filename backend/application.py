@@ -31,6 +31,7 @@ from backend.modules.video import api as video_api
 from backend.modules.video import files as video_files
 from backend.modules.video import preview as video_preview
 from backend.modules.video import tasks as video_tasks
+from backend.modules.video import bilibili_session
 app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan)
 
 
@@ -92,6 +93,7 @@ def frontend_endpoint() -> FileResponse:
         raise HTTPException(404, "前端尚未构建，请在 frontend 目录执行 npm run build。")
     return FileResponse(index)
 accounts.cancel_callbacks.append(video_tasks.cancel_user_tasks)
+accounts.cancel_callbacks.append(bilibili_session.disconnect)
 accounts.cancel_callbacks.append(browser_session_store.sessions.cancel_user)
 accounts.cancel_callbacks.append(music_agent_runtime.cancel_user)
 

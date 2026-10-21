@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { downloadUrl } from '../../shared/media'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, Palette, RefreshCw } from 'lucide-vue-next'
 import MusicWorkspace from './MusicWorkspace.vue'
@@ -119,7 +120,7 @@ async function search(text = query.value, provider = source.value) {
 async function download(track: MusicTrack) {
   if (track.local_url) {
     const anchor = document.createElement('a')
-    anchor.href = track.local_url
+    anchor.href = downloadUrl(track.local_url)
     anchor.download = track.filename || track.title
     anchor.click()
     return

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
 
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.watermark import api as watermark
 from backend.infrastructure.runtime import executable_name
 
@@ -18,7 +18,13 @@ from backend.infrastructure.runtime import executable_name
 class WatermarkTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.directory.name)
+        self.storage_root = Path(self.directory.name)
+        self.root = self.storage_root / "users" / "1" / "files"
+        self.root.mkdir(parents=True)
+        for mocked in (patch.object(paths, "DOWNLOAD_DIR", self.storage_root),
+                       patch.object(storage, "owner", side_effect=lambda uid=None: uid or 1)):
+            mocked.start()
+            self.addCleanup(mocked.stop)
         self.path_patch = patch.object(watermark, "DOWNLOAD_DIR", self.root)
         self.path_patch.start()
         self.source = self.root / "source.mp4"
@@ -145,7 +151,7 @@ class WatermarkTests(unittest.TestCase):
             killed.set()
 
         def progress():
-            (self.root / "running.source.watermark-removed.part.mp4").write_bytes(b"incomplete")
+            storage.path("temp", "running.source.watermark-removed.part.mp4", uid=1).write_bytes(b"incomplete")
             started.set()
             killed.wait(3)
             yield "out_time_us=10000\n"
@@ -161,6 +167,7 @@ class WatermarkTests(unittest.TestCase):
             watermark.cancel_watermark(job.task_id)
             worker.join(3)
             self.assertFalse(worker.is_alive())
+        self.assertFalse(storage.path("temp", "running.source.watermark-removed.part.mp4", uid=1).exists())
         self.assertTrue(killed.is_set())
         self.assertEqual(job.status, "cancelled")
         self.assertEqual(list(self.root.iterdir()), [self.source])

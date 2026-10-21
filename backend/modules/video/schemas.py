@@ -24,6 +24,7 @@ class SummaryRequest(BaseModel):
     url: HttpUrl
     parse_record_id: str | None = Field(default=None, max_length=64)
     generate_mind_map: bool = False
+    bilibili_subtitle_policy: Literal["prompt", "speech"] = "prompt"
 
 
 class PreviewRequest(BaseModel):

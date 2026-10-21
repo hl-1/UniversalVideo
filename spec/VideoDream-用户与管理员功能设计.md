@@ -1,8 +1,10 @@
 # VideoDream 用户与管理员功能设计
 
-版本：v1.0 最终设计稿  
-日期：2026-10-10  
-状态：待实现
+版本：v1.1
+
+日期：2026-10-21
+
+状态：功能实现与维护规格；云端用户目录须在发布时离线迁移
 
 ## 1. 设计目标
 
@@ -37,6 +39,7 @@
 | --- | --- |
 | Access Token | JWT，有效期 15 分钟，前端保存在内存，通过 `Authorization: Bearer` 发送 |
 | Refresh Token | 高熵随机凭证，有效期 7 天，放入 `HttpOnly` Cookie，服务端仅保存摘要 |
+| 媒体 Cookie | `videodream_media`，签名 JWT，受众 `videodream-media`，有效期不超过 Redis 会话剩余时间；只允许指定媒体读取路由 |
 | Redis | 保存登录会话、刷新凭证摘要、用户会话索引及登录限流计数，使用 TTL 自动过期 |
 | MySQL | 保存用户、密码摘要、角色、账号状态、业务数据、系统配置和关键操作日志 |
 
@@ -91,3 +94,91 @@ Redis 无新增或修改的 key、值结构、TTL、读写或失效规则；AI �
 ## 10. 验收标准
 
 使用两个普通用户和一个超级管理员验证：用户数据互不可见，普通用户无法调用管理接口，管理员可以管理全部业务数据；JWT 过期可刷新，旧刷新凭证不可重复使用，退出、停用及降级有效，Redis 故障不能绕过认证。现有音乐、下载、总结和去水印功能保持可用，越权访问或撤销失效必须阻断发布。
+
+## 11. 云端媒体鉴权与播放修复（2026-10-21）
+
+云端已下载文件出现 `/api/files/…m4a` 返回 401；列表和歌词正常不代表媒体请求带有有效凭证。普通业务 fetch 添加 Bearer，而原生音视频、图片和下载链接曾依赖 Service Worker 向页面索取凭证。媒体读取改为浏览器自动携带 HttpOnly Cookie，认证初始化不再等待 Worker 支持、注册或控制页面。旧 Worker 升级期间保留页面凭证消息处理，新 Worker 激活后接管旧页面并直接透传网络请求。
+
+`videodream_media` 使用当前签名密钥和 HS256，包含 `sub`、`sid`、`iat`、`exp`、`iss=videodream`、`aud=videodream-media`，与普通 Access JWT 的 `videodream-web` 受众分离。Cookie 为 host-only，Path `/api/`，HttpOnly、SameSite Strict，生产启用 Secure；最长 604800 秒，签发期限不超过对应 Redis 会话剩余 TTL。登录和成功刷新会话时签发；现有用户通过刷新获得；退出和修改密码清理 Cookie。刷新摘要轮换不撤销有效媒体 Cookie。
+
+媒体 Cookie 只允许以下路由的 GET/HEAD；实际支持的方法由路由定义约束：
+
+- `/api/files/{filename}`、`/api/summary-files/{filename}`、`/api/thumbnails/{filename}`。
+- `/api/library/images/{name}`、`/api/image-proxy`。
+- `/api/music/playback/{token}/content`、`/api/previews/{token}/content`。
+- `/api/watermarks/videos/{filename}`，不包括其 `/info` 业务接口。
+- `/api/music/batches/{batch_id}/archive`。
+
+普通业务继续要求 Bearer。带 Bearer 的请求优先校验该凭证，失败不回退 Cookie；未携带 Authorization 且命中媒体读取白名单时才接受媒体 Cookie。媒体 JWT 不能作为业务 Bearer。每次读取仍检查 Redis 会话、当前 MySQL 账号状态和 auth_version、角色、临时密码要求、功能开关与资源归属；缺失会话返回 401，越权资源返回 404，Redis 故障返回 503。会话撤销后拒绝后续请求，已发送的响应内容无法追回。
+
+失败认证日志记录服务端生成的 request_id、方法、接口区域、认证来源、状态和原因，不记录 JWT、Cookie、刷新凭证或签名播放地址；响应返回 `X-Request-ID`。
+
+## 12. 用户文件目录与统一读写
+
+所有下载、导入和生成的用户文件保存到 `downloads/users/{user_id}/`。本地基于项目目录，容器内为 `/app/downloads/users/{user_id}/`，云端宿主机为 `/opt/videodream/downloads/users/{user_id}/`。文件仍占用服务器磁盘，另存为设备文件不会自动删除服务器原件。目录按需建立，以稳定数据库 ID 命名，用户名或昵称修改不影响路径。
+
+| 子目录 | 内容 |
+| --- | --- |
+| files | 音频、视频、导入音频、去水印结果及关联 LRC |
+| thumbnails | 自动提取或缓存的封面 |
+| images | 用户上传的头像、封面和背景图 |
+| lyrics | 旧歌词 JSON 缓存，歌词长期数据继续保存 MySQL |
+| summaries | 总结 Markdown、JSON 导出 |
+| batches | 响应结束后删除的批量 ZIP |
+| tmp | 下载、转码及转写的中间文件 |
+
+`backend/core/storage.py` 统一生成和解析路径。新文件以任务所属用户为准；已有资源先检查权限，再从 resources.user_id 定位。管理员读取、上传封面、重试和删除必须保留原用户归属。后台任务固定 user_id，库扫描只扫描当前业务用户的文件目录；管理员跨用户管理通过资源目录完成。容器继续由同一服务账号运行，用户隔离由后端授权实现，不创建额外操作系统账号。
+
+文件名保留任务 ID/随机标识等全局唯一前缀，保持现有 resources 复合主键和 music_downloads 文件名唯一约束。现有 `/api/files/{filename}` 等 URL 不加入物理目录，数据库不保存绝对路径。拒绝路径穿越、非法文件名和符号链接；取消任务、失败清理、打包和删除限定到目标用户及资源。停用账号保留其文件；删除账号沿用明确的管理员删除流程。
+
+## 13. 文件响应与有限恢复
+
+M4A 显式返回 `audio/mp4`，MP3 返回 `audio/mpeg`，MP4 返回 `video/mp4`。播放使用 inline，明确保存时文件地址增加 `download=1` 返回 attachment；总结和 ZIP 默认附件。文件、音视频代理支持 GET/HEAD，保留 Range、If-Range、Content-Length、Content-Range、Accept-Ranges 和正确的 206/416；私有响应使用 `private, no-store`。新生成 M4A 增加 faststart，存量文件不批量转码。
+
+播放器失败后以带媒体 Cookie 的小范围读取诊断状态，并取消诊断响应体。401 刷新会话后重载一次，在线内容 410 重新获取源一次，尽量恢复原进度；总自动恢复最多一次。403 提示权限或密码要求，404 提示文件不存在或无权访问，502 提示上游不可用，503 提示服务故障。200/206 与媒体解码错误结合判断格式异常；浏览器要求手势时保留点击继续入口，不循环自动播放。移动端必须用真实设备补充验收，不能仅以桌面缩窄窗口替代。
+
+## 14. 存量迁移、兼容与回滚
+
+`scripts/migrate-user-storage.py` 提供 plan/apply/status/rollback。plan 输出清单，不移动文件；apply/rollback 要求应用及所有写入进程已停止，并显式传入 `--offline-confirmed`。脚本使用 MySQL 命名锁防止多个迁移并发。迁移清单必须在 downloads 外，默认运维位置 `.run/storage-migrations/`。
+
+按 resources 归属交叉核对 music_downloads；关联 LRC、歌词缓存和音频提取封面可从原文件名推导归属。归属冲突、目标内容不同或符号链接阻止执行；未索引文件保留原处并报告，不自动分给管理员；已缺失文件记入 missing。清单包含用户、类型、文件名、来源、目标、大小、SHA-256、授权依据和状态。
+
+apply 在任何移动前校验全部清单并自动备份当前数据库 SQL 和整个 downloads ZIP，校验 ZIP CRC。通过同文件系统的“不覆盖目标的硬链接创建 + 校验 + 删除原目录项”搬迁，逐项持久化进度；中断可重复执行并识别已搬迁或双目录项状态，禁止覆盖不同内容。迁移执行中的 active 清单只允许已确认用户、类型、文件名和哈希匹配的旧路径回读；完成后删除 active，正常读取不再搜索公共根目录。
+
+全部验证后写 account_migrations 的 `user-storage-v1` 记录。回滚先备份当前数据，再扫描所有现有用户目录，包括升级后新增的文件，反向恢复旧布局；文件名冲突阻止全部搬迁。成功后删除迁移标记并回滚匹配代码。仅回滚镜像无法恢复旧文件布局，不允许用升级前备份直接覆盖并丢失新增文件。
+
+## 15. 本次 MySQL / Redis 数据契约
+
+无新增或修改的 MySQL 表结构、列、索引、外键及业务关系。目录由 users.id、resources.kind、resources.resource_key 推导，music_downloads.filename 与历史 URL 保持不变；现有 resource_owner、音乐用户索引、文件名唯一索引与歌曲外键继续使用。唯一新增迁移标记写入现有 account_migrations，其完整结构为：
+
+```sql
+CREATE TABLE account_migrations (
+  id VARCHAR(40) PRIMARY KEY,
+  completed_at DOUBLE NOT NULL,
+  backup_path TEXT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+主键为 id，无其他索引或外键。新增行 id=`user-storage-v1`、completed_at=验证完成时间、backup_path=本次备份目录；未完成不写完成标记。无需执行 DDL，回滚仅在反向迁移成功后删除该版本记录，原业务记录与关系保持。
+
+无新增或修改 Redis key、类型、值、TTL；目录不使用 Redis 缓存。媒体认证复用以下既有结构：
+
+| Key（示例） | 类型与值 | TTL、读写与失效 |
+| --- | --- | --- |
+| `videodream:session:{sid}`（`videodream:session:abc123`） | Hash：uid 用户 ID、digest 刷新凭证 SHA-256、version 账号认证版本，均为字符串 | 最长 604800 秒；登录创建，业务/媒体认证读取，刷新原子轮换 digest 但不延长会话；退出删除，停用及密码重置批量撤销 |
+| `videodream:user-sessions:{uid}`（`videodream:user-sessions:28`） | Set：该用户会话 ID | 沿用登录时设置/更新 604800 秒规则；登录加入，登出移除，批量撤销读取并删除 |
+
+媒体 JWT 的期限不超过 Redis 会话剩余 TTL，不单独缓存授权；账号状态、角色、版本和资源归属以 MySQL 当前数据为准。会话不存在或版本不一致拒绝读取，Redis 故障返回 503，丢失会话后重新登录。解析、预览、Worker 心跳和限流 key 全部沿用原规则，无 key 转换或额外缓存一致性迁移。
+
+## 16. 交付验证
+
+验证两个普通用户和管理员的目录隔离、同名内容、跨用户访问、管理员上传与删除归属、媒体 Cookie 的读取白名单和独立受众、HEAD/Range/附件响应、刷新期限与撤销、Redis 故障、迁移冲突/中断/重复执行和回滚保留新增文件。运行后端测试、前端测试和生产构建。修改后按原端口重启本地前端 5174、后端 8001；云端保持内部 8001 与现有 HTTPS 入口。云端发布前离线备份迁移，发布后补真实手机和桌面验证。
+
+### 16.1 本地执行记录（2026-10-21）
+
+- **迁移完成**：停止本项目 8001、8002 两个后端实例后，执行离线 plan/apply。335 个文件、856306581 字节全部迁入 `downloads/users/1/`，逐文件 SHA-256 校验通过；缺失、冲突和未归属文件均为 0，原文件 URL 保持不变。现有本地文件均归用户 1，其他用户的隔离通过独立测试数据验证。
+- **清单与备份**：清单为 `.run/storage-migrations/local-20261021-final.json`，状态 `complete`；备份目录为 `.run/storage-migrations/local-20261021-final.backup-1792549671215897000/`，包含 `database.sql`、`downloads.zip`，ZIP 完整性校验通过。MySQL 已写入 `user-storage-v1` 完成标记，迁移中回读清单已移除。备份属于敏感本地运维资料，不纳入版本管理。
+- **服务与响应**：按原端口恢复前端 5174、后端 8001、原有额外后端 8002；三个入口的健康检查通过。经前端代理及直连验证媒体 Cookie 读取、HEAD、32 字节 Range 206、越界 416、附件下载；匿名访问、无效 Bearer、仅媒体 Cookie 访问业务接口和已撤销会话均返回 401。
+- **浏览器播放**：独立 Chrome 测试上下文禁用 Service Worker、Web Locks、BroadcastChannel，页面刷新会话成功并获得 HttpOnly 媒体 Cookie；迁移后的存量 M4A 可实际播放、跳转至第 5 秒，媒体请求不带 Bearer，返回 206，无页面脚本错误。临时验证会话已清理，不修改现有用户密码。
+- **自动验证**：本次后端相关范围 309 项通过，后续定向复验 45 项通过；最新前端 51 项测试和生产构建通过。后端验证使用独立、仅开放 Unix socket 的临时 MySQL，验证后已关闭。本记录不将工作区内同时进行的场景歌单 Agent 改动计为完整全量验收通过。
+- **交付边界**：本地实现与迁移已完成；未执行 git commit、git push 或云端发布。云端须独立执行第 14 节离线迁移和部署验收，真实手机与生产 HTTPS 环境仍待验证。

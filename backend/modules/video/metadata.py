@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import re
 import hashlib
 import html
@@ -77,7 +79,7 @@ def _capture_page_thumbnail(page: Any, normalized_url: str) -> str | None:
     identity = f"{accounts.owner_id()}:{normalized_url}" if accounts.principal.get() else normalized_url
     try:
         filename = f"{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:16]}.png"
-        target_path = paths.THUMBNAIL_DIR / filename
+        target_path = storage.path("thumbnail", filename)
         videos = page.locator("video")
         index = videos.evaluate_all("""(videos) => videos.findIndex(video => video.currentSrc.startsWith('blob:') || video.currentSrc.includes('.douyinvod.com/'))""")
         locator = videos.nth(index) if index >= 0 else page.locator("body").first
@@ -88,7 +90,7 @@ def _capture_page_thumbnail(page: Any, normalized_url: str) -> str | None:
     except Exception:
         try:
             filename = f"{hashlib.sha1(identity.encode('utf-8')).hexdigest()[:16]}.png"
-            target_path = paths.THUMBNAIL_DIR / filename
+            target_path = storage.path("thumbnail", filename)
             page.screenshot(path=str(target_path), timeout=2000, full_page=False)
             if target_path.exists() and target_path.stat().st_size > 0:
                 accounts.register_resource("thumbnail", filename, {"filename": filename, "size": target_path.stat().st_size})

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import json
 import math
 import mimetypes
@@ -125,10 +127,10 @@ def _video_path(filename: str) -> Path:
         accounts.resource("file", filename)
     if any(char in filename for char in ("/", "\\", ":", "\x00")) or Path(filename).name != filename:
         raise HTTPException(status_code=422, detail="视频文件名不合法。")
-    candidate = DOWNLOAD_DIR / filename
+    candidate = storage.resource_path("file", filename) if accounts.principal.get() else storage.owned_path("file", filename)
     if candidate.suffix.lower() not in VIDEO_EXTENSIONS:
         raise HTTPException(status_code=422, detail="请选择视频文件，音频暂不支持去水印。")
-    if not candidate.is_file() or candidate.resolve().parent != DOWNLOAD_DIR.resolve():
+    if not candidate.is_file():
         raise HTTPException(status_code=404, detail="视频不存在，请刷新文件列表。")
     return candidate.resolve()
 
@@ -205,7 +207,7 @@ def _update(job: WatermarkJob, **changes) -> None:
         accounts.register_resource("watermark", job.task_id, job.response().model_dump(), uid=job.user_id)
         job._saved_at = time.monotonic()
         if job.status == "finished" and job.filename:
-            path = DOWNLOAD_DIR / job.filename
+            path = storage.owned_path("file", job.filename, uid=job.user_id or None)
             accounts.register_resource("file", job.filename, {"filename": job.filename, "size": path.stat().st_size}, uid=job.user_id)
 
 
@@ -271,8 +273,8 @@ def _run_lama(job: WatermarkJob, partial: Path, errors, timed_out: threading.Eve
 
 
 def _run_watermark(job: WatermarkJob) -> None:
-    target = DOWNLOAD_DIR / f"{job.task_id}.{job.source.stem[:120]}.watermark-removed.mp4"
-    partial = target.with_suffix(".part.mp4")
+    target = storage.path("file", f"{job.task_id}.{job.source.stem[:120]}.watermark-removed.mp4", uid=job.user_id or None)
+    partial = storage.path("temp", target.stem + ".part.mp4", uid=job.user_id or None)
     timer = None
     timed_out = threading.Event()
     try:
@@ -365,10 +367,10 @@ def _run_watermark(job: WatermarkJob) -> None:
 def list_videos() -> list[dict]:
     allowed = accounts.permitted_files() if accounts.principal.get() else None
     files = [
-        path for path in DOWNLOAD_DIR.iterdir()
+        path for path in ([storage.resource_path("file", name) for name in allowed] if allowed is not None else storage.directory().iterdir())
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
         and (allowed is None or path.name in allowed)
-        and not path.name.endswith(".part.mp4") and path.resolve().parent == DOWNLOAD_DIR.resolve()
+        and not path.name.endswith(".part.mp4") and not path.is_symlink()
     ]
     files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     videos = []
@@ -426,10 +428,10 @@ def video_info(filename: str) -> VideoInfo:
     return _probe_video(_video_path(filename))
 
 
-@router.get("/videos/{filename}")
-def video_content(filename: str) -> FileResponse:
+@router.api_route("/videos/{filename}", methods=["GET", "HEAD"])
+def video_content(filename: str, download: bool = False) -> FileResponse:
     source = _video_path(filename)
-    return FileResponse(source, filename=source.name, content_disposition_type="inline", media_type=mimetypes.guess_type(source.name)[0] or "video/mp4")
+    return storage.media_response(source, download=download)
 
 
 @router.post("/tasks", response_model=WatermarkResponse, status_code=202)
@@ -442,7 +444,7 @@ def create_watermark(payload: WatermarkRequest) -> WatermarkResponse:
     if payload.method == "lama" and not inpainting.availability()["available"]:
         raise HTTPException(status_code=503, detail="AI 修复模型未安装。")
     job = WatermarkJob(uuid.uuid4().hex[:12], source, info, payload.regions, method=payload.method)
-    job.user_id = accounts.owner_id() if accounts.principal.get() else 0
+    job.user_id = accounts.resource("file", payload.filename)["user_id"] if accounts.principal.get() else 0
     with jobs_lock:
         if sum(item.status in {"pending", "running"} for item in jobs.values()) >= 4:
             raise HTTPException(status_code=429, detail="去水印队列已满，请等待现有任务完成。")

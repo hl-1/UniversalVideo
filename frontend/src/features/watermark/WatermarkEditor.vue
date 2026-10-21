@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Crosshair, Download, Eraser, Pause, Play, RefreshCw, ScanEye, Square, Trash2, Undo2 } from 'lucide-vue-next'
 import { clampRegion, regionFromPoints, type Point, type WatermarkRegion } from './watermarkRegions'
+import { downloadUrl, mediaFailureMessage, probeMedia } from '../../shared/media'
 
 const props = defineProps<{ preferredFilename?: string | null }>()
 type VideoInfo = { filename: string; width: number; height: number; duration: number; preview_url: string; fps: number }
@@ -55,6 +56,28 @@ const busy = computed(() => previewing.value || submitting.value || job.value?.s
 const selectedRegion = computed(() => regions.value[activeRegion.value])
 const originalFilename = computed(() => files.value.find(file => file.filename === filename.value)?.original_filename)
 const sourceUrl = computed(() => view.value === 'result' ? job.value?.download_url || '' : info.value?.preview_url || '')
+let mediaRecoveryUsed = false
+watch(sourceUrl, () => { mediaRecoveryUsed = false })
+async function handleVideoError() {
+  const source = sourceUrl.value
+  const element = video.value
+  if (!source || !element) return
+  if (mediaRecoveryUsed) { videoError.value = '视频恢复失败，请重新选择文件。'; return }
+  mediaRecoveryUsed = true
+  const position = currentTime.value
+  const diagnostic = new AbortController()
+  const timer = window.setTimeout(() => diagnostic.abort(), 12000)
+  try {
+    const result = await probeMedia(source, diagnostic.signal)
+    if (unmounted || source !== sourceUrl.value) return
+    if (result.recovered) {
+      element.addEventListener('loadedmetadata', () => { element.currentTime = position }, { once: true })
+      element.load()
+    } else videoError.value = mediaFailureMessage(result.status, element.error?.code)
+  } catch {
+    if (!unmounted && source === sourceUrl.value) videoError.value = '视频连接中断，请检查网络后重试。'
+  } finally { window.clearTimeout(timer) }
+}
 const canEdit = computed(() => Boolean(info.value && !busy.value && view.value === 'original'))
 const canProcess = computed(() => Boolean(info.value && !busy.value && regions.value.length && view.value !== 'result' && (method.value === 'delogo' || lamaAvailable.value)))
 const stageStyle = computed(() => info.value ? {
@@ -301,7 +324,7 @@ async function saveResult() {
       savingMessage.value = '处理结果已保存。'
     } else {
       const anchor = document.createElement('a')
-      anchor.href = job.value.download_url
+      anchor.href = downloadUrl(job.value.download_url)
       anchor.download = job.value.filename
       document.body.appendChild(anchor)
       anchor.click()
@@ -365,7 +388,7 @@ onBeforeUnmount(() => { unmounted = true; ++infoRequest; stopPolling(); clearRep
         <div class="wm-canvas">
           <div class="wm-stage" :style="stageStyle">
             <img v-if="view === 'preview' && previewImage" :src="previewImage" alt="当前帧修复预览" />
-            <video v-else ref="video" :src="sourceUrl" playsinline preload="auto" @loadeddata="ready = true" @play="playing = true" @pause="playing = false" @ended="playing = false" @timeupdate="currentTime = video?.currentTime || 0" @error="videoError = '浏览器无法预览此视频，可尝试 MP4 格式。'" />
+            <video v-else ref="video" :src="sourceUrl" playsinline preload="auto" @loadeddata="ready = true" @play="playing = true" @pause="playing = false" @ended="playing = false" @timeupdate="currentTime = video?.currentTime || 0" @error="handleVideoError" />
             <div v-if="view === 'original'" class="wm-selection" :class="{ 'wm-editable': canEdit && ready }" aria-label="水印区域选择" @pointerdown="beginRegion" @pointermove="moveRegion" @pointerup="finishRegion" @pointercancel="cancelRegion" @lostpointercapture="cancelRegion">
               <div v-for="(region, index) in regions" :key="index" class="wm-box" :class="{ 'wm-box-active': activeRegion === index }" :data-region="index" :style="boxStyle(region)"><span>{{ index + 1 }}</span></div>
               <div v-if="draft" class="wm-box wm-draft" :style="boxStyle(draft)"></div>

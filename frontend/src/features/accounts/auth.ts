@@ -11,7 +11,7 @@ let accessToken = ''
 let expiresAt = 0
 let refreshPromise: Promise<boolean> | undefined
 let epoch = 0
-const events = new BroadcastChannel('videodream-account-events')
+const events = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel('videodream-account-events')
 
 function clearSession(broadcast = false) {
   epoch++
@@ -19,9 +19,9 @@ function clearSession(broadcast = false) {
   expiresAt = 0
   account.value = null
   window.dispatchEvent(new Event('videodream-session-cleared'))
-  if (broadcast) events.postMessage('logout')
+  if (broadcast) events?.postMessage('logout')
 }
-events.onmessage = event => { if (event.data === 'logout') clearSession() }
+if (events) events.onmessage = event => { if (event.data === 'logout') clearSession() }
 
 async function authRequest(path: string, body?: unknown) {
   const response = await nativeFetch(`/api/auth/${path}`, { method: 'POST', credentials: 'same-origin',
@@ -41,7 +41,7 @@ function accept(data: { access_token: string; expires_in: number; user: Account 
 export async function refreshSession(): Promise<boolean> {
   if (refreshPromise) return refreshPromise
   const revision = epoch
-  const pending = (async () => await navigator.locks.request('videodream-refresh', async () => {
+  const refresh = async () => {
     try {
       const data = await authRequest('refresh')
       if (revision !== epoch) return false
@@ -53,7 +53,9 @@ export async function refreshSession(): Promise<boolean> {
       else authError.value = failure instanceof Error ? failure.message : '认证服务暂不可用。'
       return false
     }
-  }))().finally(() => { refreshPromise = undefined })
+  }
+  const pending = (async () => navigator.locks ? await navigator.locks.request('videodream-refresh', refresh) : await refresh())()
+    .finally(() => { refreshPromise = undefined })
   refreshPromise = pending
   return pending
 }
@@ -112,20 +114,17 @@ export async function changePassword(old_password: string, new_password: string)
 
 export async function initializeAuth() {
   window.fetch = authenticatedFetch
-  navigator.serviceWorker.addEventListener('message', event => {
-    if (event.data?.type === 'videodream-token') {
-      void token(Boolean(event.data.force)).then(value => event.ports[0]?.postMessage({ token: value }))
-    }
-  })
+  if ('serviceWorker' in navigator && navigator.serviceWorker) {
+    // Keep answering old workers until the pass-through worker takes control.
+    navigator.serviceWorker.addEventListener('message', event => {
+      if (event.data?.type === 'videodream-token') {
+        void token(Boolean(event.data.force)).then(value => event.ports[0]?.postMessage({ token: value }))
+      }
+    })
+    void navigator.serviceWorker.register('/auth-worker.js', { scope: '/', updateViaCache: 'none' })
+      .then(registration => registration.update()).catch(() => undefined)
+  }
   try {
-    await navigator.serviceWorker.register('/auth-worker.js', { scope: '/' })
-    await navigator.serviceWorker.ready
-    if (!navigator.serviceWorker.controller) {
-      await new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(() => reject(new Error('媒体认证初始化失败，请刷新页面。')), 10000)
-        navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timer); resolve() }, { once: true })
-      })
-    }
     const response = await nativeFetch('/api/auth/status')
     const data = await response.json()
     if (!response.ok) throw new Error(data.detail || '认证服务暂不可用。')
@@ -135,4 +134,10 @@ export async function initializeAuth() {
   } catch (failure) {
     authError.value = failure instanceof Error ? failure.message : '认证初始化失败。'
   } finally { authReady.value = true }
+}
+
+export function mediaFetch(url: string, options?: RequestInit) {
+  const target = new URL(url, location.href)
+  if (target.origin !== location.origin || !target.pathname.startsWith('/api/')) throw new Error('媒体地址无效。')
+  return nativeFetch(target, { ...options, credentials: 'same-origin', cache: 'no-store' })
 }

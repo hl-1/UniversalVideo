@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.accounts import service as accounts
 from backend.modules.music import sources as music
 from backend.modules.music import lyrics
@@ -45,7 +45,13 @@ class LyricsTests(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.root = Path(self.folder.name)
+        self.storage_root = Path(self.folder.name)
+        self.root = self.storage_root / "users" / "1" / "files"
+        self.root.mkdir(parents=True)
+        root_patch = patch.object(paths, "DOWNLOAD_DIR", self.storage_root)
+        owner_patch = patch.object(storage, "owner", side_effect=lambda uid=None: uid or 1)
+        root_patch.start(); owner_patch.start()
+        self.addCleanup(root_patch.stop); self.addCleanup(owner_patch.stop)
         (self.root / "song.m4a").write_bytes(b"audio")
         self.directory = patch.object(lyrics, "DOWNLOAD_DIR", self.root)
         self.directory.start()

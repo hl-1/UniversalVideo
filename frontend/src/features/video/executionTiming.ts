@@ -1,7 +1,14 @@
+export type ModelRequestTiming = {
+  attempt: number; status: 'finished' | 'failed'; elapsed_ms: number
+  first_output_ms: number | null; first_content_ms: number | null
+  reasoning_tokens: number | null; prompt_tokens: number | null; completion_tokens: number | null
+  thinking_enabled: boolean | null
+}
 export type TimingStage = {
   id: string; label: string; parent_id?: string | null; status: string
   started_at_ms: number; finished_at_ms: number | null; elapsed_ms: number
   attempts: number; retry_wait_ms: number; completed_units: number; total_units: number; reused: boolean
+  model_requests?: ModelRequestTiming[]
 }
 export type ExecutionTiming = {
   version: number; accepted_at_ms: number; server_now_ms: number; finished_at_ms: number | null
@@ -10,6 +17,19 @@ export type ExecutionTiming = {
 export type ModelInfo = { model: string; service?: string | null }
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+const tokens = (value: unknown) => number(value) && Number.isInteger(value) ? value : null
+
+function filterModelRequests(value: unknown): ModelRequestTiming[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(record).filter(item => number(item.attempt) && Number.isInteger(item.attempt) && item.attempt > 0
+    && number(item.elapsed_ms) && ['finished', 'failed'].includes(String(item.status))).map(item => ({
+    attempt: item.attempt as number, status: item.status as 'finished' | 'failed', elapsed_ms: item.elapsed_ms as number,
+    first_output_ms: number(item.first_output_ms) ? item.first_output_ms : null,
+    first_content_ms: number(item.first_content_ms) ? item.first_content_ms : null,
+    reasoning_tokens: tokens(item.reasoning_tokens), prompt_tokens: tokens(item.prompt_tokens), completion_tokens: tokens(item.completion_tokens),
+    thinking_enabled: typeof item.thinking_enabled === 'boolean' ? item.thinking_enabled : null,
+  }))
+}
 
 export function filterTiming(value: unknown): ExecutionTiming | null {
   if (!record(value) || value.version !== 1 || !number(value.accepted_at_ms) || !number(value.server_now_ms)
@@ -24,7 +44,8 @@ export function filterTiming(value: unknown): ExecutionTiming | null {
       elapsed_ms: item.elapsed_ms, attempts: number(item.attempts) ? item.attempts : 0,
       retry_wait_ms: number(item.retry_wait_ms) ? item.retry_wait_ms : 0,
       completed_units: number(item.completed_units) ? item.completed_units : 0,
-      total_units: number(item.total_units) ? item.total_units : 0, reused: item.reused === true })
+      total_units: number(item.total_units) ? item.total_units : 0, reused: item.reused === true,
+      ...(Array.isArray(item.model_requests) ? { model_requests: filterModelRequests(item.model_requests) } : {}) })
   }
   return { version: 1, accepted_at_ms: value.accepted_at_ms, server_now_ms: value.server_now_ms,
     finished_at_ms: value.finished_at_ms, elapsed_ms: value.elapsed_ms, stages }

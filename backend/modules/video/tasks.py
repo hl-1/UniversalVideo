@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import json
 import subprocess
 import threading
@@ -80,6 +82,8 @@ class SummaryTask:
         self.timing = timing.ExecutionTimer()
         self.model_info = None
         self.generate_mind_map = False
+        self.bilibili_prepared = False
+        self.prepared_source = None
         self.map_task = None
         self.map_future = None
         self.mind_map_task_id = None
@@ -228,10 +232,10 @@ def _persist_task(task, kind, force=False):
             if stored and stored["deleted"]:
                 task.cancel.set()
                 if isinstance(task, SummaryTask):
-                    files_to_remove = list(paths.SUMMARY_DIR.glob(f"{task.task_id}.*.summary.*"))
+                    files_to_remove = list(storage.directory("summary_file", uid=task.user_id).glob(f"{task.task_id}.*.summary.*"))
                     file_kind = "summary_file"
                 else:
-                    files_to_remove = [paths.DOWNLOAD_DIR / task.filename] if getattr(task, "filename", None) else []
+                    files_to_remove = [storage.owned_path("file", task.filename, uid=task.user_id)] if getattr(task, "filename", None) else []
                     file_kind = "file"
                 for path in files_to_remove:
                     path.unlink(missing_ok=True)
@@ -251,7 +255,7 @@ def _persist_task(task, kind, force=False):
                     ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
                                (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now))
         if task.status == "finished" and getattr(task, "filename", None):
-            path = paths.DOWNLOAD_DIR / task.filename
+            path = storage.owned_path("file", task.filename, uid=task.user_id)
             accounts.register_resource("file", task.filename, {"filename": task.filename, "size": path.stat().st_size if path.is_file() else 0}, uid=task.user_id)
         task._saved_at = time.monotonic()
 

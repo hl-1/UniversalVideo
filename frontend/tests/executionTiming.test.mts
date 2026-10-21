@@ -52,3 +52,19 @@ test('mind map runtime filter preserves timing and actual model metadata', () =>
   assert.equal(task?.timing?.elapsed_ms, 2)
   assert.deepEqual(task?.model_info, { model: 'actual-model', service: null })
 })
+
+test('model request metrics distinguish missing usage from zero and discard unknown fields', () => {
+  const request = { attempt: 1, status: 'finished', elapsed_ms: 11000, first_output_ms: 1000,
+    first_content_ms: 1000, reasoning_tokens: 0, prompt_tokens: 200, completion_tokens: 300,
+    thinking_enabled: false }
+  const result = filterTiming({ ...timing(0, 11000), stages: [
+    { id: 'summary_model', label: '总结', status: 'finished', started_at_ms: 0, finished_at_ms: 11000, elapsed_ms: 11000,
+      model_requests: [{ ...request, reasoning_content: '不得复制', api_key: '不得复制' },
+        { ...request, reasoning_tokens: undefined, first_content_ms: NaN }, { ...request, elapsed_ms: -1 }] },
+  ] })
+  const requests = result!.stages[0].model_requests!
+  assert.equal(requests.length, 2)
+  assert.deepEqual(requests[0], request)
+  assert.equal(requests[1].reasoning_tokens, null)
+  assert.equal(requests[1].first_content_ms, null)
+})

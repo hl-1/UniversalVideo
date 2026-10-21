@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 import json
 import time
@@ -191,8 +193,8 @@ def migrate(cursor):
                 result = json.loads(row["payload"]).get("result") or {}
                 for field in ("markdown_url", "json_url"):
                     name = unquote(Path(result.get(field) or "").name)
-                    path = DOWNLOAD_DIR / "_summaries" / name
-                    if name not in names and path.is_file() and not path.is_symlink() and path.resolve().parent == (DOWNLOAD_DIR / "_summaries").resolve():
+                    path = storage.owned_path("summary_file", name, uid=row["user_id"]) if name else None
+                    if name and name not in names and path.is_file() and not path.is_symlink():
                         archive.write(path, arcname=name)
                         names.add(name)
         versions: dict[str, set[int]] = {}

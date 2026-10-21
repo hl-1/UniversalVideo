@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import logging
 import os
 import re
 import secrets
@@ -32,11 +34,25 @@ LOCAL_CONFIG_PATH = ROOT / ".env.universal-video.local"
 ACCESS_TTL = 900
 SESSION_TTL = 604800
 COOKIE = "videodream_refresh"
+MEDIA_COOKIE = "videodream_media"
+MEDIA_AUDIENCE = "videodream-media"
+logger = logging.getLogger("videodream.auth")
 passwords = PasswordHasher()
 dummy_hash = passwords.hash(secrets.token_urlsafe(32))
 router = APIRouter(prefix="/api/auth", tags=["accounts"])
 cancel_callbacks = []
 schema_lock = threading.RLock()
+
+
+def cancel_resources(uid: int, key: str):
+    for callback in cancel_callbacks:
+        # User-only cleanup (for example disconnecting a platform account)
+        # must not run when just one file or task is deleted.
+        try:
+            inspect.signature(callback).bind(uid, key)
+        except TypeError:
+            continue
+        callback(uid, key)
 
 
 @dataclass(frozen=True)
@@ -163,9 +179,9 @@ AI_GROUPS = {"text": ("ai", "LLM", "文字处理"),
              "vision": ("ai_vision", "LLM_VISION", "截图识别"),
              "speech": ("ai_asr", "LLM_ASR", "语音转写")}
 DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
-                        music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=12,
+                        music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=6,
                         music_agent_network_requests=300, music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
-                        music_agent_tokens=200000, music_agent_concurrency=2, music_agent_api="auto")
+                        music_agent_tokens=150000, music_agent_model_calls=40, music_agent_concurrency=2, music_agent_api="auto")
 
 
 def resolve_ai_settings(saved: dict, *, use_environment: bool = True) -> dict:
@@ -270,6 +286,10 @@ def settings(*, use_environment: bool = True) -> dict:
     config = resolve_ai_settings(saved, use_environment=use_environment)
     if row and "music_agent_network_requests" not in saved:
         config["music_agent_network_requests"] = 160
+    # Old stored settings remain readable; new tasks always obey the current ceiling.
+    config["music_agent_tokens"] = min(150000, config["music_agent_tokens"])
+    config["music_agent_decisions"] = min(6, config["music_agent_decisions"])
+    config["music_agent_model_calls"] = min(40, config["music_agent_model_calls"])
     return config
 
 
@@ -329,9 +349,9 @@ def issue_access(user: dict, sid: str):
                        "iss": "videodream", "aud": "videodream-web"}, signing_key(), algorithm="HS256")
 
 
-def authenticate(token: str) -> Principal:
+def authenticate(token: str, *, audience: str = "videodream-web") -> Principal:
     try:
-        claims = jwt.decode(token, signing_key(), algorithms=["HS256"], issuer="videodream", audience="videodream-web",
+        claims = jwt.decode(token, signing_key(), algorithms=["HS256"], issuer="videodream", audience=audience,
                             options={"require": ["sub", "sid", "iat", "exp"]})
         session = redis_client().hgetall(session_key(claims["sid"]))
         if not session or session.get("uid") != claims["sub"]:
@@ -347,6 +367,32 @@ def authenticate(token: str) -> Principal:
 def cookie_options() -> dict:
     return {"httponly": True, "secure": environment("VIDEODREAM_COOKIE_SECURE", "false").lower() == "true",
             "samesite": "strict", "path": "/api/auth"}
+
+
+def media_cookie_options() -> dict:
+    return cookie_options() | {"path": "/api/"}
+
+
+def set_media_cookie(response: Response, user: dict, sid: str, ttl: int):
+    # Do not extend the session, and never issue a cookie for an expired session.
+    ttl = min(SESSION_TTL, ttl)
+    if ttl <= 0:
+        raise HTTPException(401, "会话已失效，请重新登录。")
+    now = int(time.time())
+    token = jwt.encode({"sub": str(user["id"]), "sid": sid, "iat": now, "exp": now + ttl,
+                        "iss": "videodream", "aud": MEDIA_AUDIENCE}, signing_key(), algorithm="HS256")
+    response.set_cookie(MEDIA_COOKIE, token, max_age=ttl, **media_cookie_options())
+
+
+def media_read(path: str, method: str) -> bool:
+    if method not in {"GET", "HEAD"}:
+        return False
+    return any(re.fullmatch(pattern, path) for pattern in (
+        r"/api/files/[^/]+", r"/api/summary-files/[^/]+", r"/api/thumbnails/[^/]+",
+        r"/api/library/images/[^/]+", r"/api/image-proxy", r"/api/music/playback/[^/]+/content",
+        r"/api/previews/[^/]+/content", r"/api/watermarks/videos/[^/]+",
+        r"/api/music/batches/[^/]+/archive",
+    ))
 
 
 def require_csrf(request: Request):
@@ -456,6 +502,7 @@ def login(payload: Credentials, request: Request, response: Response):
             pipeline.expire(user_sessions_key(user['id']), SESSION_TTL)
             pipeline.execute()
     response.set_cookie(COOKIE, sid + "." + secret, max_age=SESSION_TTL, **cookie_options())
+    set_media_cookie(response, user, sid, redis_client().ttl(session_key(sid)))
     audit("login", str(user["id"]), actor=user["id"], ip=ip)
     return {"access_token": issue_access(user, sid), "expires_in": ACCESS_TTL, "user": public_user(user)}
 
@@ -482,6 +529,7 @@ def refresh(request: Request, response: Response):
     if ttl <= 0:
         raise HTTPException(401, "刷新凭证已失效，请重新登录。")
     response.set_cookie(COOKIE, sid + "." + secret, max_age=ttl, **cookie_options())
+    set_media_cookie(response, user, sid, ttl)
     return {"access_token": issue_access(user, sid), "expires_in": ACCESS_TTL, "user": public_user(user)}
 
 
@@ -497,6 +545,7 @@ def logout(request: Request, response: Response):
             client.delete(session_key(sid))
             client.srem(user_sessions_key(int(session['uid'])), sid)
     response.delete_cookie(COOKIE, **cookie_options())
+    response.delete_cookie(MEDIA_COOKIE, **media_cookie_options())
     return {"ok": True}
 
 
@@ -518,6 +567,7 @@ def change_password(payload: PasswordChange, response: Response):
                        (passwords.hash(payload.new_password), user["id"]))
     revoke_all(user["id"])
     response.delete_cookie(COOKIE, **cookie_options())
+    response.delete_cookie(MEDIA_COOKIE, **media_cookie_options())
     audit("password_change", str(user["id"]))
     return {"ok": True}
 
@@ -559,15 +609,24 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             except redis.RedisError:
                 return JSONResponse({"detail": "认证服务暂不可用，请稍后重试。"}, status_code=503)
         marker = None
+        request_id = secrets.token_hex(8)
+        auth_source = "none"
         try:
             header = request.headers.get("authorization", "")
-            if not header.startswith("Bearer "):
-                raise HTTPException(401, "请先登录。")
             if path.rstrip("/") == "/api/music/mcp":
+                if not header.startswith("Bearer "):
+                    raise HTTPException(401, "请先登录。")
+                auth_source = "task_bearer"
                 from backend.modules.music.agent.auth import authenticate_task
                 user = await run_in_threadpool(authenticate_task, header[7:])
-            else:
+            elif header.startswith("Bearer "):
+                auth_source = "bearer"
                 user = await run_in_threadpool(authenticate, header[7:])
+            elif not header and media_read(path, request.method) and request.cookies.get(MEDIA_COOKIE):
+                auth_source = "media_cookie"
+                user = await run_in_threadpool(authenticate, request.cookies[MEDIA_COOKIE], audience=MEDIA_AUDIENCE)
+            else:
+                raise HTTPException(401, "请先登录。")
             marker = principal.set(user)
             if user.must_change_password and path not in {"/api/auth/me", "/api/auth/password"}:
                 raise HTTPException(403, "请先修改临时密码。")
@@ -581,13 +640,19 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Request-ID"] = request_id
             if request.method == "DELETE":
                 await run_in_threadpool(audit, "delete", path, "success" if response.status_code < 400 else "denied")
             return response
         except HTTPException as exc:
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+            logger.info("request_id=%s method=%s area=%s auth=%s status=%s reason=%s", request_id,
+                        request.method, "/".join(path.split("/")[:3]), auth_source, exc.status_code, exc.detail)
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
+                                headers={"Cache-Control": "private, no-store", "X-Request-ID": request_id} | (exc.headers or {}))
         except redis.RedisError:
-            return JSONResponse({"detail": "认证服务暂不可用，请稍后重试。"}, status_code=503)
+            logger.warning("request_id=%s auth=%s status=503 reason=redis_unavailable", request_id, auth_source)
+            return JSONResponse({"detail": "认证服务暂不可用，请稍后重试。"}, status_code=503,
+                                headers={"Cache-Control": "private, no-store", "X-Request-ID": request_id})
         finally:
             if marker is not None:
                 principal.reset(marker)

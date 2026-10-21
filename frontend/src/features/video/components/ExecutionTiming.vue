@@ -106,6 +106,11 @@ const models = computed(() => [...new Set([props.summary.model_info?.model, prop
             <span class="execution-stage-result"><span class="execution-status" :data-state="stage.status">{{ stateLabels[stage.status] }}</span><span class="execution-stage-duration">{{ formatElapsed(stageElapsedAt(stage, group.delta)) }}</span></span>
             <div v-if="stage.status === 'finished' || stage.status === 'running'" class="execution-lane" :class="{ indeterminate: stage.progress === undefined }" role="progressbar" :aria-label="stage.label" :aria-valuenow="stage.progress" :aria-valuemin="0" :aria-valuemax="100" :aria-valuetext="stage.status === 'finished' ? '已完成' : stage.progress === undefined ? '执行中，进度未知' : `已完成 ${stage.completed_units} / ${stage.total_units} 段`"><span :style="stage.progress === undefined ? undefined : { width: `${stage.progress}%` }"></span></div>
             <small v-if="stage.detail" class="execution-unit">{{ stage.detail }}</small>
+            <template v-if="expanded">
+              <small v-for="(request, index) in stage.model_requests" :key="index" class="execution-unit">
+                调用 {{ index + 1 }} · 第 {{ request.attempt }} 次尝试 · {{ stateLabels[request.status] }} · {{ request.thinking_enabled === false ? '思考已关闭' : request.thinking_enabled === true ? '思考已开启' : '服务默认模式' }} · 首字 {{ formatElapsed(request.first_content_ms) }} · 思考 token {{ request.reasoning_tokens ?? '未记录' }} · 接口 {{ formatElapsed(request.elapsed_ms) }}
+              </small>
+            </template>
           </div>
           <p v-if="!group.stages.length" class="execution-note">阶段耗时未记录</p>
         </div>

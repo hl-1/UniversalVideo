@@ -33,6 +33,7 @@
 - 不重新提取字幕，不使用弹幕，不返回 API Key。
 - 长文本按原有大小分块，最多并行 2 个分块，按原字幕顺序归并并保留字幕引用；不以截断导图输入换取速度。
 - 采用共用请求限制、显式超时和可取消重试规则，详见[总结规格](ai-video-summary.md)。
+- 硅基流动指定 DeepSeek V4 模型的导图调用与总结一致，默认显式关闭思考；JSON 输出要求、字幕引用和节点清洗仍照常执行。服务端通过流式响应采集首字和 usage，前端仍接收完整导图；残缺流丢弃并按原次数重试，取消时关闭流。适用主机/模型、质量影响和完整参数见[总结规格 AI 输出契约](ai-video-summary.md#ai-输出契约)。
 
 ## 前端
 
@@ -69,6 +70,7 @@
 - MySQL：无 DDL、索引或关系变更。沿用 `video_mind_maps` 的 `summary_task_id`、`version`、账号归属及 `content` JSON，新增可选 `timing` 和 `model_info`；总结 JSON 保存自动导图 ID。完整既有表结构、JSON 契约和回滚说明见[性能记录](../performance/ai-video-generation-2026-10-19.md)。
 - Redis：无新增或修改的 key、类型、值结构、TTL、读写及失效规则。耗时随已有 MySQL 快照持久化，不依赖 Redis。
 - 历史任务没有计时数据时显示“未记录”；服务中断后冻结最后快照，排除未知停机时长。移除新增代码即可回滚，无数据迁移。
+- 模型阶段可选 `model_requests` 保存逐调用的 `attempt/status/elapsed_ms/first_output_ms/first_content_ms/reasoning_tokens/prompt_tokens/completion_tokens/thinking_enabled`；完整结构、null 语义、并行顺序和读写规则见[总结规格](ai-video-summary.md#执行调度数据与兼容)。展开计时详情展示首字、思考 token、请求模式和接口用时。复用 `video_mind_maps.content` JSON，因此无新增/修改 MySQL 表、列、索引、外键、关系或 SQL 迁移，也不新增/修改 Redis key 模板、示例、类型、结构、TTL、读写、失效和一致性规则。回滚请求与展示代码即可，新增 JSON 字段可保留，旧任务无需补写。
 
 ## 布局数据与兼容
 

@@ -14,5 +14,5 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 RUN_DIR = ROOT_DIR / ".run"
 FFMPEG_DIR = ffmpeg_directory()
 NODE_EXE = node_executable()
-for folder in (DOWNLOAD_DIR, THUMBNAIL_DIR, SUMMARY_DIR):
+for folder in (DOWNLOAD_DIR,):
     folder.mkdir(exist_ok=True)

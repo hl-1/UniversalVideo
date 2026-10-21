@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 from backend.infrastructure import audio
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.video import downloads as video_downloads
 from backend.modules.video import parse_cache as video_parse_cache
 from backend.modules.video import parsing as video_parsing
@@ -47,6 +47,9 @@ class AudioExportTests(unittest.TestCase):
                 self.assertEqual([stream["codec_type"] for stream in info["streams"]], ["audio"])
                 self.assertAlmostEqual(info["duration"], 2, delta=0.15)
                 self.assertEqual(info["codec"], "aac" if extension == "m4a" else "mp3")
+                if extension == "m4a":
+                    content = target.read_bytes()
+                    self.assertLess(content.index(b'moov'), content.index(b'mdat'))
 
     def test_rejects_short_trial_instead_of_marking_complete(self):
         target = self.directory / "trial.m4a"
@@ -62,6 +65,14 @@ class AudioExportTests(unittest.TestCase):
 
 
 class AudioRoutingTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        for mocked in (patch.object(paths, "DOWNLOAD_DIR", Path(folder.name)),
+                       patch.object(storage, "owner", side_effect=lambda uid=None: uid or 1)):
+            mocked.start()
+            self.addCleanup(mocked.stop)
+
     def test_douyin_detail_metadata_is_bound_to_target_video(self):
         response = Mock(url="https://www.douyin.com/aweme/v1/web/aweme/detail/", status=200)
         response.json.return_value = {"aweme_detail": {"aweme_id": "123", "desc": "target", "video": {"duration": 64800, "cover": {"url_list": ["https://example.com/cover.jpg"]}}, "author": {"nickname": "creator"}}}

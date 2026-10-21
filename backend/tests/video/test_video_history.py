@@ -13,7 +13,7 @@ import requests
 import redis
 
 from backend.modules.video import parse_cache as video_parse_cache
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.video import parsing as video_parsing
 from backend.modules.video import preview as video_preview
 from backend.modules.video import schemas as video_schemas
@@ -272,7 +272,7 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         map_id = self.a.post(f"/api/summaries/{summary.task_id}/mind-map").json()["task_id"]
         self.finish_map(map_id)
         filename = f"{summary.task_id}.summary.md"
-        (paths.SUMMARY_DIR / filename).write_text("original", encoding="utf-8")
+        (storage.path("summary_file", filename, uid=self.a_id)).write_text("original", encoding="utf-8")
         summary.result.markdown_url = f"/api/summary-files/{filename}"
         video_tasks._persist_task(summary, "summary", force=True)
         backup_dir = self.root / "legacy-backups"
@@ -297,7 +297,7 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         parsed = self.parse()
         record_id = parsed["record_id"]
         summary = self.summary(record_id)
-        summary_file = paths.SUMMARY_DIR / f"{summary.task_id}.summary.md"
+        summary_file = storage.path("summary_file", f"{summary.task_id}.summary.md", uid=self.a_id)
         summary_file.write_text("summary", encoding="utf-8")
         summary.result.markdown_url = f"/api/summary-files/{summary_file.name}"
         video_tasks._persist_task(summary, "summary", force=True)
@@ -305,7 +305,7 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         response = self.a.post("/api/download", json={"url": self.url, "format_id": parsed["formats"][0]["format_id"], "parse_record_id": record_id})
         response.raise_for_status()
         task = video_tasks.tasks[response.json()["task_id"]]
-        video_file = paths.DOWNLOAD_DIR / f"{task.task_id}.mp4"
+        video_file = storage.path("file", f"{task.task_id}.mp4", uid=self.a_id)
         video_file.write_bytes(b"video")
         video_tasks._set_task(task, status="finished", progress=100, filename=video_file.name)
         self.a.delete(f"/api/videos/records/{record_id}?cascade=true").raise_for_status()
@@ -402,7 +402,7 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         self.finish_map(second)
         self.a.delete('/api/workspace/resources/mind_map/' + second).raise_for_status()
         filename = summary.task_id + '.summary.md'
-        (paths.SUMMARY_DIR / filename).write_text('完整的原始总结', encoding='utf-8')
+        (storage.path("summary_file", filename, uid=self.a_id)).write_text('完整的原始总结', encoding='utf-8')
         summary.result.markdown_url = '/api/summary-files/' + filename
         video_tasks._persist_task(summary, 'summary', force=True)
         self.a.put(f'/api/videos/records/{record_id}/view', json={'tab': 'mind-map', 'playback_time': 42}).raise_for_status()

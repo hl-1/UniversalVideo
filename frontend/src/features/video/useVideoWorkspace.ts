@@ -1,4 +1,5 @@
 import { useVideoSummary } from './useVideoSummary'
+import { useBilibiliSession } from './useBilibiliSession'
 import { useVideoDownload } from './useVideoDownload'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from './mindMap'
@@ -8,6 +9,7 @@ import './video-history.css'
 import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
 import { account } from '../accounts/auth'
 import { api } from '../../shared/api/client'
+import { mediaFailureMessage, probeMedia } from '../../shared/media'
 import { extractHttpUrl } from '../../shared/utils/downloadInput'
 import type { ParseResult, TaskResult, SummaryTaskResult, PreviewState, SummaryTab, FilePickerHandle } from './types'
 import { readApiError } from '../../shared/api/client'
@@ -46,6 +48,8 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   const previewState = ref<PreviewState>('idle')
   const previewUrl = ref('')
   const previewError = ref('')
+  let previewRecoveryUsed = false
+  let previewRecovering = false
   const previewVideoRef = ref<HTMLVideoElement | null>(null)
   const pendingSeekTime = ref<number | null>(null)
   const playbackTime = ref(0)
@@ -67,6 +71,14 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   const localVideoUrl = ref('')
   const localPreviewFailed = ref(false)
   const revisions = { record: 0, summary: 0, map: 0, preview: 0 }
+  const bilibili = useBilibiliSession()
+  watch(activeRecordId, () => bilibili.closeBilibiliLogin())
+  watch(() => account.value?.id, () => {
+    revisions.record++
+    loadingSummary.value = false
+    bilibili.resetBilibiliSession()
+    if (account.value) void bilibili.refreshBilibiliStatus()
+  })
   let restoringRecord = false
   let formatsFresh = false
   let viewSaveTimer: number | undefined
@@ -132,6 +144,8 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     mindMapPollingTimer,
     refreshTaskReferences,
     scheduleVideoView,
+    requestBilibiliLogin: bilibili.requestBilibiliLogin,
+    requestBilibiliSpeechConfirmation: bilibili.requestBilibiliSpeechConfirmation,
   })
   const { chooseSaveHandle, startDownload, pollTask, saveFinishedFile, stopPolling } = useVideoDownload({
     url,
@@ -225,6 +239,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   }
 
   async function openVideoRecord(id: string, requestedTab?: SummaryTab) {
+    bilibili.closeBilibiliLogin()
     const revision = ++revisions.record
     await saveVideoView()
     if (revision !== revisions.record) return
@@ -276,6 +291,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
 
   async function selectSummary(event: Event) {
     if (!(event.target instanceof HTMLSelectElement)) return
+    bilibili.closeBilibiliLogin()
     const id = event.target.value
     const revision = revisions.record
     const selection = ++revisions.summary
@@ -379,12 +395,45 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     pendingSeekTime.value = null
   }
 
-  function handlePreviewError() {
-    if (previewUrl.value === localVideoUrl.value) localPreviewFailed.value = true
-    formatsFresh = false
-    previewUrl.value = ''
-    previewState.value = 'error'
-    previewError.value = '视频连接失败，请重新解析或稍后重试。'
+  async function handlePreviewError() {
+    if (previewRecovering || !previewUrl.value) return
+    const source = previewUrl.value
+    const revision = revisions.preview
+    const video = previewVideoRef.value
+    const position = video?.currentTime || playbackTime.value
+    if (previewRecoveryUsed) {
+      previewState.value = 'error'
+      previewError.value = '视频恢复失败，请重新点击播放。'
+      return
+    }
+    previewRecoveryUsed = true
+    previewRecovering = true
+    const diagnostic = new AbortController()
+    const timer = window.setTimeout(() => diagnostic.abort(), 12000)
+    try {
+      const result = await probeMedia(source, diagnostic.signal)
+      if (revision !== revisions.preview || source !== previewUrl.value) return
+      if (result.recovered && video) {
+        pendingSeekTime.value = position
+        previewState.value = 'loading'
+        video.load()
+        void video.play().catch(() => undefined)
+      } else if (result.status === 410 && source !== localVideoUrl.value) {
+        formatsFresh = false
+        pendingSeekTime.value = position
+        previewState.value = 'error'
+        await startPreview(true)
+      } else {
+        if (source === localVideoUrl.value) localPreviewFailed.value = true
+        previewState.value = 'error'
+        previewError.value = mediaFailureMessage(result.status, video?.error?.code)
+      }
+    } catch {
+      if (revision === revisions.preview) {
+        previewState.value = 'error'
+        previewError.value = '视频连接中断，请检查网络后重试。'
+      }
+    } finally { window.clearTimeout(timer); previewRecovering = false }
   }
 
   function handlePreviewReady() {
@@ -416,8 +465,9 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     errorMessage.value = '当前视频没有可跳转的在线预览。'
   }
 
-  async function startPreview() {
+  async function startPreview(retry = false) {
     if (!parseResult.value || previewState.value === 'loading') return
+    if (retry !== true) previewRecoveryUsed = false
     const revision = revisions.record
     const request = ++revisions.preview
     const recordId = activeRecordId.value
@@ -457,6 +507,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
       return
     }
     loadingParse.value = true
+    bilibili.closeBilibiliLogin()
     const revision = ++revisions.record
     await saveVideoView()
     if (revision !== revisions.record) return
@@ -519,6 +570,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   }
 
   onBeforeUnmount(() => {
+    revisions.record++
     flushVideoView()
     window.removeEventListener('hashchange', restoreFromLocation)
     window.removeEventListener('pagehide', flushVideoView)
@@ -528,6 +580,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   })
 
   onMounted(() => {
+    void bilibili.refreshBilibiliStatus()
     void loadRecentLinks()
     void refreshBrowserSession()
     window.addEventListener('hashchange', restoreFromLocation)
@@ -538,6 +591,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   })
 
   return {
+    ...bilibili,
     activeRecordId,
     browserBusy,
     browserSession,

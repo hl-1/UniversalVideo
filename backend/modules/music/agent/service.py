@@ -11,6 +11,7 @@ from backend.modules.music import sources as music
 from backend.infrastructure import network
 from backend.modules.music.agent import auth, budget, features, platforms, store, validation
 from backend.modules.music.agent.models import RunResult
+from backend.modules.music.agent.faults import ModelFault
 
 
 def current_run(run_id):
@@ -33,6 +34,8 @@ def check_active(run_id):
     total = row["context"].get("base_seconds",0) + time.time()-row["context"].get("active_started_at",time.time())
     if total > row["context"]["limits"]["seconds"]:
         raise budget.BudgetExceeded("已达到执行时长预算上限")
+    if row["context"].get("model_stop"):
+        raise ModelFault(row["context"]["model_stop"])
     return row
 
 
@@ -105,6 +108,13 @@ def replace_candidate(run_id, key, **changes):
         store.update(cursor, row, context=row["context"] | {"candidates": candidates})
 
 
+def progress(run_id, stage, message, current_song=None):
+    with library.database() as cursor:
+        row = store.get(cursor, run_id, lock=True)
+        store.update(cursor, row, context=row["context"] | {"stage":stage, "message":message,
+                     "current_song":current_song, "progress_at":time.time()})
+
+
 def search_personal(run_id, query="", offset=0, limit=20):
     if len(query)>100 or not 0<=offset<=1000 or not 1<=limit<=20:
         raise ValueError("个人库分页参数无效")
@@ -145,7 +155,7 @@ def qualified(row):
     if not parsed:
         return []
     return [t | {"match": features.match(t, parsed)} for t in row["context"].get("candidates", [])
-            if features.match(t, parsed)["qualified"]]
+            if isinstance(t.get("title"), str) and isinstance(t.get("artist"), str) and features.match(t, parsed)["qualified"]]
 
 
 def deduplicated(tracks):
@@ -190,10 +200,13 @@ def artists_complete(row):
 
 def batch_size(row):
     parsed = row['request']['parsed']
-    if parsed.get('goal') != 'count':
-        return 5
-    gap = max(1, parsed.get('target_count', 20) - len(deduplicated(qualified(row))))
-    return 1 if gap == 1 else 2 if gap < 5 else 5
+    gap = max(1, parsed.get('target_count', 20) - len(deduplicated(qualified(row)))) if parsed.get('goal') == 'count' else 5
+    size = 1 if gap == 1 else 2 if gap < 5 else 5
+    if not any(r["phase"] == "semantic" for r in row["context"].get("model_requests", [])):
+        size = min(3, size)
+    remaining = row["context"]["limits"].get("tokens", 150000) - sum(budget.usage(row["context"]).values())
+    return min(size, 1 if remaining < 20000 else 3 if remaining < 40000 else 5,
+               max(1, 10-row["context"].get("no_progress", {}).get("count", 0)))
 
 
 def satisfied(row):
@@ -345,19 +358,25 @@ def execute_scoped(token, name, arguments):
                 tracks = selected_candidates(row,arguments["keys"])[:batch_size(row)]
                 parsed = row["request"]["parsed"]
                 data = {"tracks":[]}
-                for track in tracks:
+                if name == "get_track_features":
+                    progress(run_id, "semantic", "正在分析候选歌曲", "、".join(t["title"] for t in tracks)[:300])
+                    values = features.analyze_many(run_id, tracks, charge, network_allowed(row),
+                        need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"}, check=lambda:check_active(run_id))
+                    for track, value in values:
+                        replace_candidate(run_id, track["key"], analysis=value)
+                        data["tracks"].append({"key":track["key"], **value})
+                for track in tracks if name == "validate_tracks" else []:
                     current = check_active(run_id)
                     if satisfied(current)[0]:
                         break
-                    if name == "get_track_features":
-                        value = features.analyze(run_id,track,charge,network_allowed(row),
-                            need_audio=parsed["scene"] in {"睡眠","游戏","运动","工作","专注","放松"},check=lambda:check_active(run_id))
-                        replace_candidate(run_id,track["key"],analysis=value)
-                        data["tracks"].append({"key":track["key"], **value})
+                    progress(run_id, "validation", "正在校验完整播放", track["title"])
+                    if not features.semantic_eligible(track, parsed):
+                        value = {"checked_at":time.time(), "identity":False, "playable":False,
+                                 "full":False, "reason":"未满足曲目语义或音频条件，已跳过完整播放下载"}
                     else:
                         value = validation.validate(track,charge,network_allowed(row),check=lambda:check_active(run_id))
-                        replace_candidate(run_id,track["key"],validation=value)
-                        data["tracks"].append({"key":track["key"],**value})
+                    replace_candidate(run_id,track["key"],validation=value)
+                    data["tracks"].append({"key":track["key"],**value})
             else:
                 raise ValueError("Unknown tool")
         except budget.BudgetExceeded as exc:
@@ -366,7 +385,12 @@ def execute_scoped(token, name, arguments):
             if exc.status_code in {401,503} or exc.detail=="任务已停止":
                 raise
             error = {"code":str(exc.status_code),"message":str(exc.detail),"retryable":False}
-        except Exception:
+        except ModelFault as exc:
+            # MCP transports exceptions as generic tool errors. Keep a typed stop envelope.
+            return {"data":{}, "error":{"code":"MODEL_STOP", "message":str(exc), "retryable":False}}
+        except Exception as exc:
+            if getattr(exc, "agent_policy_error", False):
+                raise
             error = {"code":"SOURCE_UNAVAILABLE","message":"来源未返回有效数据，请尝试其他来源或候选","retryable":True}
         if name in {"search_my_music", "search_online_tracks"}:
             query = arguments.get("query", "")

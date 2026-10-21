@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 import re
 import subprocess
@@ -35,8 +37,8 @@ def local_path(track):
     if Path(name).name != name or any(c in name for c in "\\/:"):
         raise ValueError("本地歌曲路径无效")
     accounts.resource("file", name)
-    path = (library.DOWNLOAD_DIR / name).resolve()
-    if not path.is_relative_to(library.DOWNLOAD_DIR.resolve()) or not path.is_file():
+    path = storage.resource_path("file", name)
+    if not path.is_file():
         return None
     return path
 

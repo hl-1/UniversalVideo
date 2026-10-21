@@ -41,12 +41,11 @@ def remove(kind: ResourceKind, key: str):
         from backend.modules.video.history import delete_record
         return delete_record(key)
     row = accounts.resource(kind, key)
-    for callback in accounts.cancel_callbacks:
-        callback(row["user_id"], key)
+    accounts.cancel_resources(row["user_id"], key)
     with accounts.database() as cursor:
         video_store.tombstone(cursor, kind, key)
         if kind == "file":
             cursor.execute("DELETE FROM music_downloads WHERE filename=%s", (key,))
-    remove_file(kind, key)
+    remove_file(kind, key, uid=row["user_id"])
     accounts.audit("data_delete", f"{kind}:{key}")
     return {"ok": True}

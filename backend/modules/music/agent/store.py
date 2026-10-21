@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
-from backend.modules.music.agent.models import ACTIVE, MAX_SNAPSHOT_BYTES, POLICY_VERSION
+from backend.modules.music.agent.models import ACTIVE, MAX_SNAPSHOT_BYTES, POLICY_VERSION, ParsedNeed
 
 
 execution_lease = ContextVar("scene_playlist_execution_lease",default=None)
@@ -85,6 +85,10 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
+def tool_signature(name, arguments):
+    return json.dumps([name, arguments], sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
 def decode(row):
     if row:
         for key in ("request", "context", "steps", "result"):
@@ -154,11 +158,18 @@ def recover(cursor):
     cursor.execute("SELECT * FROM music_recommendation_runs WHERE deleted=FALSE AND status IN ('pending','running') AND lease_until<%s FOR UPDATE", (time.time(),))
     for row in cursor.fetchall():
         row = decode(row)
+        context = row["context"]
+        requests = [r | {"state":"unconfirmed", "error":"工作进程中断，用量待确认"}
+                    if r["state"] == "in_flight" else r for r in context.get("model_requests", [])]
+        if any(r["state"] == "unconfirmed" for r in requests):
+            context = context | {"model_requests":requests, "model_stop":"执行中断，模型用量待确认，请手动重试新任务"}
         update(cursor, row, status="interrupted", worker_id=None, lease_until=None,
-               context=row["context"] | {"message": "服务执行中断，请继续任务"})
+               context=context | {"message": "服务执行中断，请查看任务状态"})
 
 
 def create(request, key, skill_version, parent=None, seed=None):
+    if "parsed" in request:
+        request = request | {"parsed":ParsedNeed.model_validate(request["parsed"]).model_dump()}
     uid = accounts.current().id
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     config = accounts.settings()
@@ -205,6 +216,18 @@ def create(request, key, skill_version, parent=None, seed=None):
 
 
 def public(row):
+    from backend.modules.music.agent import budget, service
+    context = row["context"]
+    candidates = context.get("candidates", [])
+    qualified = service.deduplicated(service.qualified(row))
+    counts = {"candidates":len(candidates), "analyzed":sum(bool(t.get("analysis")) for t in candidates),
+              "evaluated":sum(bool(t.get("analysis") and t.get("validation")) for t in candidates),
+              "qualified":len(qualified)} if candidates else context.get("counts", {})
+    preview = [{k:t.get(k) for k in ("key", "title", "artist", "thumbnail")} for t in qualified[:5]]
     return {k: row[k] for k in ("run_id", "parent_run_id", "status", "request", "steps", "result", "revision",
                                "result_version", "saved_playlist_id", "saved_at", "created_at", "updated_at")} | {
-        "progress": {k: row["context"].get(k) for k in ("message", "budget", "waiting_reason", "coverage")}}
+        "progress": {k: context.get(k) for k in ("message", "budget", "waiting_reason", "coverage", "stage", "current_song", "progress_at")} |
+            {"usage":budget.usage(context) if row["policy_version"] == POLICY_VERSION else {
+                "actual":context.get("actual_tokens", 0), "reserved":0, "unconfirmed":0, "legacy":True},
+             "limits":{k:context["limits"].get(k) for k in ("tokens", "model_calls", "seconds")},
+             "counts":counts, "preview":preview}}

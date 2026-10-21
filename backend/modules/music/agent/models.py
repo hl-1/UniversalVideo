@@ -5,10 +5,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.modules.music.library import TrackInput
+from backend.modules.music.agent.scenes import SCENES, normalize_scene
 
 
 class Preferences(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    scene: str | None = Field(default=None, max_length=80)
+
+    @field_validator("scene")
+    @classmethod
+    def selected_scene(cls, value):
+        if value is None:
+            return None
+        value = normalize_scene(value)
+        if value not in SCENES:
+            raise ValueError("请选择支持的场景")
+        return value
+
     vocals: Literal["allowed", "instrumental"] = "allowed"
     languages: list[str] = Field(default_factory=list, max_length=8)
     exclusions: list[str] = Field(default_factory=list, max_length=20)
@@ -44,18 +57,9 @@ class CreateRun(BaseModel):
     @classmethod
     def validate_preferences(cls, value):
         Preferences.model_validate(value)
+        if value.get("scene") is not None:
+            value = value | {"scene":normalize_scene(value["scene"])}
         return value
-
-
-def normalize_scene(value):
-    aliases = {"游戏": ("游戏", "gaming", "game"), "睡眠": ("睡眠", "睡觉", "助眠"),
-               "运动": ("运动", "跑步", "健身"), "专注": ("专注", "学习", "阅读"),
-               "工作": ("工作", "办公"), "放松": ("放松", "休闲"), "情歌": ("情歌",), "励志": ("励志",)}
-    value = str(value).strip()
-    for scene, terms in aliases.items():
-        if any(term in value.casefold() for term in terms):
-            return scene
-    return value
 
 
 class ParsedNeed(Preferences):
@@ -64,7 +68,10 @@ class ParsedNeed(Preferences):
     @field_validator("scene")
     @classmethod
     def canonical_scene(cls, value):
-        return normalize_scene(value)
+        value = normalize_scene(value)
+        if value not in SCENES:
+            raise ValueError("模型返回了不支持的场景")
+        return value
 
     mood: str = Field(default="", max_length=80)
     effect: str = Field(default="", max_length=80)
@@ -180,4 +187,4 @@ TERMINAL = {"finished", "partial", "failed", "cancelled"}
 RESUMABLE = {"waiting_input", "waiting_auth", "interrupted"}
 ACTIVE = {"pending", "running"}
 MAX_SNAPSHOT_BYTES = 512 * 1024
-POLICY_VERSION = "scene-playlist-v1"
+POLICY_VERSION = "scene-playlist-v2"

@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import Request, Response, APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 from starlette.background import BackgroundTask
@@ -360,8 +360,8 @@ def create_playback(payload: PlaybackRequest) -> dict:
     return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL, "source": source}
 
 
-@router.get("/playback/{token}/content")
-def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None) -> StreamingResponse:
+@router.api_route("/playback/{token}/content", methods=["GET", "HEAD"])
+def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None, request: Request = None):
     if accounts.principal.get():
         accounts.resource("playback", token)
     with lock:
@@ -376,8 +376,11 @@ def playback_content(token: str, range_header: Annotated[str | None, Header(alia
     headers = {**session.headers, "Accept-Encoding": "identity"}
     if range_header:
         headers["Range"] = range_header.strip()
+    if request and request.headers.get("if-range"):
+        headers["If-Range"] = request.headers["if-range"]
     try:
-        upstream = requests.get(session.media_url, headers=headers, stream=True, timeout=(10, 30))
+        fetch = requests.head if request and request.method == "HEAD" else requests.get
+        upstream = fetch(session.media_url, headers=headers, stream=True, timeout=(10, 30), allow_redirects=True)
     except requests.RequestException as exc:
         raise HTTPException(502, "连接音源失败，请重新点击播放。") from exc
     content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()
@@ -394,6 +397,9 @@ def playback_content(token: str, range_header: Annotated[str | None, Header(alia
         "content-type", "content-length", "content-range", "accept-ranges",
     }}
     response_headers["Cache-Control"] = "private, no-store"
+    if request and request.method == "HEAD":
+        upstream.close()
+        return Response(status_code=upstream.status_code, headers=response_headers)
 
     def body():
         try:

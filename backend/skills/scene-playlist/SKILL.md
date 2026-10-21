@@ -1,6 +1,6 @@
 # Scene Playlist
 
-Version: scene-playlist-v4
+Version: scene-playlist-v5
 
 Generate a listening playlist from one user need. Parse mood, activity and desired effect.
 Use the desired effect before inferred mood. Defaults: vocals allowed, no language
@@ -46,6 +46,15 @@ Substantial lead singing/rap earns 20 points when vocals are allowed. Sparse sam
 and background chants earn no lead-vocal or language bonus. Credits are metadata,
 not lyrics. Missing lyrics means unknown, never instrumental. Backend scores use
 0..100 with evidence; unknown scene relevance is not a default score.
+Canonical scenes, aliases and recall terms come from categories.json. 恋爱、谈恋爱、
+爱情、约会 map to 情歌. Preserve finer mood/effect and negative themes. An explicit
+scene conflict needs clarification before any track search. No arbitrary scene keys.
+All parse, planning, semantic and correction requests share 150000 tokens and 40
+calls, with at most 6 planning calls. The backend stops immediately on model faults,
+unknown usage or cancellation. Do not retry a failed model through another tool.
+After ten distinct evaluated candidates give no new qualified result, change the
+query/source once and evaluate the newly recalled pool first. Another ten without
+gain ends exploration. Respect partial results and never relax qualification.
 Playlist and track searches share five calls (empty results count). When search calls
 are exhausted, continue reading discovered playlists and analyzing/validating their
 tracks within remaining budgets. Do not abandon unread discovered sources.

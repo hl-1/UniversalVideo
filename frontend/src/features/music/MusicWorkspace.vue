@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { downloadUrl } from '../../shared/media'
 import { createMusicBatch } from './musicBatch'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account } from '../accounts/auth'
@@ -499,7 +500,7 @@ onBeforeUnmount(() => { disposed = true; localRevision++; batchGeneration++; sto
           <Check v-if="item.status === 'finished'" :size="16" /><LoaderCircle v-else-if="item.status === 'running'" :size="16" class="spin" /><X v-else-if="item.status === 'failed' || item.status === 'cancelled'" :size="16" /><Music2 v-else :size="16" />
           <div class="batch-item-name"><strong>{{ item.title }}</strong><span>{{ item.artist }} · {{ providers[item.provider] }}</span><p v-if="item.error">{{ item.error }}</p></div>
           <span class="batch-item-status">{{ itemStatus(item) }}</span>
-          <div v-if="item.status === 'finished' && item.download_url" class="batch-item-actions"><button type="button" class="track-play" :title="`播放已下载的 ${item.title}`" :aria-label="`播放已下载的 ${item.title}`" @click="playBatchItem(item)"><Play :size="16" /></button><a class="track-play" :href="item.download_url" :download="`${item.artist} - ${item.title}.${batch.audio_format}`" :title="`保存 ${item.title}`" :aria-label="`保存 ${item.title}`"><Download :size="16" /></a></div><span v-else class="batch-item-placeholder" />
+          <div v-if="item.status === 'finished' && item.download_url" class="batch-item-actions"><button type="button" class="track-play" :title="`播放已下载的 ${item.title}`" :aria-label="`播放已下载的 ${item.title}`" @click="playBatchItem(item)"><Play :size="16" /></button><a class="track-play" :href="downloadUrl(item.download_url)" :download="`${item.artist} - ${item.title}.${batch.audio_format}`" :title="`保存 ${item.title}`" :aria-label="`保存 ${item.title}`"><Download :size="16" /></a></div><span v-else class="batch-item-placeholder" />
         </li>
       </ol>
     </section>

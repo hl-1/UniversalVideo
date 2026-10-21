@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from backend.infrastructure import database as database_store
-from backend.core import paths
+from backend.core import paths, storage
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
 from backend.modules.music import media
@@ -23,6 +23,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.principal_marker = accounts.principal.set(accounts.Principal(1, 'admin', 'super_admin'))
+        cls.addClassCleanup(accounts.principal.reset, cls.principal_marker)
         cls.original_ready = database_store.schema_ready
         cls.config = database_store.database_config()
         cls.database_name = "videodream_test_" + secrets.token_hex(6)
@@ -35,10 +36,14 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         cls.config_patch.start()
         database_store.schema_ready = False
         cls.work = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls.work.name)
-        cls.directory_patch = patch.object(library, "DOWNLOAD_DIR", cls.directory)
+        cls.storage_root = Path(cls.work.name)
+        cls.directory = cls.storage_root / "users" / "1" / "files"
+        cls.directory.mkdir(parents=True)
+        cls.paths_patch = patch.object(paths, "DOWNLOAD_DIR", cls.storage_root)
+        cls.paths_patch.start()
+        cls.directory_patch = patch.object(library, "DOWNLOAD_DIR", cls.storage_root)
         cls.directory_patch.start()
-        cls.lyrics_directory_patch = patch.object(lyrics, "DOWNLOAD_DIR", cls.directory)
+        cls.lyrics_directory_patch = patch.object(lyrics, "DOWNLOAD_DIR", cls.storage_root)
         cls.lyrics_directory_patch.start()
         app = FastAPI()
         app.include_router(library.router)
@@ -51,6 +56,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.client.close()
         cls.directory_patch.stop()
+        cls.paths_patch.stop()
         cls.lyrics_directory_patch.stop()
         cls.work.cleanup()
         cls.config_patch.stop()
@@ -58,7 +64,6 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         with cls.administrator.cursor() as cursor:
             cursor.execute(f"DROP DATABASE `{cls.database_name}`")
         cls.administrator.close()
-        accounts.principal.reset(cls.principal_marker)
 
     def setUp(self):
         with library.database() as cursor:
@@ -255,7 +260,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
     def test_legacy_lyrics_migrate_and_manual_import_survives_reconnection(self):
         path = self.directory / "lyrics.mp3"
         path.write_bytes(b"lyrics recording")
-        cached = self.directory / "_lyrics" / (library.hashlib.sha256(path.name.encode()).hexdigest() + ".json")
+        cached = self.directory.parent / "lyrics" / (library.hashlib.sha256(path.name.encode()).hexdigest() + ".json")
         cached.parent.mkdir(exist_ok=True)
         cached.write_text(library.json.dumps({"text": "[00:02]old lyrics", "source": "LRCLIB"}), encoding="utf-8")
         try:
@@ -287,7 +292,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
             self.assertIsNone(row["custom_thumbnail"])
             self.assertIsNone(self.client.get("/api/library").json()["profile"]["avatar"])
         finally:
-            folder = self.directory / "_images"
+            folder = self.directory.parent / "images"
             for path in folder.glob("*"):
                 path.unlink()
             if folder.exists():

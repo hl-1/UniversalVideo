@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 import json
 import os
@@ -205,7 +207,7 @@ def link_legacy_results(record_id: str) -> None:
             for summary in summaries:
                 result = decode(summary).get("result") or {}
                 for field in ("markdown_url", "json_url"):
-                    path = paths.SUMMARY_DIR / unquote(Path(result.get(field) or "missing").name)
+                    path = storage.owned_path("summary_file", unquote(Path(result.get(field) or "missing").name), uid=uid)
                     if path.is_file() and not path.is_symlink():
                         archive.write(path, arcname=path.name)
         for item in affected:
@@ -350,11 +352,10 @@ def delete_record(record_id: str, cascade: bool = False):
         for kind, filename in files:
             cursor.execute("UPDATE resources SET deleted=TRUE WHERE kind=%s AND resource_key=%s AND user_id=%s", (kind, filename, uid))
     for task in related:
-        for callback in accounts.cancel_callbacks:
-            callback(uid, task["resource_key"])
+        accounts.cancel_resources(uid, task["resource_key"])
     from backend.modules.admin.api import remove_file
     for kind, filename in files:
-        remove_file(kind, filename)
+        remove_file(kind, filename, uid=uid)
     data = decode(record)
     for url in {data["url"], (data.get("result") or {}).get("webpage_url") or data["url"]}:
         video_cache.remove(video_cache.parse_key(url, uid))

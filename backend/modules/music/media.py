@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import io
 import json
 import re
@@ -35,15 +37,15 @@ def status_for_owner():
     return cover_states.setdefault(accounts.owner_id(), dict(cover_status))
 
 
-def image_directory() -> Path:
-    return library.DOWNLOAD_DIR / "_images"
+def image_directory(uid: int | None = None) -> Path:
+    return storage.directory("image", uid=uid)
 
 
 def image_path(url: str) -> Path:
     name = url.rsplit("/", 1)[-1]
     if not IMAGE_NAME.fullmatch(name):
         raise HTTPException(422, "图片地址无效。")
-    return image_directory() / name
+    return storage.resource_path("image", name)
 
 
 def save_image(data: bytes, *, background: bool = False, uid: int | None = None) -> str:
@@ -59,7 +61,7 @@ def save_image(data: bytes, *, background: bool = False, uid: int | None = None)
                 picture.thumbnail((2560, 1600), Image.Resampling.LANCZOS)
             else:
                 picture = ImageOps.fit(picture, (512, 512), method=Image.Resampling.LANCZOS)
-            folder = image_directory()
+            folder = image_directory(uid)
             folder.mkdir(parents=True, exist_ok=True)
             name = secrets.token_hex(16) + ".webp"
             picture.save(folder / name, "WEBP", quality=90)
@@ -77,7 +79,7 @@ def upload_image(file: UploadFile, *, background: bool = False, uid: int | None 
         file.file.close()
 
 
-@router.get("/images/{name}")
+@router.api_route("/images/{name}", methods=["GET", "HEAD"])
 def serve_image(name: str):
     path = image_path(name)
     if not path.is_file():
@@ -183,8 +185,14 @@ def get_theme():
 
 @router.put("/theme")
 def save_theme(theme: Theme):
-    if theme.background_image and not image_path(theme.background_image).is_file():
-        raise HTTPException(422, "背景图片不存在，请重新上传。")
+    if theme.background_image:
+        try:
+            if not image_path(theme.background_image).is_file():
+                raise HTTPException(404, "图片不存在。")
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            raise HTTPException(422, "背景图片不存在或无权访问，请重新上传。") from exc
     data = theme.model_dump()
     if theme.background_image:
         accounts.resource("image", Path(theme.background_image).name)
@@ -257,7 +265,7 @@ def backfill_covers():
             try:
                 url = track["thumbnail"]
                 if not url and track["filename"]:
-                    url = library.inspect_audio(library.DOWNLOAD_DIR / track["filename"])["thumbnail"]
+                    url = library.inspect_audio(storage.owned_path("file", track["filename"]))["thumbnail"]
                 if not url:
                     url = matching_cover(track)
                 if url:

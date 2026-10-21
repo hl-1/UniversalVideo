@@ -42,8 +42,12 @@ class ExecutionTimer:
         with self.lock:
             item = self.stages.get(identity)
             if item:
-                key = "attempts" if event == "attempt" else "retry_wait_ms"
-                item[key] += 1 if event == "attempt" else value
+                if event == "model_request":
+                    item.setdefault("model_requests", []).append(dict(value))
+                elif event == "attempt":
+                    item["attempts"] += 1
+                elif event == "retry":
+                    item["retry_wait_ms"] += value
 
     @contextmanager
     def stage(self, identity, label, parent_id=None):
@@ -69,6 +73,8 @@ class ExecutionTimer:
             stages = []
             for item in self.stages.values():
                 value = dict(item)
+                if "model_requests" in value:
+                    value["model_requests"] = [dict(request) for request in value["model_requests"]]
                 if value["status"] == "running":
                     value["elapsed_ms"] = max(0, now - value["started_at_ms"])
                 stages.append(value)

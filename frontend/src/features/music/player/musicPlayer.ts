@@ -1,6 +1,7 @@
 import { nextTick, ref } from 'vue'
 import { duration, libraryError, refreshLibrary, trackKey, trackPayload, type MusicTrack } from '../musicLibrary'
 import { api, jsonRequest } from '../../../shared/api/client'
+import { mediaFailureMessage, probeMedia } from '../../../shared/media'
 
 export const currentTrack = ref<MusicTrack | null>(null)
 export const queue = ref<MusicTrack[]>([])
@@ -20,6 +21,9 @@ let generation = 0
 let recordedGeneration = -1
 let expiresAt = 0
 let attachedSource = ''
+let recoveryUsed = false
+let recovering = false
+let pendingSeek = 0
 
 export function isPlaybackTrack(track: MusicTrack) { return Boolean(currentTrack.value && trackKey(currentTrack.value) === trackKey(track)) }
 function clearTimer() { window.clearTimeout(timeout); timeout = undefined }
@@ -73,18 +77,21 @@ async function resume(revision: number) {
     if (failure instanceof DOMException && failure.name === 'NotAllowedError') {
       playbackState.value = 'paused'
       playbackError.value = '点击播放继续聆听。'
-    } else fail('当前音源无法播放，请重试或切换音乐平台。')
+    } else void recoverPlayback()
   }
 }
 export function addToQueue(track: MusicTrack) {
   if (!queue.value.some(item => trackKey(item) === trackKey(track))) queue.value.push(track)
 }
-export async function playTrack(track: MusicTrack, list?: MusicTrack[]) {
+export async function playTrack(track: MusicTrack, list?: MusicTrack[], retry = false, position = 0) {
   if (list?.length) queue.value = [...new Map(list.map(item => [trackKey(item), item])).values()]
   addToQueue(track)
   controller?.abort()
   audio.value?.pause()
   const revision = ++generation
+  if (!retry) recoveryUsed = false
+  recovering = false
+  pendingSeek = position
   controller = new AbortController()
   currentTrack.value = track
   playbackState.value = 'loading'
@@ -143,6 +150,11 @@ function currentEvent(event: Event) {
 export function onMetadata(event: Event) {
   if (!currentEvent(event) || !audio.value) return
   total.value = Number.isFinite(audio.value.duration) ? audio.value.duration : currentTrack.value?.duration || 0
+  if (pendingSeek > 0) {
+    audio.value.currentTime = Math.min(pendingSeek, Math.max(0, total.value - 0.1))
+    elapsed.value = audio.value.currentTime
+    pendingSeek = 0
+  }
   const expected = currentTrack.value?.duration
   if (expected && total.value < expected - Math.max(3, expected * 0.03)) {
     playbackWarning.value = `试听片段 ${duration(total.value)} / ${duration(expected)}`
@@ -171,7 +183,33 @@ export function onWaiting(event: Event) {
   startTimer(generation)
 }
 export function onError(event: Event) {
-  if (currentEvent(event)) fail('音源连接中断或格式无法播放，请重试。')
+  if (currentEvent(event)) void recoverPlayback()
+}
+async function recoverPlayback() {
+  if (recovering || !playbackUrl.value || !currentTrack.value) return
+  const revision = generation
+  const position = elapsed.value
+  const track = currentTrack.value
+  const code = audio.value?.error?.code || 0
+  if (recoveryUsed) { fail('媒体恢复失败，请重新点击播放。'); return }
+  recoveryUsed = true
+  recovering = true
+  playbackState.value = 'loading'
+  clearTimer()
+  const diagnostic = new AbortController()
+  const timer = window.setTimeout(() => diagnostic.abort(), 12000)
+  try {
+    const result = await probeMedia(playbackUrl.value, diagnostic.signal)
+    if (revision !== generation) return
+    if (result.recovered || result.status === 410 && !track.local_url && track.provider !== 'local') {
+      await playTrack({ ...track, token: undefined }, undefined, true, position)
+    } else fail(mediaFailureMessage(result.status, code))
+  } catch {
+    if (revision === generation) fail('媒体连接中断，请检查网络后重试。')
+  } finally {
+    window.clearTimeout(timer)
+    if (revision === generation) recovering = false
+  }
 }
 export async function nextTrack(direction = 1, automatic = false) {
   if (!queue.value.length) return

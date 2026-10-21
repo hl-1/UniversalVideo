@@ -24,9 +24,36 @@ from backend.modules.video import summary as video_summary
 from backend.modules.video import tasks as video_tasks
 from backend.modules.video import thumbnails as video_thumbnails
 from backend.modules.video import urls as video_urls
+from backend.modules.video import bilibili_session
+from backend.modules.video import subtitles as video_subtitles
 
 
 router = APIRouter()
+
+
+@router.get("/api/videos/bilibili/session")
+def bilibili_status():
+    return bilibili_session.status(accounts.current().id)
+
+
+@router.delete("/api/videos/bilibili/session")
+def bilibili_disconnect():
+    return bilibili_session.disconnect(accounts.current().id)
+
+
+@router.post("/api/videos/bilibili/qr")
+def bilibili_create_qr():
+    return bilibili_session.create_qr(accounts.current().id)
+
+
+@router.get("/api/videos/bilibili/qr/{login_id}")
+def bilibili_poll_qr(login_id: str):
+    return bilibili_session.poll_qr(accounts.current().id, login_id)
+
+
+@router.delete("/api/videos/bilibili/qr/{login_id}")
+def bilibili_cancel_qr(login_id: str):
+    return bilibili_session.cancel_qr(accounts.current().id, login_id)
 
 
 @router.post("/api/parse", response_model=video_schemas.ParseResponse)
@@ -147,6 +174,33 @@ def summary_endpoint(payload: video_schemas.SummaryRequest) -> video_schemas.Sum
     relation = video_history.validate_relation(payload.parse_record_id, video_urls.normalize_url(str(payload.url)))
     task_id = uuid.uuid4().hex[:12]
     task = video_tasks.SummaryTask(task_id=task_id, url=str(payload.url))
+    if accounts.principal.get() and video_urls._is_bilibili_url(task.url):
+        task.bilibili_prepared = True
+        if payload.bilibili_subtitle_policy == "prompt":
+            # Use the actor's credentials, including when an admin opens another user's record.
+            uid = accounts.current().id
+            cookie_header, session_raw = "", None
+            try:
+                # Count automated probing, but never count the human QR wait or persist a failed admission.
+                with task.timing.stage("source", "字幕与转写准备"):
+                    cookie_header, session_raw = bilibili_session.cookie_header(uid)
+                    task.prepared_source = video_subtitles._extract_bilibili_api_summary_source(
+                        task.url, cookie_header=cookie_header, strict=True,
+                    )
+            except video_subtitles.BilibiliLoginRequired as exc:
+                if not (cookie_header and bilibili_session.still_valid(uid, session_raw)):
+                    bilibili_session.invalidate(uid, session_raw)
+                    raise HTTPException(409, {"code": "bilibili_login_required", "message": str(exc)}) from None
+                # An independently verified login with no caption tracks may offer speech.
+                task.timing.update("source", status="finished")
+            except video_subtitles.BilibiliSubtitleError as exc:
+                raise HTTPException(502, {"code": "bilibili_subtitle_unavailable", "message": str(exc)}) from None
+            if task.prepared_source is None:
+                raise HTTPException(409, {
+                    "code": "bilibili_speech_confirmation_required",
+                    "message": "本视频暂无可用字幕，需使用语音转写，耗时通常更长。是否继续？",
+                })
+            task.timing.update("queue", started_at_ms=task.timing.now(), elapsed_ms=0)
     task.generate_mind_map = payload.generate_mind_map
     task.parse_record_id = payload.parse_record_id
     if relation:

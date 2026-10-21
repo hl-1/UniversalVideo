@@ -230,6 +230,17 @@ class LyricClassificationTests(unittest.TestCase):
 
 
 class PendingWorkTests(unittest.TestCase):
+    @patch.object(runtime.service, 'network_allowed', return_value=True)
+    def test_changed_source_candidates_are_evaluated_before_old_pool(self, _):
+        row = self.row()
+        row['context']['candidates'] = [
+            {'key':'old', 'title':'Old', 'artist':'Artist'},
+            {'key':'new', 'title':'New', 'artist':'Artist'}]
+        row['context']['adjustment_candidates'] = ['new']
+        self.assertEqual(runtime.pending_tool(row, set()), ('get_track_features', {'keys':['new']}))
+        row['context']['candidates'][1]['analysis'] = {'features':{}}
+        self.assertEqual(runtime.pending_tool(row, set()), ('validate_tracks', {'keys':['new']}))
+
     def row(self):
         return {'request': {'parsed': ParsedNeed().model_dump()}, 'context': {
             'personal_searched': True, 'candidates': [], 'limits': {'candidates': 100},
@@ -241,7 +252,7 @@ class PendingWorkTests(unittest.TestCase):
         action = runtime.pending_tool(row, set())
         self.assertEqual(action[0], 'get_playlist_tracks')
         self.assertEqual(action[1]['playlist_id'], '123')
-        attempted = {runtime.store.encode(list(action))}
+        attempted = {runtime.store.tool_signature(*action)}
         self.assertIsNone(runtime.pending_tool(row, attempted))
 
     @patch.object(runtime.service, 'network_allowed', return_value=True)
@@ -256,7 +267,7 @@ class PendingWorkTests(unittest.TestCase):
         row = self.row()
         row['request']['parsed']['target_count'] = 20
         with patch.object(service, 'qualified', return_value=[]), patch.object(service, 'deduplicated') as unique:
-            for count, size in ((0, 5), (16, 2), (19, 1)):
+            for count, size in ((0, 3), (16, 2), (19, 1)):
                 unique.return_value = [{}] * count
                 self.assertEqual(service.batch_size(row), size)
         row['context']['limits']['network_requests'] = 300

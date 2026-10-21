@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 import json
 import threading
@@ -32,8 +34,8 @@ def audio_path(filename: str) -> Path:
         accounts.resource("file", filename)
     if Path(filename).name != filename or "/" in filename or "\\" in filename:
         raise HTTPException(422, "音频文件名无效。")
-    path = (DOWNLOAD_DIR / filename).resolve()
-    if not path.is_relative_to(DOWNLOAD_DIR.resolve()) or not path.is_file():
+    path = storage.resource_path("file", filename) if accounts.principal.get() else storage.owned_path("file", filename)
+    if not path.is_file():
         raise HTTPException(404, "音频文件不存在。")
     if path.suffix.lower() not in {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".opus", ".aac"}:
         raise HTTPException(422, "请选择音频文件。")
@@ -41,7 +43,8 @@ def audio_path(filename: str) -> Path:
 
 
 def cache_path(filename: str) -> Path:
-    return DOWNLOAD_DIR / "_lyrics" / (hashlib.sha256(filename.encode()).hexdigest() + ".json")
+    row = accounts.resource("file", filename) if accounts.principal.get() else None
+    return storage.owned_path("lyrics", hashlib.sha256(filename.encode()).hexdigest() + ".json", uid=row["user_id"] if row else None)
 
 
 def decode_lrc(data: bytes) -> str:

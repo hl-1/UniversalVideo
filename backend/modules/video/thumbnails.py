@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -35,7 +37,7 @@ def _cache_thumbnail(url: str) -> str:
     response = fetch_image(url)
     ext = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(response.media_type, "jpg")
     filename = f"video-{accounts.owner_id()}-{hashlib.sha256(url.encode()).hexdigest()[:24]}.{ext}"
-    path = paths.THUMBNAIL_DIR / filename
+    path = storage.path("thumbnail", filename)
     path.write_bytes(response.body)
     accounts.register_resource("thumbnail", filename, {"filename": filename, "size": path.stat().st_size})
     return _local_thumbnail(filename)

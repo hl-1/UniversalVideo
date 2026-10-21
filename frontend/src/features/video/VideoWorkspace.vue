@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import MindMapCanvas from './components/MindMapCanvas.vue'
 import ExecutionTiming from './components/ExecutionTiming.vue'
+import BilibiliLoginDialog from './components/BilibiliLoginDialog.vue'
 import VideoHistory from './components/VideoHistory.vue'
 import WatermarkEditor from '../watermark/WatermarkEditor.vue'
 import { ArrowRight, Download, Eraser, ExternalLink, History, LoaderCircle, Music2, Play, RotateCcw, ShieldCheck, Trash2, Video, X } from 'lucide-vue-next'
@@ -10,6 +11,8 @@ import { useVideoWorkspace } from './useVideoWorkspace'
 const emit = defineEmits<{ back: []; activate: [] }>()
 const returnMusicCenter = () => emit('back')
 const {
+  bilibiliStatus, bilibiliDialog, bilibiliForSummary, bilibiliSpeechOnly, bilibiliBusy, bilibiliError, bilibiliQr,
+  openBilibiliLogin, refreshBilibiliQr, closeBilibiliLogin, disconnectBilibili,
   activeRecordId,
   browserBusy,
   browserSession,
@@ -182,7 +185,7 @@ defineExpose({ open })
                   class="preview-play-button"
                   :aria-label="previewState === 'error' ? '重新连接视频' : '播放视频'"
                   :title="previewState === 'error' ? '重新连接视频' : '播放视频'"
-                  @click="startPreview"
+                  @click="startPreview()"
                 >
                   <RotateCcw v-if="previewState === 'error'" :size="21" /><Play v-else :size="21" />
                 </button>
@@ -226,6 +229,12 @@ defineExpose({ open })
                 {{ loadingSummary ? '启动生成中' : generateMindMap ? '生成总结与思维导图' : '生成 AI 总结' }}
               </button>
               <label class="generation-option"><input v-model="generateMindMap" type="checkbox" :disabled="!canSummarize" />同时生成思维导图</label>
+              <div v-if="sourceHost === 'bilibili.com' || sourceHost.endsWith('.bilibili.com') || sourceHost === 'b23.tv'" class="bili-binding">
+                <span>{{ bilibiliStatus.bound ? `B站已连接 · ${bilibiliStatus.nickname}` : 'B站未连接' }}</span>
+                <button v-if="bilibiliStatus.bound" :disabled="bilibiliBusy" @click="disconnectBilibili">解除绑定</button>
+                <button v-else :disabled="bilibiliBusy" @click="openBilibiliLogin">扫码登录</button>
+                <small v-if="bilibiliError && !bilibiliDialog" role="alert">{{ bilibiliError }}</small>
+              </div>
             </div>
           </div>
 
@@ -342,8 +351,12 @@ defineExpose({ open })
       </section>
     </main>
   </div>
+  <BilibiliLoginDialog :open="bilibiliDialog" :for-summary="bilibiliForSummary" :speech-only="bilibiliSpeechOnly" :busy="bilibiliBusy" :error="bilibiliError" :qr="bilibiliQr" @close="closeBilibiliLogin()" @speech="closeBilibiliLogin('speech')" @refresh="refreshBilibiliQr" />
 </template>
 
 <style scoped>
+.bili-binding { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: #64748b; }
+.bili-binding button { border: 0; background: transparent; padding: 5px 0; font: inherit; color: #4268d9; cursor: pointer; }
+.bili-binding small { width: 100%; color: #bf3445; }
 .generation-option{display:flex;align-items:center;gap:8px;font-size:13px;color:#52647c;padding-top:10px}.generation-option input{width:16px;height:16px}
 </style>

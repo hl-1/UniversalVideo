@@ -8,7 +8,7 @@ from typing import Annotated
 from urllib.parse import unquote, urlparse
 
 import requests
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter
 
@@ -117,10 +117,11 @@ def _get_preview_session(token: str) -> PreviewSession:
         return session
 
 
-@router.get("/api/previews/{token}/content")
+@router.api_route("/api/previews/{token}/content", methods=["GET", "HEAD"])
 def preview_content(
     token: str,
     range_header: Annotated[str | None, Header(alias="Range")] = None,
+    request: Request = None,
 ) -> StreamingResponse:
     session = _get_preview_session(token)
     if range_header and not video_constants.PREVIEW_RANGE_PATTERN.fullmatch(range_header.strip()):
@@ -129,12 +130,16 @@ def preview_content(
     headers = {
         **video_constants.DOUYIN_HEADERS,
         "Referer": session.referer,
+        "Accept-Encoding": "identity",
     }
     if range_header:
         headers["Range"] = range_header.strip()
 
+    if request and request.headers.get("if-range"):
+        headers["If-Range"] = request.headers["if-range"]
     try:
-        upstream = requests.get(
+        fetch = requests.head if request and request.method == "HEAD" else requests.get
+        upstream = fetch(
             session.media_url,
             headers=headers,
             stream=True,
@@ -145,6 +150,10 @@ def preview_content(
         raise HTTPException(status_code=502, detail="连接抖音视频源失败，请重新解析后重试。") from exc
 
     content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    if upstream.status_code == 416:
+        content_range = upstream.headers.get("Content-Range")
+        upstream.close()
+        raise HTTPException(416, "播放位置超出视频范围。", headers={"Content-Range": content_range} if content_range else None)
     if upstream.status_code not in {200, 206} or not (
         content_type.startswith("video/") or content_type == "application/octet-stream"
     ):
@@ -158,6 +167,11 @@ def preview_content(
     response_headers = {
         name: value for name, value in upstream.headers.items() if name.lower() in allowed_headers
     }
+
+    response_headers["Cache-Control"] = "private, no-store"
+    if request and request.method == "HEAD":
+        upstream.close()
+        return Response(status_code=upstream.status_code, headers=response_headers)
 
     def body():
         try:

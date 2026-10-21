@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage, paths
+
 import json
 import time
 from pathlib import Path
@@ -35,12 +37,13 @@ class SettingsUpdate(BaseModel):
     music_agent_enabled: bool = False
     music_agent_network_enabled: bool = True
     music_agent_sources: list[Literal["netease", "qq", "kugou"]] = Field(default_factory=lambda: ["netease", "qq", "kugou"])
-    music_agent_decisions: int = Field(default=12, ge=2, le=12)
+    music_agent_decisions: int = Field(default=6, ge=2, le=6)
+    music_agent_model_calls: int = Field(default=40, ge=1, le=40)
     music_agent_network_requests: int = Field(default=300, ge=160, le=600)
     music_agent_search_rounds: int = Field(default=5, ge=0, le=5)
     music_agent_candidates: int = Field(default=100, ge=1, le=100)
     music_agent_seconds: int = Field(default=600, ge=30, le=600)
-    music_agent_tokens: int = Field(default=200000, ge=2000, le=200000)
+    music_agent_tokens: int = Field(default=150000, ge=2000, le=150000)
     music_agent_concurrency: int = Field(default=2, ge=1, le=8)
     music_agent_api: Literal["auto", "chat", "responses"] = "auto"
     registration_enabled: bool
@@ -158,7 +161,7 @@ def delete_user(uid: int):
     for callback in accounts.cancel_callbacks:
         callback(uid)
     for row in files:
-        remove_file(row["kind"], row["resource_key"])
+        remove_file(row["kind"], row["resource_key"], uid=uid)
     accounts.audit("user_delete", str(uid))
     accounts.revoke_all(uid)
     return {"ok": True}
@@ -214,22 +217,16 @@ def data(kind: DataKind = "file", user_id: int | None = None, q: str = Query(def
     return {"items": items, "total": total}
 
 
-def remove_file(kind: str, key: str):
-    directories = {"file": "", "image": "_images", "thumbnail": "_thumbnails", "summary_file": "_summaries"}
-    if kind not in directories:
+def remove_file(kind: str, key: str, *, uid: int | None = None):
+    if kind not in {"file", "image", "thumbnail", "summary_file"}:
         return
-    if Path(key).name != key or any(char in key for char in ("/", "\\", ":", "\x00")):
-        raise HTTPException(422, "文件路径无效。")
-    root = ROOT_DOWNLOADS() / directories[kind]
-    path = root / key
-    if path.resolve().parent != root.resolve():
-        raise HTTPException(422, "文件路径无效。")
-    path.unlink(missing_ok=True)
+    if uid is None:
+        raise ValueError("File deletion requires the original resource owner")
+    storage.owned_path(kind, key, uid=uid).unlink(missing_ok=True)
 
 
 def ROOT_DOWNLOADS():
-    from backend.modules.music.library import DOWNLOAD_DIR
-    return DOWNLOAD_DIR
+    return paths.DOWNLOAD_DIR
 
 
 @router.delete("/data/{kind}/{key}")
@@ -243,8 +240,7 @@ def delete_data(kind: DataKind, key: str):
         return delete_record(key)
     if kind not in DATA_TABLES:
         row = accounts.resource(kind, key)
-        for callback in accounts.cancel_callbacks:
-            callback(row["user_id"], key)
+        accounts.cancel_resources(row["user_id"], key)
     with accounts.database() as cursor:
         if kind in DATA_TABLES:
             table, field = DATA_TABLES[kind]
@@ -254,7 +250,8 @@ def delete_data(kind: DataKind, key: str):
             video_store.tombstone(cursor, kind, key)
             if kind == "file":
                 cursor.execute("DELETE FROM music_downloads WHERE filename=%s", (key,))
-    remove_file(kind, key)
+    if kind not in DATA_TABLES:
+        remove_file(kind, key, uid=row["user_id"])
     accounts.audit("data_delete", f"{kind}:{key}")
     return {"ok": True}
 

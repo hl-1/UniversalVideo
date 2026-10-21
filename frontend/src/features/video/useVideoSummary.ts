@@ -1,9 +1,10 @@
 import type { ComputedRef, Ref } from 'vue'
-import { extractHttpUrl } from '../../shared/utils/downloadInput'
-import { readApiError } from '../../shared/api/client'
-import { filterMindMapTask, type MindMapTask } from './mindMap'
+import { extractHttpUrl } from '../../shared/utils/downloadInput.ts'
+import { readApiError } from '../../shared/api/client.ts'
+import { filterMindMapTask, type MindMapTask } from './mindMap.ts'
 import type { MapView } from './videoHistory'
 import type { ParseResult, SummaryTaskResult, SummaryTab } from './types'
+import type { BilibiliChoice } from './useBilibiliSession'
 
 type SummaryContext = {
   url: Ref<string>
@@ -27,6 +28,8 @@ type SummaryContext = {
   mindMapPollingTimer: Ref<number | undefined>
   refreshTaskReferences: () => Promise<void>
   scheduleVideoView: () => void
+  requestBilibiliLogin: () => Promise<BilibiliChoice>
+  requestBilibiliSpeechConfirmation: () => Promise<BilibiliChoice>
 }
 
 export function useVideoSummary(context: SummaryContext) {
@@ -52,6 +55,8 @@ export function useVideoSummary(context: SummaryContext) {
     mindMapPollingTimer,
     refreshTaskReferences,
     scheduleVideoView,
+    requestBilibiliLogin,
+    requestBilibiliSpeechConfirmation,
   } = context
   let summaryPolling = false
   let mapPolling = false
@@ -77,6 +82,7 @@ export function useVideoSummary(context: SummaryContext) {
     const selection = ++revisions.summary
     revisions.map++
     const recordId = activeRecordId.value
+    const withMindMap = generateMindMap.value
     errorMessage.value = ''
     saveMessage.value = ''
     loadingSummary.value = true
@@ -88,11 +94,24 @@ export function useVideoSummary(context: SummaryContext) {
     stopMindMapPolling()
 
     try {
-      const response = await fetch('/api/summaries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: target, parse_record_id: recordId || undefined, generate_mind_map: generateMindMap.value }),
-      })
+      let policy: 'prompt' | 'speech' = 'prompt'
+      let response: Response
+      for (;;) {
+        response = await fetch('/api/summaries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: target, parse_record_id: recordId || undefined, generate_mind_map: withMindMap, bilibili_subtitle_policy: policy }),
+        })
+        if (revision !== revisions.record || selection !== revisions.summary) return
+        if (response.status !== 409) break
+        const code = (await response.clone().json().catch(() => null))?.detail?.code
+        if (code !== 'bilibili_login_required' && code !== 'bilibili_speech_confirmation_required') break
+        const choice = code === 'bilibili_login_required'
+          ? await requestBilibiliLogin()
+          : await requestBilibiliSpeechConfirmation()
+        if (choice === 'cancel' || revision !== revisions.record || selection !== revisions.summary) return
+        policy = choice === 'speech' ? 'speech' : 'prompt'
+      }
       if (!response.ok) throw new Error(await readApiError(response))
       const data: { task_id: string; mind_map_task_id?: string } = await response.json()
       if (revision !== revisions.record || selection !== revisions.summary) return

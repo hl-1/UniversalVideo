@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import re
 import json
 import threading
@@ -96,7 +98,7 @@ def _run_music_batch(batch: dict[str, Any]) -> None:
             video_tasks._set_task(entry["task"], status="running", message="正在解析音轨")
         attempted = True
         try:
-            if entry.get("playlist_pending") and entry["task"].filename and (paths.DOWNLOAD_DIR / entry["task"].filename).is_file():
+            if entry.get("playlist_pending") and entry["task"].filename and (storage.owned_path("file", entry["task"].filename, uid=entry["task"].user_id or None)).is_file():
                 video_tasks._set_task(entry["task"], status="finished", progress=100, error=None)
             else:
                 video_downloads._run_audio_download(entry["task"])
@@ -193,7 +195,7 @@ def retry_music_batch(batch_id: str) -> dict[str, Any]:
         return response
 
 
-@router.get("/api/music/batches/{batch_id}/archive")
+@router.api_route("/api/music/batches/{batch_id}/archive", methods=["GET", "HEAD"])
 def music_batch_archive(batch_id: str) -> FileResponse:
     with video_tasks.music_batches_lock:
         batch = _get_music_batch(batch_id)
@@ -203,7 +205,7 @@ def music_batch_archive(batch_id: str) -> FileResponse:
                    if entry["task"].status == "finished" and entry["task"].filename]
     if not entries:
         raise HTTPException(409, "没有成功下载的音频可供打包。")
-    archive_dir = paths.DOWNLOAD_DIR / "_batches"
+    archive_dir = storage.directory("batch", uid=batch.get("user_id"))
     archive_dir.mkdir(exist_ok=True)
     archive = archive_dir / f"{uuid.uuid4().hex}.zip"
     try:
@@ -211,8 +213,8 @@ def music_batch_archive(batch_id: str) -> FileResponse:
             for index, track, filename in entries:
                 if accounts.principal.get():
                     accounts.resource("file", filename)
-                file_path = (paths.DOWNLOAD_DIR / filename).resolve()
-                if file_path.parent != paths.DOWNLOAD_DIR.resolve() or not file_path.is_file():
+                file_path = storage.resource_path("file", filename) if accounts.principal.get() else storage.owned_path("file", filename)
+                if not file_path.is_file():
                     raise HTTPException(404, f"音频文件不存在：{track.title}")
                 label = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', " ", f"{track.artist} - {track.title}").strip(" .")[:120] or "audio"
                 bundle.write(file_path, arcname=f"{index:03d}. {label}{file_path.suffix}")

@@ -51,7 +51,8 @@ def export_audio(source: Path, target: Path, ffmpeg_dir: Path, expected_duration
     try:
         result = subprocess.run(
             [str(ffmpeg_dir / executable_name("ffmpeg")), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-             "-i", str(source), "-map", "0:a:0", "-vn", *codec, str(partial)],
+             "-i", str(source), "-map", "0:a:0", "-vn", *codec,
+             *(["-movflags", "+faststart"] if target.suffix == ".m4a" else []), str(partial)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
         )
         if result.returncode:
@@ -71,12 +72,13 @@ def download_audio(
     ffmpeg_dir: Path, options: dict, progress: Progress, direct: bool = False,
     expected_duration: float | None = None,
     phase: Callable[[str, str], None] | None = None,
+    work_dir: Path | None = None,
 ) -> Path:
     if not all((ffmpeg_dir / executable_name(name)).is_file() for name in ("ffmpeg", "ffprobe")):
         raise RuntimeError("音轨下载需要 ffmpeg 和 ffprobe，请检查安装目录。")
     stem = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:80] or "audio"
     target = download_dir / f"{task_id}.{stem}.{output_format}"
-    with tempfile.TemporaryDirectory(prefix=f"audio-{task_id}-", dir=download_dir) as working:
+    with tempfile.TemporaryDirectory(prefix=f"audio-{task_id}-", dir=work_dir or download_dir) as working:
         work = Path(working)
         if phase:
             phase("audio_download", "下载音轨")
@@ -133,5 +135,7 @@ def download_audio(
         progress(88, "正在提取音轨并校验时长")
         if phase:
             phase("audio_convert", "音轨转换与校验")
-        export_audio(source, target, ffmpeg_dir, expected_duration)
+        staged = work / target.name
+        export_audio(source, staged, ffmpeg_dir, expected_duration)
+        staged.replace(target)
     return target

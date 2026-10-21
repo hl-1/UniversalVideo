@@ -2,6 +2,8 @@
 
 当前版本：`v1.0.0`
 
+下载及生成文件按账号保存于 `downloads/users/<用户ID>/`，包含 files、thumbnails、images、lyrics、summaries、batches、tmp；云端对应 `/opt/videodream/downloads/users/<用户ID>/`。文件仍保存在服务器，另存为手机/电脑后服务器原件保留。播放、图片与下载通过专用 HttpOnly 媒体 Cookie 鉴权，不依赖 Service Worker 就绪；业务 API 继续使用 Bearer。已有公共目录须停服备份并执行 `scripts/migrate-user-storage.py`，不能直接只更新镜像。详见[完整规格](spec/VideoDream-用户与管理员功能设计.md#11-云端媒体鉴权与播放修复2026-10-21)和[迁移部署说明](deploy/README.md#13-用户文件目录迁移与媒体鉴权更新)。
+
 VideoDream 是一个本地运行的视频与音乐工作台，前端使用 Vue 3 + Vite，后端使用 FastAPI。它封装 `yt-dlp`、浏览器页面解析和任务下载能力，支持先解析视频信息，再选择格式和保存位置。
 
 ## 已支持的网站

@@ -310,7 +310,7 @@ curl --fail --silent --show-error https://xianyue.huanliyu.cn/api/health
 5. 已配置的 AI 总结、导图、截图识别或转写。
 6. 原有 `huanliyu.cn`、`code.huanliyu.cn` 仍能正常访问。
 
-健康接口只证明应用存活，不检查数据库和 Redis。上述登录、初始化和业务验证用于确认完整链路。媒体认证依赖 Service Worker，公网必须使用 HTTPS。
+健康接口只证明应用存活，不检查数据库和 Redis。上述登录、初始化和业务验证用于确认完整链路。新版媒体认证使用专用 HttpOnly Cookie，不依赖 Service Worker；生产 Cookie 启用 Secure，公网必须使用 HTTPS。可检查 `/auth-worker.js`：新版只有 install/activate 接管逻辑；若仍包含 credential() 或 fetch 拦截，说明线上仍提供旧 Worker，须核对应用镜像和代理所指向的实例。
 
 测试数据持久化前先等在途任务完成，然后重建应用：
 
@@ -319,11 +319,13 @@ cd /opt/videodream
 docker compose -f deploy/compose.yml up -d --no-build --force-recreate app
 ```
 
-重新登录，确认账号、历史和下载文件仍在。下载文件位于服务器 `/opt/videodream/downloads`，用户另存为后才进入自己的电脑。重启可能中断运行中的任务。
+重新登录，确认账号、历史和下载文件仍在。新版下载文件位于服务器 `/opt/videodream/downloads/users/<用户ID>/`，用户另存为后才进入自己的电脑。旧公共目录升级必须先执行第 13 节迁移。重启可能中断运行中的任务。
 
 ## 10. 更新、备份和回滚
 
 ### 更新
+
+首次从公共文件目录升级到用户目录时，按第 13 节执行停服、备份、文件迁移及重建；下列常规更新命令不能代替首次目录迁移。仅更新本地代码或构建本地前端不会改变云端运行版本，云端须取得对应源代码并重新构建应用镜像。
 
 先等待任务完成，备份 `videodream` 数据库、`downloads/`、`.run/` 和 `deploy/.env.production`，再执行：
 
@@ -431,3 +433,50 @@ Redis 沿用已有 key、类型、值、TTL、读写与失效规则，唯一部�
 | `videodream:video:worker:{worker_id}`（`videodream:video:worker:host:1:abc...`） | String JSON：`{"alive":true}` | 45 秒，每 10 秒续期，正常关闭删除 |
 
 MySQL 是长期数据来源，Redis 不可用时认证拒绝放行；缓存丢失后重新解析，登录会话丢失后重新登录。总结、字幕、导图及任务结果继续按现有事务写入 MySQL，不增加新的缓存一致性规则。完整已有契约见账号代码及视频规格。本次无应用表/key 定义变更，因此无需新增表迁移或 key 转换脚本；部署回滚保留独立库与文件，后续版本升级按第 10 节匹配备份。
+
+## 13. 用户文件目录迁移与媒体鉴权更新
+
+2026-10-21 更新：媒体读取改用专用 HttpOnly Cookie；新文件保存至 `/app/downloads/users/{user_id}/`，宿主机对应 `/opt/videodream/downloads/users/{user_id}/`。下设 files、thumbnails、images、lyrics、summaries、batches、tmp。原文件 URL 保持不变，原挂载及内部 8001 端口不变。生产继续设置 `VIDEODREAM_COOKIE_SECURE=true` 并通过当前 HTTPS 域名同源访问，代理须传递 Cookie、Set-Cookie、Range、If-Range 和媒体响应头。
+
+首次升级不能只替换镜像。先等待全部下载/上传/转码等任务完成，并准备旧镜像标签供回滚；保留现有数据库、文件和配置外部备份。构建新镜像后停止 app，迁移工具随新镜像发布，通过一次性容器离线执行：
+
+```bash
+cd /opt/videodream
+docker compose -f deploy/compose.yml build app
+docker compose -f deploy/compose.yml stop app
+docker compose -f deploy/compose.yml run --rm --no-deps app \
+  python scripts/migrate-user-storage.py plan \
+  --manifest /app/.run/storage-migrations/user-storage-v1.json
+docker compose -f deploy/compose.yml run --rm --no-deps app \
+  python scripts/migrate-user-storage.py status \
+  --manifest /app/.run/storage-migrations/user-storage-v1.json
+```
+
+检查 conflicts、missing 和 unmapped。conflicts 非空须先解决，再用新的 manifest 文件名生成计划；missing 表示已缺失的索引文件，unmapped 保留原位且不会自动分配用户。确认应用及所有其他写入进程已停止后执行：
+
+```bash
+docker compose -f deploy/compose.yml run --rm --no-deps app \
+  python scripts/migrate-user-storage.py apply --offline-confirmed \
+  --manifest /app/.run/storage-migrations/user-storage-v1.json
+docker compose -f deploy/compose.yml run --rm --no-deps app \
+  python scripts/migrate-user-storage.py status \
+  --manifest /app/.run/storage-migrations/user-storage-v1.json
+docker compose -f deploy/compose.yml up -d --no-build --force-recreate app
+```
+
+使用去水印可选构建的部署，应在以上每条 Compose 命令保留原 `-f deploy/compose.inpainting.yml`。脚本迁移前自动在 manifest 同级创建数据库 SQL、downloads ZIP 备份并校验 ZIP；确保该持久化卷有备份所需空间，备份含敏感业务数据，限制访问并按现有备份制度保存。清单和备份不可放在 downloads 中。宿主机 downloads 和 .run 继续归 UID/GID 10001。中断后保持停服，使用原 manifest 再次 apply；每次执行均保留当时的备份，识别已迁移文件并验证哈希，不能手工删除进度记录后覆盖冲突文件。
+
+验证两个普通用户和管理员的播放/下载、跨用户拒绝、封面、去水印、总结和删除归属；验证真实手机及桌面播放和拖动进度、旧 Worker 自动升级、退出/停用后旧会话被拒绝。认证拒绝日志可用 request_id 和 auth 来源区分 Cookie/Bearer 问题，不复制完整凭证到日志。新版 Cookie 由登录或正常刷新自动获取。
+
+本次不增加或修改 MySQL 表结构、索引、外键和 Redis key/TTL；只在现有 account_migrations 写入 `user-storage-v1` 完成记录。完整既有结构、数据关系、会话 key 示例与一致性规则见[账号规格第 15 节](../spec/VideoDream-用户与管理员功能设计.md#15-本次-mysql--redis-数据契约)。目录迁移不是建表迁移，不能依靠数据库结构兼容省略文件迁移。
+
+若需回滚，先等待任务完成并停止应用，再用当前新版镜像执行反向迁移：
+
+```bash
+docker compose -f deploy/compose.yml stop app
+docker compose -f deploy/compose.yml run --rm --no-deps app \
+  python scripts/migrate-user-storage.py rollback --offline-confirmed \
+  --manifest /app/.run/storage-migrations/user-storage-v1.json
+```
+
+反向迁移先备份当前数据，再恢复全部当前用户文件到旧布局，包含新版上线后新增的文件；冲突时停止，不覆盖不同内容。成功后删除完成标记，再切换到事先保存的旧镜像并启动。不要只回滚镜像，也不要直接覆盖升级前备份而丢失新增文件。

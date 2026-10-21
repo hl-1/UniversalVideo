@@ -16,11 +16,21 @@ from yt_dlp.utils import DownloadError
 
 logger = logging.getLogger("videodream.summary")
 from backend.core import paths
+from backend.infrastructure import network
+from backend.modules.accounts import service as accounts
 from backend.modules.video import constants as video_constants
 from backend.modules.video import parsing as video_parsing
 from backend.modules.video import schemas as video_schemas
 from backend.modules.video import thumbnails as video_thumbnails
 from backend.modules.video import urls as video_urls
+
+
+class BilibiliLoginRequired(RuntimeError):
+    pass
+
+
+class BilibiliSubtitleError(RuntimeError):
+    pass
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -273,7 +283,7 @@ def _bilibili_cookie_header(cookie_jar: Any) -> str:
     cookies = {
         cookie.name: cookie.value
         for cookie in cookie_jar
-        if str(cookie.domain).lower().lstrip(".").endswith("bilibili.com")
+        if str(cookie.domain).lower().lstrip(".") == "bilibili.com"
     }
     if not cookies.get("SESSDATA"):
         return ""
@@ -299,9 +309,24 @@ def _extract_bilibili_browser_cookie_header() -> str:
 
 def _extract_bilibili_api_summary_source(
     url: str,
+    *, cookie_header: str = "", strict: bool = False,
 ) -> tuple[dict[str, Any], str, str, list[video_schemas.SubtitleSegment]] | None:
+    if strict and (urlparse(url).hostname or "").lower() == "b23.tv":
+        try:
+            response = network.public_get(url, headers=video_constants.DEFAULT_HEADERS, timeout=(5, 10))
+            response.raise_for_status()
+            resolved = response.url
+            response.close()
+            host = (urlparse(resolved).hostname or "").lower()
+            if host != "bilibili.com" and not host.endswith(".bilibili.com"):
+                raise BilibiliSubtitleError("B站短链接未指向有效的视频地址。")
+            url = resolved
+        except requests.RequestException:
+            raise BilibiliSubtitleError("B站短链接解析失败，请使用完整视频链接或稍后重试。") from None
     match = re.search(r"/video/(BV[0-9A-Za-z]+)", url, flags=re.IGNORECASE)
     if not match:
+        if strict:
+            raise BilibiliSubtitleError("请使用 B站视频的完整 BV 链接。")
         return None
     bvid = match.group(1)
     headers = {**video_constants.DEFAULT_HEADERS, "Referer": url}
@@ -310,20 +335,29 @@ def _extract_bilibili_api_summary_source(
             "https://api.bilibili.com/x/web-interface/view",
             params={"bvid": bvid},
             headers=headers,
-            timeout=(10, 30),
+            timeout=(5, 12) if strict else (10, 30),
+            allow_redirects=False,
         )
         view_response.raise_for_status()
         view_payload = view_response.json()
         view_data = view_payload.get("data") if isinstance(view_payload, dict) else None
-        if view_payload.get("code") != 0 or not isinstance(view_data, dict) or view_data.get("bvid", bvid) != bvid:
+        if not isinstance(view_payload, dict) or view_payload.get("code") != 0 or not isinstance(view_data, dict) or view_data.get("bvid", bvid) != bvid:
+            if strict:
+                raise BilibiliSubtitleError("B站视频信息获取失败，请确认视频可访问后重试。")
             return None
         pages = view_data.get("pages")
         if not isinstance(pages, list) or not pages:
+            if strict:
+                raise BilibiliSubtitleError("B站返回的视频分集信息无效。")
             return None
         page_number = max(1, video_thumbnails._safe_int(parse_qs(urlparse(url).query).get("p", [1])[0]) or 1)
-        page = next((item for item in pages if isinstance(item, dict) and item.get("page") == page_number), pages[0])
+        page = next((item for item in pages if isinstance(item, dict) and item.get("page") == page_number), None)
+        if page is None and page_number == 1:
+            page = pages[0]
         cid = page.get("cid") if isinstance(page, dict) else None
         if not cid:
+            if strict:
+                raise BilibiliSubtitleError("未找到指定的 B站分集，请检查链接的 p 参数。")
             return None
 
         def load_player_payload(request_headers: dict[str, str]) -> dict[str, Any]:
@@ -331,42 +365,68 @@ def _extract_bilibili_api_summary_source(
                 "https://api.bilibili.com/x/player/wbi/v2",
                 params={"bvid": bvid, "cid": cid},
                 headers=request_headers,
-                timeout=(10, 30),
+                timeout=(5, 12) if strict else (10, 30),
+                allow_redirects=False,
             )
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict) or payload.get("code") != 0:
+                if strict:
+                    if isinstance(payload, dict) and payload.get("code") == -101:
+                        raise BilibiliLoginRequired("B站登录已失效，请重新扫码。")
+                    raise BilibiliSubtitleError("B站字幕接口暂不可用或触发访问限制，请稍后重试。")
                 return {}
             data = payload.get("data")
             if not isinstance(data, dict) or data.get("bvid", bvid) != bvid or str(data.get("cid", cid)) != str(cid):
+                if strict:
+                    raise BilibiliSubtitleError("B站字幕响应与当前视频不一致，请稍后重试。")
                 return {}
             return payload
 
-        player_payload = load_player_payload(headers)
+        try:
+            player_payload = load_player_payload(headers)
+        except BilibiliLoginRequired:
+            if not cookie_header:
+                raise
+            headers = {**headers, "Cookie": cookie_header}
+            player_payload = load_player_payload(headers)
         player_data = player_payload.get("data") if isinstance(player_payload.get("data"), dict) else {}
         subtitle_data = player_data.get("subtitle") if isinstance(player_data.get("subtitle"), dict) else {}
         subtitles = subtitle_data.get("subtitles")
         if (not isinstance(subtitles, list) or not subtitles) and player_data.get("need_login_subtitle"):
-            cookie_header = _extract_bilibili_browser_cookie_header()
+            # Desktop browser cookies are only a legacy, unauthenticated script fallback.
+            if not strict and not cookie_header and not accounts.principal.get():
+                cookie_header = _extract_bilibili_browser_cookie_header()
             if cookie_header:
                 headers = {**headers, "Cookie": cookie_header}
                 player_payload = load_player_payload(headers)
                 player_data = player_payload.get("data") if isinstance(player_payload.get("data"), dict) else {}
                 subtitle_data = player_data.get("subtitle") if isinstance(player_data.get("subtitle"), dict) else {}
                 subtitles = subtitle_data.get("subtitles")
+                if strict and not subtitles and player_data.get("need_login_subtitle"):
+                    raise BilibiliLoginRequired("B站登录可能已失效，请重新扫码。")
+            elif strict:
+                raise BilibiliLoginRequired("此视频的字幕需要 B站登录，扫码后可优先使用字幕。")
         if not isinstance(subtitles, list) or not subtitles:
+            if strict and not isinstance(subtitles, list):
+                raise BilibiliSubtitleError("B站返回的字幕列表无效，请稍后重试。")
             return None
         candidates = [item for item in subtitles if isinstance(item, dict) and item.get("subtitle_url")]
         if not candidates:
+            if strict:
+                raise BilibiliSubtitleError("B站返回的字幕地址无效，请稍后重试。")
             return None
         subtitle = sorted(candidates, key=lambda item: _language_rank(str(item.get("lan") or "")))[0]
         subtitle_url = str(subtitle["subtitle_url"])
         if subtitle_url.startswith("//"):
             subtitle_url = "https:" + subtitle_url
-        subtitle_response = requests.get(subtitle_url, headers=headers, timeout=(10, 45))
+        # The subtitle CDN must never receive Bilibili account credentials.
+        subtitle_response = requests.get(subtitle_url, headers={k: v for k, v in headers.items() if k != "Cookie"}, timeout=(10, 45))
         subtitle_response.raise_for_status()
         segments = _parse_subtitle_content(subtitle_response.text, "json")
         if not segments:
+            if strict:
+                raise BilibiliSubtitleError("B站字幕下载成功但内容无效，请稍后重试。")
             return None
         owner = view_data.get("owner") if isinstance(view_data.get("owner"), dict) else {}
         info = {
@@ -378,6 +438,8 @@ def _extract_bilibili_api_summary_source(
         return info, str(subtitle.get("lan") or "zh"), source, segments
     except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError) as exc:
         logger.warning("Bilibili subtitle API failed: %s", type(exc).__name__)
+        if strict:
+            raise BilibiliSubtitleError("B站字幕请求失败，请检查网络或稍后重试。") from None
         return None
 
 

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import re
 import json
 import time
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, unquote
 import logging
 
+import httpx
 from openai import OpenAI, APIConnectionError, APIStatusError
 from urllib.parse import urlparse
 
@@ -47,6 +51,57 @@ def _load_ai_config() -> dict[str, str]:
     return generation.text_config.get() or ai.load_config("text", legacy_path=paths.AI_CONFIG_PATH)
 
 
+def _model_request_options(config: dict[str, str]) -> dict[str, Any]:
+    host = (urlparse(config.get("base_url", "")).hostname or "").lower()
+    if host in {"api.siliconflow.cn", "api.siliconflow.com"} and config.get("model") in {
+        "deepseek-ai/DeepSeek-V4-Flash", "Pro/deepseek-ai/DeepSeek-V4",
+    }:
+        return {"extra_body": {"enable_thinking": False}, "stream": True,
+                "stream_options": {"include_usage": True}}
+    return {}
+
+
+class _IncompleteModelStream(RuntimeError):
+    pass
+
+
+def _record_model_usage(usage, measurement):
+    for field in ("prompt_tokens", "completion_tokens"):
+        value = getattr(usage, field, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            measurement[field] = value
+    details = getattr(usage, "completion_tokens_details", None)
+    value = getattr(details, "reasoning_tokens", None)
+    if isinstance(value, int) and not isinstance(value, bool):
+        measurement["reasoning_tokens"] = value
+
+
+def _read_model_stream(stream, checkpoint, started, measurement):
+    content = []
+    finished = False
+    with stream:
+        for chunk in stream:
+            checkpoint()
+            _record_model_usage(getattr(chunk, "usage", None), measurement)
+            for choice in chunk.choices:
+                if choice.index != 0:
+                    continue
+                text = choice.delta.content or ""
+                reasoning = getattr(choice.delta, "reasoning_content", None)
+                elapsed = (time.monotonic() - started) * 1000
+                if (text or reasoning) and measurement["first_output_ms"] is None:
+                    measurement["first_output_ms"] = elapsed
+                if text:
+                    if measurement["first_content_ms"] is None:
+                        measurement["first_content_ms"] = elapsed
+                    content.append(text)
+                if choice.finish_reason is not None:
+                    finished = True
+    if not finished:
+        raise _IncompleteModelStream("AI 响应流在完成前中断，请重试。")
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="".join(content)))])
+
+
 def _model_completion(client, **kwargs):
     checkpoint = generation.request_checkpoint.get()
     for attempt in range(2):
@@ -56,11 +111,27 @@ def _model_completion(client, **kwargs):
             metric("attempt", 0)
         try:
             with generation.provider_slot(checkpoint):
-                result = client.chat.completions.create(**kwargs)
+                started = time.monotonic()
+                measurement = dict(attempt=attempt + 1, status="failed", first_output_ms=None,
+                                   first_content_ms=None, reasoning_tokens=None, prompt_tokens=None,
+                                   completion_tokens=None,
+                                   thinking_enabled=(kwargs.get("extra_body") or {}).get("enable_thinking"))
+                try:
+                    result = client.chat.completions.create(**kwargs)
+                    if kwargs.get("stream"):
+                        result = _read_model_stream(result, checkpoint, started, measurement)
+                    else:
+                        _record_model_usage(getattr(result, "usage", None), measurement)
+                    checkpoint()
+                    measurement["status"] = "finished"
+                finally:
+                    measurement["elapsed_ms"] = (time.monotonic() - started) * 1000
+                    if metric:
+                        metric("model_request", measurement)
             checkpoint()
             return result
-        except (APIConnectionError, APIStatusError) as exc:
-            retryable = isinstance(exc, APIConnectionError) or exc.status_code in {429, 500, 502, 503, 504}
+        except (APIConnectionError, APIStatusError, httpx.TransportError, _IncompleteModelStream) as exc:
+            retryable = isinstance(exc, (APIConnectionError, httpx.TransportError, _IncompleteModelStream)) or exc.status_code in {429, 500, 502, 503, 504}
             if not retryable or attempt == 1:
                 raise
             delay = 1.0
@@ -128,6 +199,7 @@ def _generate_ai_summary(title: str, webpage_url: str, segments: list[video_sche
             },
         ],
         temperature=0.2,
+        **_model_request_options(config),
     )
     content = completion.choices[0].message.content if completion.choices else None
     summary = str(content or "").strip()
@@ -249,6 +321,7 @@ def _generate_ai_mind_map(title: str, segments: list[video_schemas.SubtitleSegme
             ],
             temperature=0.2,
             response_format={"type": "json_object"},
+            **_model_request_options(config),
         )
         content = completion.choices[0].message.content if completion.choices else None
         if not str(content or "").strip():
@@ -338,8 +411,8 @@ def _save_summary_files(task: video_tasks.SummaryTask, result: video_schemas.Sum
     stem = f"{task.task_id}.{_safe_filename_stem(result.title)}"
     markdown_name = f"{stem}.summary.md"
     json_name = f"{stem}.summary.json"
-    markdown_path = paths.SUMMARY_DIR / markdown_name
-    json_path = paths.SUMMARY_DIR / json_name
+    markdown_path = storage.path("summary_file", markdown_name, uid=task.user_id)
+    json_path = storage.path("summary_file", json_name, uid=task.user_id)
 
     transcript_markdown = "\n".join(f"- [{item.timestamp}] {item.text}" for item in result.transcript)
     markdown_content = (
@@ -380,7 +453,7 @@ def _extract_speech_summary_source(task: video_tasks.SummaryTask, info: dict | N
     options["http_headers"]["Referer"] = task.url
     rows = speech.transcribe_video(
         url=source_url, title=str(info.get("title") or "视频音轨"), task_id=task.task_id,
-        work_root=paths.ROOT_DIR / ".run" / "speech", ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=direct,
+        work_root=storage.directory("temp", uid=task.user_id or None), ffmpeg_dir=paths.FFMPEG_DIR, options=options, direct=direct,
         expected_duration=info.get("duration"),
         checkpoint=lambda: video_tasks._checkpoint(task, {}),
         progress=lambda value, message: video_tasks._set_summary_task(task, progress=value, message=message),
@@ -396,11 +469,22 @@ def _run_summary(task: video_tasks.SummaryTask) -> None:
     metrics_token = generation.request_metrics.set(lambda event, value: task.timing.metric("summary_model", event, value))
     try:
         video_tasks._set_summary_task(task, status="running", progress=8.0, message="正在解析视频字幕")
+        if task.bilibili_prepared and task.prepared_source is None:
+            probe = task.timing.stages.get("source")
+            if probe:
+                # Preserve probe duration while excluding time spent in the AI executor queue.
+                task.timing.update("source", status="running", finished_at_ms=None,
+                                   started_at_ms=task.timing.now() - probe["elapsed_ms"])
         with task.timing.stage("source", "字幕与转写准备"):
             video_tasks._persist_task(task, "summary", force=True)
-            info, language, source, segments = video_subtitles._extract_summary_source(
-                task.url, speech_fallback=lambda info: _extract_speech_summary_source(task, info),
-            )
+            if task.bilibili_prepared:
+                prepared = task.prepared_source
+                task.prepared_source = None
+                info, language, source, segments = prepared or _extract_speech_summary_source(task, None)
+            else:
+                info, language, source, segments = video_subtitles._extract_summary_source(
+                    task.url, speech_fallback=lambda info: _extract_speech_summary_source(task, info),
+                )
         title = str(info.get("title") or "未命名视频")
         webpage_url = str(info.get("webpage_url") or task.url)
         task.source_info = {"title": title, "webpage_url": webpage_url}

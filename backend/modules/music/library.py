@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.core import storage
+
 import hashlib
 import json
 import logging
@@ -313,7 +315,7 @@ def serialize_track(row: dict) -> dict:
     result["automatic_thumbnail"] = result.get("thumbnail")
     result["thumbnail"] = result.get("custom_thumbnail") or result.get("thumbnail")
     if result.get("filename"):
-        exists = (DOWNLOAD_DIR / Path(result["filename"]).name).is_file()
+        exists = (storage.owned_path("file", result["filename"], uid=result.get("user_id"))).is_file()
         result["local_url"] = f"/api/files/{quote(result['filename'], safe='')}" if exists else None
         result["file_available"] = exists
     return result
@@ -321,10 +323,10 @@ def serialize_track(row: dict) -> dict:
 
 def record_download(filename: str, metadata: dict, *, imported: bool = False) -> None:
     safe_name = Path(filename).name
-    if safe_name != filename or not (DOWNLOAD_DIR / safe_name).is_file():
+    if safe_name != filename or not (storage.owned_path("file", safe_name)).is_file():
         raise ValueError("Download file is outside the library")
     track = TrackInput.model_validate(metadata)
-    path = DOWNLOAD_DIR / safe_name
+    path = storage.owned_path("file", safe_name)
     fingerprint = hash_file(path)
     stat = path.stat()
     accounts.register_resource("file", safe_name, {"filename": safe_name, "size": stat.st_size})
@@ -352,7 +354,7 @@ def hash_file(path: Path) -> str:
 def migrate_file_lyrics(cursor, path: Path, key: str) -> None:
     cursor.execute("SELECT * FROM music_lyrics WHERE track_id=%s", (key,))
     existing = cursor.fetchone()
-    cached = DOWNLOAD_DIR / "_lyrics" / (hashlib.sha256(path.name.encode()).hexdigest() + ".json")
+    cached = storage.owned_path("lyrics", hashlib.sha256(path.name.encode()).hexdigest() + ".json", uid=storage.path_owner(path))
     try:
         if cached.is_file() and cached.stat().st_size < 600000:
             data = json.loads(cached.read_text(encoding="utf-8"))
@@ -385,13 +387,14 @@ def inspect_audio(path: Path) -> dict:
     stem = re.sub(r"^(?:[a-f0-9]{12}|import-[a-f0-9]{12}|musicverify[a-z]+)\.", "", path.stem)
     thumbnail = None
     if any(stream.get("disposition", {}).get("attached_pic") for stream in streams):
-        cover = DOWNLOAD_DIR / "_thumbnails" / f"audio-{hashlib.sha256(path.name.encode()).hexdigest()[:24]}.jpg"
+        cover = storage.path("thumbnail", f"audio-{hashlib.sha256(path.name.encode()).hexdigest()[:24]}.jpg", uid=storage.path_owner(path))
         cover.parent.mkdir(exist_ok=True)
         artwork = subprocess.run([str(FFMPEG_DIR / executable_name("ffmpeg")), "-loglevel", "error", "-nostdin", "-y",
                                   "-i", str(path), "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=300:-1", str(cover)],
                                  capture_output=True, timeout=30)
         if artwork.returncode == 0:
             thumbnail = f"/api/thumbnails/{cover.name}"
+            accounts.register_resource("thumbnail", cover.name, {"filename": cover.name, "size": cover.stat().st_size}, uid=storage.path_owner(path))
     tagged_title = str(tags.get("title") or "")
     title = stem if re.fullmatch(r"Track\s*\d+", tagged_title, re.I) else tagged_title or stem
     return {"title": title[:255], "artist": str(tags.get("artist") or "")[:255],
@@ -406,7 +409,7 @@ def sync_downloads() -> None:
             cursor.execute("SELECT * FROM music_downloads WHERE user_id=%s", (accounts.owner_id(),))
             known = {row["filename"]: row for row in cursor.fetchall()}
             for name, row in known.items():
-                path = DOWNLOAD_DIR / name
+                path = storage.owned_path("file", name)
                 exists = path.is_file()
                 cursor.execute("UPDATE music_downloads SET file_available=%s WHERE id=%s", (exists, row["id"]))
                 if exists:
@@ -430,7 +433,7 @@ def sync_downloads() -> None:
             for row in cursor.fetchall():
                 if re.fullmatch(r"Track\s*\d+", row["title"], re.I) or row["title"].startswith("musicverify"):
                     try:
-                        metadata = inspect_audio(DOWNLOAD_DIR / row["filename"])
+                        metadata = inspect_audio(storage.owned_path("file", row["filename"]))
                         cursor.execute("UPDATE music_tracks SET title=%s,artist=IF(artist='',%s,artist) WHERE id=%s",
                                        (metadata["title"], metadata["artist"], row["id"]))
                     except (ValueError, OSError, subprocess.SubprocessError):
@@ -438,7 +441,7 @@ def sync_downloads() -> None:
         with database() as cursor:
             cursor.execute("SELECT resource_key FROM resources WHERE kind='file' AND deleted=FALSE AND user_id=%s", (accounts.owner_id(),))
             owned = {row["resource_key"] for row in cursor.fetchall()}
-        for path in DOWNLOAD_DIR.iterdir():
+        for path in storage.directory().iterdir():
             if path.is_file() and path.name in owned and path.suffix.lower() in AUDIO_EXTENSIONS and path.name not in known and ".partial" not in path.name:
                 try:
                     record_download(path.name, inspect_audio(path), imported=path.name.startswith("import-"))
@@ -606,7 +609,7 @@ def import_audio(file: UploadFile) -> dict:
     with database():
         pass
     safe_name = re.sub(r'[\\/:*?"<>|]', "_", original)[:160]
-    destination = DOWNLOAD_DIR / f"import-{secrets.token_hex(6)}.{safe_name}"
+    destination = storage.path("file", f"import-{secrets.token_hex(6)}.{safe_name}")
     total = 0
     try:
         with destination.open("xb") as output:
