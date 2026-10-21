@@ -6,7 +6,8 @@ import { canSeekMedia, clampSeekTime, filterMindMapTask, type MindMapTask } from
 import { getRecentLinks } from './recentLinks'
 import { readRecordLocation, recordLocation, type MapView, type VideoTaskReference, type VideoView } from './videoHistory'
 import './video-history.css'
-import { readPreviewUrl, selectPreviewFormat } from './videoPreview'
+import { downloadedPreviewUrl, monitorPreview, readPreviewStatusUrl, readPreviewUrl, selectPreviewFormat, waitForPreview, type PreviewStatus } from './videoPreview'
+import { matchRefreshedFormat, refreshDownloadFormats } from './videoFormats'
 import { account } from '../accounts/auth'
 import { api } from '../../shared/api/client'
 import { mediaFailureMessage, probeMedia } from '../../shared/media'
@@ -50,6 +51,13 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   const previewError = ref('')
   let previewRecoveryUsed = false
   let previewRecovering = false
+  const previewMessage = ref('')
+  const previewNotice = ref('')
+  const silentPreviewUrl = ref('')
+  let previewSessionUrl = ''
+  let previewAbort: AbortController | null = null
+  let allowPreviewFallback = false
+  let previewStarted = 0
   const previewVideoRef = ref<HTMLVideoElement | null>(null)
   const pendingSeekTime = ref<number | null>(null)
   const playbackTime = ref(0)
@@ -86,23 +94,22 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   let lastPlaybackSaved = 0
 
   function changeMode(next: 'video' | 'music', focus = false) {
-    if (next === 'music') { returnMusicCenter(); return }
+    if (next === 'music') { resetPreview(); returnMusicCenter(); return }
     mode.value = next
     if (focus) document.getElementById(`${next}-tab`)?.focus()
   }
 
   const supported = [
     { label: 'B站', href: 'https://www.bilibili.com/' },
-    { label: 'YouTube', href: 'https://www.youtube.com/' },
     { label: '抖音公开视频', href: 'https://www.douyin.com/' },
     { label: '小红书公开视频', href: 'https://www.xiaohongshu.com/' },
     { label: '微博', href: 'https://weibo.com/' },
-    { label: '更多 yt-dlp 支持站点', href: 'https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md' },
   ]
   const taskTone = computed(() => task.value?.status || 'idle')
   const summaryTone = computed(() => summaryTask.value?.status || 'idle')
   const mindMapTone = computed(() => mindMapTask.value?.status || 'idle')
-  const canDownload = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingDownload.value))
+  const canDownload = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingDownload.value && !savingFile.value
+    && !['pending', 'running'].includes(task.value?.status || '')))
   const canSummarize = computed(() => Boolean(parseResult.value && url.value.trim() && !loadingSummary.value
     && !['pending', 'running'].includes(summaryTask.value?.status || '') && !['pending', 'running'].includes(mindMapTask.value?.status || '')))
   const hasRecentLinks = computed(() => recentLinks.value.length > 0)
@@ -116,11 +123,11 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     }
   })
   const previewFormat = computed(() => {
-    const host = sourceHost.value
-    if (!parseResult.value || (host !== 'douyin.com' && !host.endsWith('.douyin.com'))) return null
+    if (!parseResult.value) return null
     return selectPreviewFormat(parseResult.value.formats, selectedFormat.value)
   })
-  const canPreview = computed(() => Boolean((previewFormat.value || (localVideoUrl.value && !localPreviewFailed.value)) && previewState.value !== 'loading'))
+  const canPreview = computed(() => Boolean(parseResult.value && (previewFormat.value || !parseResult.value.formats.length
+    || (localVideoUrl.value && !localPreviewFailed.value)) && previewState.value !== 'loading'))
 
   const { stopSummaryPolling, stopMindMapPolling, startSummary, pollSummary, startMindMap, pollMindMap } = useVideoSummary({
     url,
@@ -147,7 +154,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     requestBilibiliLogin: bilibili.requestBilibiliLogin,
     requestBilibiliSpeechConfirmation: bilibili.requestBilibiliSpeechConfirmation,
   })
-  const { chooseSaveHandle, startDownload, pollTask, saveFinishedFile, stopPolling } = useVideoDownload({
+  const { startDownload, startPolling, saveFinishedFile, resetDownload, cancelSave, fileSaved, saveProgress } = useVideoDownload({
     url,
     parseResult,
     activeRecordId,
@@ -159,7 +166,6 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     selectedFormat,
     saveHandle,
     savingFile,
-    taskTone,
     pollingTimer,
     localVideoUrl,
     prepareFormats,
@@ -241,20 +247,21 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   async function openVideoRecord(id: string, requestedTab?: SummaryTab) {
     bilibili.closeBilibiliLogin()
     const revision = ++revisions.record
+    resetDownload()
     await saveVideoView()
     if (revision !== revisions.record) return
     restoringRecord = true
     loadingParse.value = false; loadingSummary.value = false; loadingMindMap.value = false; loadingDownload.value = false
     activate(); videoWorkspace.value = 'current'
     errorMessage.value = ''; saveMessage.value = ''; viewSaveStatus.value = ''
-    stopPolling(); stopSummaryPolling(); stopMindMapPolling(); resetPreview()
+    stopSummaryPolling(); stopMindMapPolling(); resetPreview()
     try {
       const detail = await api(`/api/videos/records/${id}`)
       if (revision !== revisions.record) return
       activeRecordId.value = id; lastRecordId.value = id
       url.value = detail.url
       parseResult.value = detail.result ? { ...detail.result, record_id: id } : null
-      selectedFormat.value = detail.view?.selected_format || detail.result?.formats[0]?.format_id || ''
+      selectedFormat.value = detail.view?.selected_format ?? detail.result?.formats[0]?.format_id ?? ''
       formatsFresh = false; coverFailed.value = false; saveHandle.value = null
       relatedTasks.value = detail.tasks; restoredView.value = detail.view
       playbackTime.value = detail.view?.playback_time || 0
@@ -277,9 +284,10 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
         const restoredTask = await api(`/api/tasks/${download.task_id}`)
         if (revision !== revisions.record) return
         task.value = restoredTask
-        if (task.value?.status === 'finished' && /\.(mp4|webm)$/i.test(task.value.filename || '')) localVideoUrl.value = task.value.download_url || ''
-        if (['pending', 'running'].includes(task.value?.status || '')) pollingTimer.value = window.setInterval(() => pollTask(download.task_id), 1200)
+        localVideoUrl.value = downloadedPreviewUrl(task.value) || ''
+        if (['pending', 'running'].includes(task.value?.status || '')) await startPolling(download.task_id)
       }
+      if (revision !== revisions.record) return
       if (detail.view?.mind_map_id !== renderedMindMap.value?.task_id) currentMapView.value = null
       window.history.replaceState(null, '', recordLocation(id, summaryTab.value))
     } catch (failure) {
@@ -349,18 +357,18 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     if (!activeRecordId.value || (formatsFresh && !force)) return true
     const revision = revisions.record
     const id = activeRecordId.value
-    const selected = parseResult.value?.formats.find(item => item.format_id === selectedFormat.value)
     const fresh: ParseResult = await api(`/api/videos/records/${id}/formats?force=${force}`, { method: 'POST' })
-    if (revision !== revisions.record || id !== activeRecordId.value) return false
-    parseResult.value = fresh
-    selectedFormat.value = fresh.formats.find(item => item.label === selected?.label && item.ext === selected?.ext)?.format_id || fresh.formats[0]?.format_id || ''
+    if (revision !== revisions.record || id !== activeRecordId.value || !parseResult.value) return false
+    const refreshed = refreshDownloadFormats(parseResult.value, fresh, selectedFormat.value)
+    parseResult.value = refreshed.result
+    selectedFormat.value = refreshed.selectedId
     formatsFresh = true
     return true
   }
 
   function reparseHistory(target: string) { videoWorkspace.value = 'current'; url.value = target; void parseVideo(true) }
   function removedVideoRecord(id: string) {
-    if (activeRecordId.value === id) { revisions.record++; activeRecordId.value = ''; parseResult.value = null; summaryTask.value = null; mindMapTask.value = null; task.value = null; resetPreview(); stopPolling(); stopSummaryPolling(); stopMindMapPolling(); window.history.replaceState(null, '', '#workspace') }
+    if (activeRecordId.value === id) { revisions.record++; resetDownload(); activeRecordId.value = ''; parseResult.value = null; summaryTask.value = null; mindMapTask.value = null; task.value = null; resetPreview(); stopSummaryPolling(); stopMindMapPolling(); window.history.replaceState(null, '', '#workspace') }
     if (!activeRecordId.value) { loadingParse.value = false; loadingSummary.value = false; loadingMindMap.value = false; loadingDownload.value = false; restoringRecord = false }
     if (lastRecordId.value === id) lastRecordId.value = ''
   }
@@ -368,6 +376,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   function flushVideoView() { void saveVideoView(true) }
   watch(summaryTab, () => { if (activeRecordId.value && !restoringRecord) window.history.replaceState(null, '', recordLocation(activeRecordId.value, summaryTab.value)); scheduleVideoView() })
   watch(selectedFormat, scheduleVideoView)
+  watch(localVideoUrl, () => { localPreviewFailed.value = false })
 
   function selectRecentLink(target: string) {
     url.value = target
@@ -385,12 +394,30 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     await parseVideo()
   }
 
+  function releasePreview() {
+    previewAbort?.abort()
+    previewAbort = null
+    const target = previewSessionUrl
+    previewSessionUrl = ''
+    return target ? fetch(target, { method: 'DELETE', keepalive: true }).then(() => undefined).catch(() => undefined) : Promise.resolve()
+  }
+
+  function leavePage() {
+    flushVideoView()
+    resetPreview()
+  }
+
   function resetPreview() {
+    allowPreviewFallback = false
     revisions.preview++
     if (previewState.value === 'ready' && previewVideoRef.value) playbackTime.value = previewVideoRef.value.currentTime
     previewState.value = 'idle'
     previewUrl.value = ''
     previewError.value = ''
+    releasePreview()
+    previewMessage.value = ''
+    previewNotice.value = ''
+    silentPreviewUrl.value = ''
     previewVideoRef.value = null
     pendingSeekTime.value = null
   }
@@ -422,7 +449,14 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
         formatsFresh = false
         pendingSeekTime.value = position
         previewState.value = 'error'
-        await startPreview(true)
+        await startPreview(true, true)
+      } else if (result.status >= 200 && result.status < 300 && (source === localVideoUrl.value || allowPreviewFallback)) {
+        const forcePrepare = source !== localVideoUrl.value
+        if (!forcePrepare) localPreviewFailed.value = true
+        allowPreviewFallback = false
+        pendingSeekTime.value = position
+        previewState.value = 'error'
+        await startPreview(forcePrepare, true)
       } else {
         if (source === localVideoUrl.value) localPreviewFailed.value = true
         previewState.value = 'error'
@@ -436,6 +470,13 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     } finally { window.clearTimeout(timer); previewRecovering = false }
   }
 
+  function continueSilentPreview() {
+    if (!silentPreviewUrl.value) return
+    previewState.value = 'loading'
+    previewUrl.value = silentPreviewUrl.value
+    silentPreviewUrl.value = ''
+  }
+
   function handlePreviewReady() {
     previewState.value = 'ready'
     if (pendingSeekTime.value !== null && previewVideoRef.value) {
@@ -444,6 +485,13 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
       void previewVideoRef.value.play().catch(() => undefined)
     } else if (previewVideoRef.value && playbackTime.value) {
       previewVideoRef.value.currentTime = clampSeekTime(playbackTime.value, previewVideoRef.value.duration)
+    }
+  }
+
+  function handlePreviewFirstFrame() {
+    if (previewStarted) {
+      performance.measure('video-preview:first-frame', { start: previewStarted, end: performance.now() })
+      previewStarted = 0
     }
   }
 
@@ -465,7 +513,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     errorMessage.value = '当前视频没有可跳转的在线预览。'
   }
 
-  async function startPreview(retry = false) {
+  async function startPreview(forcePrepare = false, retry = false) {
     if (!parseResult.value || previewState.value === 'loading') return
     if (retry !== true) previewRecoveryUsed = false
     const revision = revisions.record
@@ -475,27 +523,89 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     previewState.value = 'loading'
     previewUrl.value = ''
     previewError.value = ''
+    await releasePreview()
+    if (revision !== revisions.record || request !== revisions.preview) return
+    previewStarted = performance.now()
+    allowPreviewFallback = false
+    silentPreviewUrl.value = ''
+    previewNotice.value = ''
+    previewMessage.value = '正在准备音视频'
+    const controller = new AbortController()
+    previewAbort = controller
 
     try {
-      if (localVideoUrl.value && !localPreviewFailed.value) { previewUrl.value = localVideoUrl.value; return }
-      if (!await prepareFormats() || revision !== revisions.record || request !== revisions.preview) return
-      const format = previewFormat.value
+      if (!forcePrepare && localVideoUrl.value && !localPreviewFailed.value) {
+        previewNotice.value = '正在播放已下载的视频'
+        previewUrl.value = localVideoUrl.value
+        return
+      }
       const target = parseResult.value?.webpage_url || extractHttpUrl(url.value)
-      if (!format || !target) throw new Error('当前视频没有可用的播放源。')
-      const response = await fetch('/api/previews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: target, format_id: format.format_id, parse_record_id: recordId || undefined }),
-      })
-      if (!response.ok) throw new Error(await readApiError(response))
-      const localPreviewUrl = readPreviewUrl(await response.json())
+      if (!target) throw new Error('当前视频没有可用的播放源。')
+      let playbackFormat = previewFormat.value
+      let initial: PreviewStatus | null = null
+      if (!forcePrepare && recordId) {
+        const cached = await fetch('/api/previews/reuse', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: target, format_id: selectedFormat.value.startsWith('saved:') ? undefined : selectedFormat.value || undefined, parse_record_id: recordId }),
+        })
+        if (!cached.ok) throw new Error(await readApiError(cached))
+        initial = await cached.json()
+        if (revision !== revisions.record || request !== revisions.preview) {
+          const stale = initial && readPreviewStatusUrl(initial)
+          if (stale) void fetch(stale, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+          return
+        }
+      }
+      if (!initial) {
+        const selected = parseResult.value?.formats.find(item => item.format_id === selectedFormat.value)
+        // Preview URLs may expire independently of the displayed download choices.
+        const fresh = recordId && !formatsFresh
+          ? await api<ParseResult>(`/api/videos/records/${recordId}/formats?force=false`, { method: 'POST', signal: controller.signal })
+          : parseResult.value
+        if (revision !== revisions.record || request !== revisions.preview) return
+        const matched = matchRefreshedFormat(fresh?.formats || [], selected)
+        playbackFormat = selectPreviewFormat(fresh?.formats || [], matched?.format_id || '')
+        if (!playbackFormat) throw new Error('当前视频没有可用的播放源。')
+        const response = await fetch('/api/previews', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: target, format_id: playbackFormat.format_id, parse_record_id: recordId || undefined, force_prepare: forcePrepare }),
+        })
+        if (!response.ok) throw new Error(await readApiError(response))
+        initial = await response.json()
+      }
+      if (!initial) throw new Error('预览接口返回了无效状态。')
+      const sessionUrl = readPreviewStatusUrl(initial)
+      if (revision !== revisions.record || request !== revisions.preview) {
+        if (sessionUrl) void fetch(sessionUrl, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+        return
+      }
+      previewSessionUrl = sessionUrl || ''
+      const prepared = await waitForPreview(initial, (target, signal) => api<PreviewStatus>(target, { signal }), controller.signal,
+        status => { previewMessage.value = status.message || '正在准备音视频' })
       if (revision !== revisions.record || request !== revisions.preview) return
+      const localPreviewUrl = readPreviewUrl(prepared)
       if (!localPreviewUrl) throw new Error('预览接口返回了无效地址。')
-      previewUrl.value = localPreviewUrl
+      allowPreviewFallback = !forcePrepare && (prepared.reused || prepared.delivery === 'proxy' || prepared.delivery === 'fragmented')
+      if (prepared.delivery === 'fragmented' && prepared.complete === false) {
+        void monitorPreview(prepared, (target, signal) => api<PreviewStatus>(target, { signal }), controller.signal).catch(error => {
+          if (controller.signal.aborted || request !== revisions.preview || revision !== revisions.record) return
+          allowPreviewFallback = false
+          previewUrl.value = ''
+          previewState.value = 'error'
+          previewError.value = error instanceof Error ? error.message : '视频准备中断，请重试播放。'
+          void releasePreview()
+        })
+      }
+      previewNotice.value = prepared.has_audio === false ? '当前源仅含画面，没有可用音频。' : prepared.message || (playbackFormat?.format_id.startsWith('sniffpair:') && playbackFormat.format_id !== selectedFormat.value ? '预览使用完整音视频线路' : '')
+      if (prepared.has_audio === false) {
+        previewState.value = 'idle'
+        silentPreviewUrl.value = localPreviewUrl
+      } else previewUrl.value = localPreviewUrl
     } catch (error) {
       if (revision !== revisions.record || request !== revisions.preview) return
       previewState.value = 'error'
       previewError.value = error instanceof Error ? error.message : '视频连接失败，请稍后重试。'
+      releasePreview()
     }
   }
 
@@ -509,6 +619,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     loadingParse.value = true
     bilibili.closeBilibiliLogin()
     const revision = ++revisions.record
+    resetDownload()
     await saveVideoView()
     if (revision !== revisions.record) return
     restoringRecord = false
@@ -519,7 +630,6 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     saveMessage.value = ''
     resetPreview()
     playbackTime.value = 0
-    stopPolling()
     parseResult.value = null
     task.value = null
     summaryTask.value = null
@@ -572,9 +682,10 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
   onBeforeUnmount(() => {
     revisions.record++
     flushVideoView()
+    resetPreview()
     window.removeEventListener('hashchange', restoreFromLocation)
-    window.removeEventListener('pagehide', flushVideoView)
-    stopPolling()
+    window.removeEventListener('pagehide', leavePage)
+    resetDownload()
     stopSummaryPolling()
     stopMindMapPolling()
   })
@@ -584,7 +695,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     void loadRecentLinks()
     void refreshBrowserSession()
     window.addEventListener('hashchange', restoreFromLocation)
-    window.addEventListener('pagehide', flushVideoView)
+    window.addEventListener('pagehide', leavePage)
     const route = readRecordLocation(window.location.hash)
     if (route) void openVideoRecord(route.recordId, route.tab)
     else void api('/api/videos/last-record').then(data => { lastRecordId.value = data.record_id || '' }).catch(() => {})
@@ -598,14 +709,17 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     canDownload,
     canPreview,
     canSummarize,
+    cancelSave,
     changeMapView,
     changeMode,
     closeVerificationBrowser,
     coverFailed,
     currentMapView,
     errorMessage,
+    fileSaved,
     handlePreviewError,
     handlePreviewReady,
+    handlePreviewFirstFrame,
     hasRecentLinks,
     hideRecentLinksSoon,
     historyPanel,
@@ -626,6 +740,10 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     parseResult,
     parseVideo,
     previewError,
+    previewMessage,
+    previewNotice,
+    silentPreviewUrl,
+    continueSilentPreview,
     previewState,
     previewUrl,
     previewVideoRef,
@@ -639,6 +757,7 @@ export function useVideoWorkspace(returnMusicCenter: () => void, activate: () =>
     retryVerifiedVideo,
     saveFinishedFile,
     saveMessage,
+    saveProgress,
     savePlaybackProgress,
     saveVideoView,
     savingFile,

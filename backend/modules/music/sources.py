@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 from fastapi import Request, Response, APIRouter, Header, HTTPException, Query
+from backend.infrastructure import video_network
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 from starlette.background import BackgroundTask
@@ -60,6 +61,7 @@ class PlaybackSession:
     media_url: str
     headers: dict[str, str]
     expires_at: float
+    referer: str = ""
 sessions: dict[str, TrackSession] = {}
 playback_sessions: dict[str, PlaybackSession] = {}
 search_cache: dict[tuple[str, str, int], tuple[float, list[Track]]] = {}
@@ -355,8 +357,8 @@ def create_playback(payload: PlaybackRequest) -> dict:
             del playback_sessions[expired]
         if len(playback_sessions) >= 200:
             del playback_sessions[next(iter(playback_sessions))]
-        playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL)
-    accounts.register_resource("playback", token)
+        playback_sessions[token] = PlaybackSession(media_url, options.get("http_headers", HEADERS), now + TOKEN_TTL, track.webpage_url)
+    accounts.register_resource("playback", token, {"source_url": track.webpage_url, "media_url": media_url})
     return {"playback_url": f"/api/music/playback/{token}/content", "expires_in": TOKEN_TTL, "source": source}
 
 
@@ -379,8 +381,7 @@ def playback_content(token: str, range_header: Annotated[str | None, Header(alia
     if request and request.headers.get("if-range"):
         headers["If-Range"] = request.headers["if-range"]
     try:
-        fetch = requests.head if request and request.method == "HEAD" else requests.get
-        upstream = fetch(session.media_url, headers=headers, stream=True, timeout=(10, 30), allow_redirects=True)
+        upstream = video_network.get(session.media_url, referer=session.referer, headers=headers, stream=True, timeout=(10, 30))
     except requests.RequestException as exc:
         raise HTTPException(502, "连接音源失败，请重新点击播放。") from exc
     content_type = upstream.headers.get("Content-Type", "").split(";", 1)[0].lower()

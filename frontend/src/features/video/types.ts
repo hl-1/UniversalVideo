@@ -4,6 +4,7 @@ export type VideoFormat = {
   ext?: string | null
   resolution?: string | null
   filesize?: number | null
+  has_video?: boolean | null
 }
 
 export type ParseResult = {
@@ -61,8 +62,9 @@ export type SummaryTaskResult = {
 }
 
 export type FilePickerWritable = {
-  write(data: Blob): Promise<void>
+  write(data: Blob | Uint8Array): Promise<void>
   close(): Promise<void>
+  abort?(): Promise<void>
 }
 
 export type FilePickerHandle = {

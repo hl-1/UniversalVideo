@@ -31,11 +31,29 @@ class PreviewRequest(BaseModel):
     url: HttpUrl
     format_id: str = Field(min_length=1, max_length=4096)
     parse_record_id: str | None = Field(default=None, max_length=64)
+    force_prepare: bool = False
 
 
 class PreviewResponse(BaseModel):
-    preview_url: str
+    preview_url: str | None = None
     expires_in: int
+    preview_id: str | None = None
+    status: Literal["preparing", "ready", "failed"] = "ready"
+    status_url: str | None = None
+    has_audio: bool | None = None
+    message: str = ""
+    error_code: str | None = None
+    alternate: bool = False
+    delivery: Literal["file", "proxy", "fragmented"] = "file"
+    complete: bool = True
+    reused: bool = False
+    timings_ms: dict[str, float] = Field(default_factory=dict)
+
+
+class PreviewReuseRequest(BaseModel):
+    url: HttpUrl
+    format_id: str | None = Field(default=None, max_length=4096)
+    parse_record_id: str = Field(min_length=1, max_length=64)
 
 
 class FormatInfo(BaseModel):
@@ -44,6 +62,7 @@ class FormatInfo(BaseModel):
     ext: str | None = None
     resolution: str | None = None
     filesize: int | None = None
+    has_video: bool | None = None
 
 
 class ParseResponse(BaseModel):

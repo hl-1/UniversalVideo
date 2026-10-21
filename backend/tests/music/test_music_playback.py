@@ -58,7 +58,7 @@ class MusicPlaybackTests(unittest.TestCase):
     def test_stream_forwards_range_and_media_headers_and_closes_the_connection(self):
         url = self.create_session()
         upstream = self.upstream()
-        with patch.object(music.requests, "get", return_value=upstream) as get:
+        with patch.object(music.video_network, "get", return_value=upstream) as get:
             response = self.client.get(url, headers={"Range": "bytes=10-19"})
         self.assertEqual(response.status_code, 206)
         self.assertEqual(response.content, b"0123456789")
@@ -71,7 +71,7 @@ class MusicPlaybackTests(unittest.TestCase):
     def test_full_stream_and_suffix_ranges_are_supported(self):
         url = self.create_session()
         for headers in ({}, {"Range": "bytes=-10"}):
-            with self.subTest(headers=headers), patch.object(music.requests, "get", return_value=self.upstream(status=200)):
+            with self.subTest(headers=headers), patch.object(music.video_network, "get", return_value=self.upstream(status=200)):
                 response = self.client.get(url, headers=headers)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.content, b"0123456789")
@@ -79,7 +79,7 @@ class MusicPlaybackTests(unittest.TestCase):
     def test_multiple_or_malformed_ranges_are_rejected_before_connecting(self):
         url = self.create_session()
         for header in ("bytes=0-9,20-29", "bytes=-", "items=0-9"):
-            with self.subTest(header=header), patch.object(music.requests, "get") as get:
+            with self.subTest(header=header), patch.object(music.video_network, "get") as get:
                 response = self.client.get(url, headers={"Range": header})
             self.assertEqual(response.status_code, 416)
             get.assert_not_called()
@@ -89,7 +89,7 @@ class MusicPlaybackTests(unittest.TestCase):
         token = url.split("/")[-2]
         with music.lock:
             music.playback_sessions[token].expires_at = time.time() - 1
-        with patch.object(music.requests, "get") as get:
+        with patch.object(music.video_network, "get") as get:
             response = self.client.get(url)
         self.assertEqual(response.status_code, 410)
         get.assert_not_called()
@@ -98,7 +98,7 @@ class MusicPlaybackTests(unittest.TestCase):
         url = self.create_session()
         for status, content_type in ((200, "text/html"), (200, "application/json"), (403, "audio/mpeg")):
             upstream = self.upstream(status, content_type)
-            with self.subTest(status=status, content_type=content_type), patch.object(music.requests, "get", return_value=upstream):
+            with self.subTest(status=status, content_type=content_type), patch.object(music.video_network, "get", return_value=upstream):
                 response = self.client.get(url)
             self.assertEqual(response.status_code, 502)
             upstream.close.assert_called()
@@ -106,7 +106,7 @@ class MusicPlaybackTests(unittest.TestCase):
 
     def test_source_timeout_returns_a_retryable_error(self):
         url = self.create_session()
-        with patch.object(music.requests, "get", side_effect=requests.Timeout("timeout")):
+        with patch.object(music.video_network, "get", side_effect=requests.Timeout("timeout")):
             response = self.client.get(url)
         self.assertEqual(response.status_code, 502)
 
@@ -114,7 +114,7 @@ class MusicPlaybackTests(unittest.TestCase):
         url = self.create_session()
         upstream = self.upstream(status=416)
         upstream.headers["Content-Range"] = "bytes */200"
-        with patch.object(music.requests, "get", return_value=upstream):
+        with patch.object(music.video_network, "get", return_value=upstream):
             response = self.client.get(url, headers={"Range": "bytes=999-"})
         self.assertEqual(response.status_code, 416)
         self.assertEqual(response.headers["Content-Range"], "bytes */200")

@@ -143,9 +143,13 @@ def get_user(uid: int) -> dict:
     return row
 
 
-def active_worker(uid: int):
+def active_worker(uid: int, *, source=None):
     if uid:
-        get_user(uid)
+        user = get_user(uid)
+        if source is not None and user["role"] != "super_admin":
+            from backend.infrastructure import platform_access
+            if platform_access.source(source) or (isinstance(source, dict) and platform_access.metadata_for(source)):
+                raise HTTPException(403, "该平台任务需要超级管理员权限，任务已停止。")
 
 
 def audit(action: str, target: str, result: str = "success", *, actor: int | None = None, ip: str = ""):
@@ -297,6 +301,13 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
     uid = uid or (owner_id() if principal.get() else None)
     if uid is None:
         return
+    from backend.infrastructure import platform_access
+    if platform_access._cache.get() is not None:
+        platform_access._cache.get().clear()
+    payload = dict(payload or {})
+    inherited = platform_access.metadata_for(payload)
+    if inherited:
+        payload.update(inherited)
     with database() as cursor:
         cursor.execute("SELECT id FROM users WHERE id=%s", (uid,))
         if not cursor.fetchone():
@@ -308,6 +319,12 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
                 return
             video_store.save(cursor, kind, key, uid, payload or {})
             return
+        cursor.execute("SELECT payload FROM resources WHERE kind=%s AND resource_key=%s", (kind, key))
+        previous = cursor.fetchone()
+        if previous:
+            saved = json.loads(previous["payload"])
+            if saved.get("access_scope") == "super_admin":
+                payload.update({name: saved[name] for name in ("access_scope", "source_platform", "source_task_id", "source_filename", "parse_record_id") if name in saved})
         cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
                        (kind, key, uid, json.dumps(payload or {}, ensure_ascii=False, default=str), time.time(), time.time()))
@@ -323,19 +340,24 @@ def resource(kind: str, key: str, *, check: bool = True) -> dict:
             row = cursor.fetchone()
     if not row or (check and current().role != "super_admin" and row["user_id"] != current().id):
         raise HTTPException(404, "资源不存在。")
+    if check:
+        from backend.infrastructure import platform_access
+        platform_access.require(metadata=platform_access.resource_metadata(kind, key))
     return row
 
 
 def permitted_files(kind="file") -> set[str]:
     user = current()
     with database() as cursor:
-        query = "SELECT resource_key FROM resources WHERE kind=%s AND deleted=FALSE"
+        query = "SELECT * FROM resources WHERE kind=%s AND deleted=FALSE"
         args = (kind,)
         if user.role != "super_admin":
             query += " AND user_id=%s"
             args += (user.id,)
         cursor.execute(query, args)
-        return {row["resource_key"] for row in cursor.fetchall()}
+        rows = cursor.fetchall()
+    from backend.infrastructure import platform_access
+    return {row["resource_key"] for row in rows if platform_access.visible(row)}
 
 
 def submit(pool, function, *args):
@@ -611,6 +633,8 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         marker = None
         request_id = secrets.token_hex(8)
         auth_source = "none"
+        from backend.infrastructure import platform_access
+        access_marker = platform_access._cache.set({})
         try:
             header = request.headers.get("authorization", "")
             if path.rstrip("/") == "/api/music/mcp":
@@ -632,12 +656,25 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 raise HTTPException(403, "请先修改临时密码。")
             if path.startswith("/api/admin/"):
                 admin()
+            await run_in_threadpool(platform_access.require_payload, dict(request.query_params))
+            if request.headers.get("content-type", "").split(";", 1)[0] == "application/json":
+                try:
+                    body = await request.json()
+                except (ValueError, UnicodeError):
+                    body = None
+                await run_in_threadpool(platform_access.require_payload, body)
             await run_in_threadpool(check_path, path)
             config = await run_in_threadpool(settings)
             feature = "music" if path.startswith(("/api/music", "/api/library")) else "watermark" if path.startswith("/api/watermarks") else "summary" if path.startswith("/api/summaries") else "video" if path in {"/api/parse", "/api/download"} or path.startswith(("/api/browser-session", "/api/previews", "/api/videos")) else None
             if feature and not config[f"{feature}_enabled"]:
                 raise HTTPException(403, "此功能已由管理员关闭。")
             response = await call_next(request)
+            if user.role != "super_admin" and response.status_code < 400 and response.headers.get("content-type", "").startswith("application/json"):
+                raw = b"".join([chunk async for chunk in response.body_iterator])
+                data = json.loads(raw)
+                filtered = await run_in_threadpool(platform_access.filter_response, data)
+                headers = {key: value for key, value in response.headers.items() if key.lower() not in {"content-length", "content-type"}}
+                response = JSONResponse(filtered, status_code=response.status_code, headers=headers, background=response.background)
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Request-ID"] = request_id
@@ -654,5 +691,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "认证服务暂不可用，请稍后重试。"}, status_code=503,
                                 headers={"Cache-Control": "private, no-store", "X-Request-ID": request_id})
         finally:
+            platform_access._cache.reset(access_marker)
             if marker is not None:
                 principal.reset(marker)

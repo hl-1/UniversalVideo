@@ -4,12 +4,13 @@ import ExecutionTiming from './components/ExecutionTiming.vue'
 import BilibiliLoginDialog from './components/BilibiliLoginDialog.vue'
 import VideoHistory from './components/VideoHistory.vue'
 import WatermarkEditor from '../watermark/WatermarkEditor.vue'
+import OverseasPlatforms from './OverseasPlatforms.vue'
 import { ArrowRight, Download, Eraser, ExternalLink, History, LoaderCircle, Music2, Play, RotateCcw, ShieldCheck, Trash2, Video, X } from 'lucide-vue-next'
 import { formatDuration, plainMarkdown } from './format'
 import { useVideoWorkspace } from './useVideoWorkspace'
 
 const emit = defineEmits<{ back: []; activate: [] }>()
-const returnMusicCenter = () => emit('back')
+const returnMusicCenter = () => { resetPreview(); emit('back') }
 const {
   bilibiliStatus, bilibiliDialog, bilibiliForSummary, bilibiliSpeechOnly, bilibiliBusy, bilibiliError, bilibiliQr,
   openBilibiliLogin, refreshBilibiliQr, closeBilibiliLogin, disconnectBilibili,
@@ -19,14 +20,17 @@ const {
   canDownload,
   canPreview,
   canSummarize,
+  cancelSave,
   changeMapView,
   changeMode,
   closeVerificationBrowser,
   coverFailed,
   currentMapView,
   errorMessage,
+  fileSaved,
   handlePreviewError,
   handlePreviewReady,
+  handlePreviewFirstFrame,
   hasRecentLinks,
   hideRecentLinksSoon,
   historyPanel,
@@ -47,6 +51,10 @@ const {
   parseResult,
   parseVideo,
   previewError,
+  previewMessage,
+  previewNotice,
+  silentPreviewUrl,
+  continueSilentPreview,
   previewState,
   previewUrl,
   previewVideoRef,
@@ -60,6 +68,7 @@ const {
   retryVerifiedVideo,
   saveFinishedFile,
   saveMessage,
+  saveProgress,
   savePlaybackProgress,
   saveVideoView,
   savingFile,
@@ -134,7 +143,7 @@ defineExpose({ open })
                 @blur="hideRecentLinksSoon"
                 @keydown.ctrl.enter.prevent="parseVideo()"
               />
-              <div class="composer-footer"><span class="composer-source">抖音 · B站 · YouTube</span><button class="composer-submit" type="submit" :disabled="loadingParse || !url.trim()"><LoaderCircle v-if="loadingParse" :size="18" class="spin" /><ArrowRight v-else :size="18" />{{ loadingParse ? '解析中' : '解析视频' }}</button></div>
+              <div class="composer-footer"><span class="composer-source">抖音 · B站 · 小红书 · 微博</span><button class="composer-submit" type="submit" :disabled="loadingParse || !url.trim()"><LoaderCircle v-if="loadingParse" :size="18" class="spin" /><ArrowRight v-else :size="18" />{{ loadingParse ? '解析中' : '解析视频' }}</button></div>
             </form>
             <div v-if="showRecentLinks && hasRecentLinks" class="recent-links" aria-label="最近输入链接">
               <div class="video-recent-head"><span>最近提交</span><button class="video-icon" title="清空最近链接" aria-label="清空最近链接" @mousedown.prevent="removeRecentLink()"><Trash2 :size="15" /></button></div>
@@ -169,6 +178,7 @@ defineExpose({ open })
                 @timeupdate="savePlaybackProgress"
                 @pause="scheduleVideoView"
                 @loadedmetadata="handlePreviewReady"
+                @loadeddata="handlePreviewFirstFrame"
                 @error="handlePreviewError"
               />
               <template v-else>
@@ -185,18 +195,16 @@ defineExpose({ open })
                   class="preview-play-button"
                   :aria-label="previewState === 'error' ? '重新连接视频' : '播放视频'"
                   :title="previewState === 'error' ? '重新连接视频' : '播放视频'"
-                  @click="startPreview()"
+                  @click="silentPreviewUrl ? continueSilentPreview() : startPreview()"
                 >
                   <RotateCcw v-if="previewState === 'error'" :size="21" /><Play v-else :size="21" />
                 </button>
               </template>
               <div v-if="previewState === 'loading'" class="preview-loading" role="status">
                 <span class="preview-spinner" aria-hidden="true"></span>
-                <span>正在连接视频</span>
+                <span>{{ previewMessage || '正在连接视频' }}</span>
+                <button type="button" class="secondary-action compact" @click="resetPreview">取消</button>
               </div>
-              <p v-if="previewState === 'error' && previewError" class="preview-error">
-                {{ previewError }}
-              </p>
             </div>
             <div class="video-meta">
               <span class="status-chip">解析成功</span>
@@ -213,6 +221,11 @@ defineExpose({ open })
                   {{ sourceHost || '打开原网页' }}
                 </a>
               </div>
+              <div v-if="previewState === 'error' && previewError" class="preview-error" role="alert">
+                <span>{{ previewError }}</span>
+                <button type="button" class="secondary-action compact" @click="startPreview()">重试播放</button>
+              </div>
+              <p v-if="previewNotice" class="video-record-message" role="status">{{ previewNotice }}<button v-if="silentPreviewUrl" type="button" class="secondary-action compact" @click="continueSilentPreview">继续无声预览</button></p>
               <label class="format-select">
                 <span>下载格式</span>
                 <select v-model="selectedFormat" @change="resetPreview">
@@ -314,16 +327,18 @@ defineExpose({ open })
 
           <div v-if="task" class="task-card" :class="`tone-${taskTone}`">
             <div class="task-head">
-              <span>{{ task.status === 'finished' ? '下载完成' : task.status === 'failed' ? '处理失败' : '任务进行中' }}</span>
+              <span>{{ task.status === 'finished' ? (savingFile ? '正在保存到本机' : fileSaved ? '已保存到本机' : '视频文件已就绪') : task.status === 'failed' ? '处理失败' : '任务进行中' }}</span>
               <strong>{{ Math.round(task.progress) }}%</strong>
             </div>
             <div class="progress-track">
               <span :style="{ width: `${Math.max(4, task.progress)}%` }"></span>
             </div>
-            <p>{{ task.error || task.message }}</p>
-            <button v-if="task.download_url" class="download-link" :disabled="savingFile" @click="saveFinishedFile()">
-              {{ savingFile ? '保存中' : '另存为' }}
+            <p aria-live="polite">{{ task.error || (savingFile ? saveProgress : fileSaved ? '已保存到你选择的位置。' : task.message) }}</p>
+            <button v-if="task.download_url" class="download-link" :disabled="savingFile || fileSaved" @click="saveFinishedFile()">
+              {{ savingFile ? '保存中' : fileSaved ? '已保存' : '另存为' }}
             </button>
+            <button v-if="fileSaved && !savingFile" class="secondary-action compact" @click="saveFinishedFile()">再次另存为</button>
+            <button v-if="savingFile" class="secondary-action compact" @click="cancelSave">取消保存</button>
             <a v-if="task.status === 'finished' && task.filename" class="secondary-action compact watermark-entry" href="#watermark"><Eraser :size="16" aria-hidden="true" />去水印</a>
           </div>
           </div>
@@ -343,6 +358,7 @@ defineExpose({ open })
             {{ item.label }}
           </a>
         </div>
+        <OverseasPlatforms />
       </section>
 
       <section id="notice" class="notice">

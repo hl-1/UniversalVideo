@@ -18,6 +18,8 @@ def _get_sniff_cache(url: str) -> video_schemas.ParseResponse | None:
         value = video_cache.get(video_cache.parse_key(url))
         if not value:
             return None
+        from backend.infrastructure import platform_access
+        platform_access.require_payload(value)
         try:
             return video_schemas.ParseResponse.model_validate(value)
         except ValueError:

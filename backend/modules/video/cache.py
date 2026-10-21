@@ -22,7 +22,12 @@ def key(kind: str, identity: str, uid: int | None = None) -> str:
 
 
 def parse_key(url: str, uid: int | None = None) -> str:
-    return key("parse", hashlib.sha256(url.encode()).hexdigest(), uid)
+    from backend.infrastructure import platform_access, video_proxy
+    platform_access.require(url)
+    identity = url
+    if platform_access.platform(url):
+        identity += "\0" + video_proxy.selected(url)["revision"]
+    return key("parse", hashlib.sha256(identity.encode()).hexdigest(), uid)
 
 
 def get(cache_key: str) -> dict | None:
@@ -34,10 +39,10 @@ def get(cache_key: str) -> dict | None:
         return None
 
 
-def put(cache_key: str, value: dict, ttl: int = TTL) -> bool:
+def put(cache_key: str, value: dict, ttl: int = TTL, *, only_existing: bool = False) -> bool:
     try:
-        accounts.redis_client().set(cache_key, json.dumps(value, ensure_ascii=False), ex=max(1, ttl))
-        return True
+        options = {"xx": True} if only_existing else {}
+        return bool(accounts.redis_client().set(cache_key, json.dumps(value, ensure_ascii=False), ex=max(1, ttl), **options))
     except redis.RedisError:
         logger.warning("Video cache unavailable; durable data remains in MySQL")
         return False
@@ -61,8 +66,8 @@ def clear_user(uid: int) -> None:
         logger.warning("Could not clear video cache")
 
 
-def media_ttl(urls: list[str]) -> int:
-    remaining = TTL
+def media_ttl(urls: list[str], *, ceiling: int = TTL) -> int:
+    remaining = ceiling
     now = time.time()
     for url in urls:
         query = parse_qs(urlparse(url).query)

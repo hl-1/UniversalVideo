@@ -30,6 +30,7 @@ from backend.modules.music import batch as music_batch
 from backend.modules.video import api as video_api
 from backend.modules.video import files as video_files
 from backend.modules.video import preview as video_preview
+from backend.modules.video import preview_assets
 from backend.modules.video import tasks as video_tasks
 from backend.modules.video import bilibili_session
 app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan)
@@ -96,16 +97,19 @@ accounts.cancel_callbacks.append(video_tasks.cancel_user_tasks)
 accounts.cancel_callbacks.append(bilibili_session.disconnect)
 accounts.cancel_callbacks.append(browser_session_store.sessions.cancel_user)
 accounts.cancel_callbacks.append(music_agent_runtime.cancel_user)
+accounts.cancel_callbacks.append(preview_assets.cancel_user)
 
 
 @app.on_event("shutdown")
 def close_browser_sessions():
+    preview_assets.stop()
     browser_session_store.sessions.shutdown()
     video_history.stop_worker()
 
 
 @app.on_event("startup")
 def restore_task_state():
+    preview_assets.start()
     video_history.start_worker()
     try:
         video_history.restore_interrupted()

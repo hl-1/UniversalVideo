@@ -188,17 +188,30 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
 
 
     def test_redis_parse_and_preview_survive_memory_loss_and_are_private(self):
+        from backend.modules.video import preview_assets as assets
         parsed = self.parse()
         cached = video_cache.get(video_cache.parse_key(self.url, self.a_id))
         self.assertIsNotNone(cached)
         self.assertIsNone(video_cache.get(video_cache.parse_key(self.url, self.b_id)))
-        created = self.a.post("/api/previews", json={"url": self.url, "format_id": parsed["formats"][0]["format_id"], "parse_record_id": parsed["record_id"]})
-        self.assertEqual(created.status_code, 200, created.text)
-        url = created.json()["preview_url"]
-        video_preview.preview_sessions.clear(); video_parse_cache.sniff_cache.clear()
-        with patch.object(requests, "get", return_value=FakeUpstreamResponse()):
-            self.assertEqual(self.a.get(url, headers={"Range": "bytes=0-3"}).status_code, 206)
+        with patch.object(assets, '_start'), patch.object(assets, 'ROOT', self.root / 'preview-test'), patch.object(assets, 'jobs', {}):
+            created = self.a.post("/api/previews", json={"url": self.url, "format_id": parsed["formats"][0]["format_id"], "parse_record_id": parsed["record_id"]})
+            self.assertEqual(created.status_code, 200, created.text)
+            token = created.json()['preview_id']
+            job = assets.jobs[token]
+            job.directory.mkdir(parents=True)
+            (job.directory / 'preview.mp4').write_bytes(b'abcdefgh')
+            job.value.update(status='ready', file_id=token, has_audio=True)
+            cache_key = video_cache.key('preview', token, self.a_id)
+            video_cache.put(cache_key, job.value)
+            url = f'/api/previews/{token}/content'
+            assets.jobs.clear()
+            video_preview.preview_sessions.clear(); video_parse_cache.sniff_cache.clear()
+            self.assertEqual(self.a.get(created.json()['status_url']).json()['status'], 'ready')
+            response = self.a.get(url, headers={"Range": "bytes=0-3"})
+            self.assertEqual(response.status_code, 206)
+            self.assertEqual(response.content, b'abcd')
             self.assertEqual(self.b.get(url).status_code, 404)
+            self.assertEqual(self.b.delete(created.json()['status_url']).status_code, 404)
 
     def test_delete_record_preserves_results_by_default_and_cascade_tombstones_tasks(self):
         first = self.parse()["record_id"]
@@ -335,11 +348,15 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         self.assertEqual(self.a.post(f"/api/summaries/{summary.task_id}/mind-map").status_code, 404)
 
     def test_deletion_revokes_associated_preview(self):
+        from backend.modules.video import preview_assets as assets
         parsed = self.parse()
-        response = self.a.post("/api/previews", json={"url": self.url, "format_id": parsed["formats"][0]["format_id"], "parse_record_id": parsed["record_id"]})
-        response.raise_for_status()
-        self.a.delete(f"/api/videos/records/{parsed['record_id']}").raise_for_status()
-        self.assertEqual(self.a.get(response.json()["preview_url"]).status_code, 404)
+        with patch.object(assets, '_start'), patch.object(assets, 'jobs', {}):
+            response = self.a.post("/api/previews", json={"url": self.url, "format_id": parsed["formats"][0]["format_id"], "parse_record_id": parsed["record_id"]})
+            response.raise_for_status()
+            job = assets.jobs[response.json()['preview_id']]
+            self.a.delete(f"/api/videos/records/{parsed['record_id']}").raise_for_status()
+            self.assertTrue(job.cancelled.is_set())
+            self.assertEqual(self.a.get(response.json()["status_url"]).status_code, 404)
 
     def test_concurrent_map_creation_and_cascade_leave_no_orphan(self):
         record_id = self.parse()["record_id"]

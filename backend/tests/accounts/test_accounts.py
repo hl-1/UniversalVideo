@@ -423,6 +423,71 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertNotIn(cookie.split('.')[1], str(stored))
 
 
+    def test_restricted_platforms_are_guarded_across_all_incoming_features(self):
+        from backend.modules.video import parsing, schemas, thumbnails
+        for source in ('https://youtu.be/test1234567', 'https://cn.pornhub.com/view_video.php?viewkey=fixture'):
+            for path in ('/api/parse', '/api/download', '/api/summaries', '/api/music/parse', '/api/previews', '/api/previews/reuse', '/api/browser-session/open'):
+                response = self.a.post(path, json={'url': source, 'format_id': 'best'})
+                self.assertEqual(response.status_code, 403, (path, response.text))
+            self.assertEqual(self.a.get('/api/image-proxy', params={'url': source}).status_code, 403)
+            parsed = schemas.ParseResponse(title='fixture', webpage_url=source, formats=[])
+            with patch.object(parsing, 'parse_video', return_value=parsed), patch.object(thumbnails, 'schedule'):
+                response = self.admin.post('/api/parse', json={'url': source, 'force': True})
+                self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.a.get('/api/admin/video-network').status_code, 403)
+        self.assertEqual(self.a.post('/api/admin/video-network/check').status_code, 403)
+        response = self.admin.get('/api/admin/video-network')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn('127.0.0.1:7890', response.text)
+
+    def test_legacy_download_and_derived_files_stay_restricted_in_lists_and_direct_links(self):
+        parent = 'abcdef123456'
+        filename = parent + '.fixture.mp4'
+        derived = 'fedcba654321.' + parent + '.fixture.watermark-removed.mp4'
+        accounts.register_resource('download', parent, {'url': 'https://www.youtube.com/watch?v=fixture', 'status': 'finished'}, uid=self.a_id)
+        # Insert the old payload shape to exercise source recovery without new flags.
+        with accounts.database() as cursor:
+            for name in (filename, derived):
+                storage.path('file', name, uid=self.a_id).write_bytes(b'legacy-video')
+                cursor.execute('INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)',
+                               ('file', name, self.a_id, json.dumps({'filename': name}), time.time(), time.time()))
+        for name in (filename, derived):
+            self.assertEqual(self.a.get('/api/files/' + name).status_code, 403)
+            self.assertEqual(self.admin.get('/api/files/' + name).status_code, 200)
+        listing = self.a.get('/api/workspace/resources?kind=file')
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(listing.json(), {'items': [], 'total': 0})
+        self.assertEqual(self.a.get('/api/tasks/' + parent).status_code, 403)
+        # Reindexing may not clear a restriction already attached to a file.
+        accounts.register_resource('file', filename, {'source_url': 'https://youtu.be/fixture'}, uid=self.a_id)
+        accounts.register_resource('file', filename, {'filename': filename, 'size': 12}, uid=self.a_id)
+        self.assertEqual(self.a.get('/api/files/' + filename).status_code, 403)
+
+    def test_demotion_hides_historical_records_previews_and_music(self):
+        from backend.modules.video import store, cache
+        record_id = 'source_record'
+        token = 'restricted_preview_fixture'
+        now = time.time()
+        with accounts.database() as cursor:
+            store.save(cursor, 'video_parse', record_id, self.a_id,
+                       {'record_id': record_id, 'url': 'https://cn.pornhub.com/view_video.php?viewkey=fixture', 'platform': 'Pornhub', 'status': 'finished', 'result': {'title': 'private'}})
+            store.save(cursor, 'video_view', str(self.a_id) + ':' + record_id, self.a_id, {'record_id': record_id, 'tab': 'summary'})
+            store.save(cursor, 'video_search', str(self.a_id), self.a_id, {'items': [{'id': 'restricted', 'url': 'https://youtu.be/fixture', 'submitted_at': now}, {'id': 'normal', 'url': 'https://weibo.com/123', 'submitted_at': now - 1}]})
+            track_id = 'a' * 64
+            cursor.execute('INSERT INTO music_tracks (id,provider,identifier,title,artist,webpage_url,access,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)',
+                           (track_id, 'video', 'fixture', 'private', '', 'https://youtu.be/fixture', '', self.a_id))
+            cursor.execute('INSERT INTO music_history (track_id,played_at,play_count,preview,user_id) VALUES (%s,%s,1,FALSE,%s)', (track_id, now, self.a_id))
+        cache.put(cache.key('preview', token, self.a_id), {'user_id': self.a_id, 'media_url': 'https://shared.example/media', 'referer': 'https://youtu.be/fixture', 'expires_at': now + 100})
+        self.assertEqual(self.a.get('/api/videos/records/' + record_id).status_code, 403)
+        records = self.a.get('/api/videos/records').json()
+        self.assertEqual(records, {'items': [], 'total': 0})
+        self.assertIsNone(self.a.get('/api/videos/last-record').json()['record_id'])
+        self.assertEqual([item['id'] for item in self.a.get('/api/videos/recent-links').json()['items']], ['normal'])
+        self.assertEqual(self.a.get('/api/previews/' + token).status_code, 403)
+        self.assertEqual(self.a.get('/api/library/tracks?view=history').json()['tracks'], [])
+        self.assertEqual(self.a.get('/api/library').json()['counts']['history'], 0)
+        self.assertEqual(self.a.delete('/api/library/history/' + track_id).status_code, 403)
+
 class NetworkSecurityTests(unittest.TestCase):
     def test_private_addresses_and_embedded_credentials_are_rejected(self):
         from backend.infrastructure.network import public_url

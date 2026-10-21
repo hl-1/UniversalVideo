@@ -89,9 +89,11 @@ def _fetch_douyin_item(url: str) -> tuple[str, dict[str, Any]]:
         raise HTTPException(status_code=422, detail="无法从抖音链接中提取视频 ID，请粘贴单个公开视频链接。")
 
     session = requests.Session()
+    session.trust_env = False
     session.headers.update(video_constants.DOUYIN_HEADERS)
     try:
-        response = session.get(video_constants.DOUYIN_API_URL, params={"item_ids": video_id}, timeout=(3, 5))
+        from backend.modules.video import parse_runtime
+        response = session.get(video_constants.DOUYIN_API_URL, params={"item_ids": video_id}, timeout=(parse_runtime.seconds(3), parse_runtime.seconds(4)))
         if response.ok and response.content:
             data = response.json()
             item_list = data.get("item_list") or []
@@ -102,7 +104,7 @@ def _fetch_douyin_item(url: str) -> tuple[str, dict[str, Any]]:
 
     share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
     try:
-        response = session.get(share_url, timeout=(3, 5))
+        response = session.get(share_url, timeout=(parse_runtime.seconds(3), parse_runtime.seconds(4)))
         response.raise_for_status()
     except requests.RequestException as exc:
         raise HTTPException(

@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.core.paths import ROOT_DIR as PROJECT_ROOT
 from backend.modules.accounts import service as accounts
+from backend.infrastructure import platform_access
 from backend.infrastructure.database import database
 from backend.infrastructure.runtime import executable_name, ffmpeg_directory
 
@@ -196,6 +197,8 @@ def track_id(track: TrackInput) -> str:
 
 
 def save_track(cursor, track: TrackInput) -> str:
+    from backend.infrastructure import platform_access
+    platform_access.require_payload(track.model_dump())
     if track.provider == "local" or track.webpage_url.startswith("/api/files/"):
         accounts.resource("file", unquote(Path(track.webpage_url).name))
     if track.thumbnail and track.thumbnail.startswith("/api/") and not track.thumbnail.startswith("/api/image-proxy"):
@@ -220,10 +223,13 @@ def resolve_track_id(cursor, key: str) -> str:
     cursor.execute("SELECT track_id FROM music_track_aliases WHERE alias_id=%s", (key,))
     alias = cursor.fetchone()
     canonical = alias["track_id"] if alias else key
-    cursor.execute("SELECT user_id FROM music_tracks WHERE id=%s", (canonical,))
+    cursor.execute("SELECT * FROM music_tracks WHERE id=%s", (canonical,))
     existing = cursor.fetchone()
     if existing and existing["user_id"] != accounts.owner_id() and accounts.current().role != "super_admin":
         raise HTTPException(404, "歌曲不存在。")
+    if existing:
+        from backend.infrastructure import platform_access
+        platform_access.require_payload(existing)
     return canonical
 
 
@@ -329,7 +335,7 @@ def record_download(filename: str, metadata: dict, *, imported: bool = False) ->
     path = storage.owned_path("file", safe_name)
     fingerprint = hash_file(path)
     stat = path.stat()
-    accounts.register_resource("file", safe_name, {"filename": safe_name, "size": stat.st_size})
+    accounts.register_resource("file", safe_name, {"filename": safe_name, "size": stat.st_size, "source_url": track.webpage_url})
     with scan_lock, database() as cursor:
         key = save_track(cursor, track)
         cursor.execute("SELECT DISTINCT track_id FROM music_downloads WHERE file_hash=%s AND user_id=%s", (fingerprint, accounts.owner_id()))
@@ -393,6 +399,7 @@ def inspect_audio(path: Path) -> dict:
                                   "-i", str(path), "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=300:-1", str(cover)],
                                  capture_output=True, timeout=30)
         if artwork.returncode == 0:
+            accounts.register_resource("thumbnail", cover.name, {"filename": cover.name, "source_filename": path.name})
             thumbnail = f"/api/thumbnails/{cover.name}"
             accounts.register_resource("thumbnail", cover.name, {"filename": cover.name, "size": cover.stat().st_size}, uid=storage.path_owner(path))
     tagged_title = str(tags.get("title") or "")
@@ -405,10 +412,13 @@ def inspect_audio(path: Path) -> dict:
 def sync_downloads() -> None:
     # Serialize scans so simultaneous page requests cannot probe the same files repeatedly.
     with scan_lock:
+        permitted = accounts.permitted_files()
         with database() as cursor:
             cursor.execute("SELECT * FROM music_downloads WHERE user_id=%s", (accounts.owner_id(),))
             known = {row["filename"]: row for row in cursor.fetchall()}
             for name, row in known.items():
+                if name not in permitted:
+                    continue
                 path = storage.owned_path("file", name)
                 exists = path.is_file()
                 cursor.execute("UPDATE music_downloads SET file_available=%s WHERE id=%s", (exists, row["id"]))
@@ -423,6 +433,8 @@ def sync_downloads() -> None:
             if duplicates:
                 backup_library(cursor)
             for group in duplicates:
+                if accounts.current().role != "super_admin":
+                    continue
                 cursor.execute("SELECT DISTINCT track_id FROM music_downloads WHERE file_hash=%s AND user_id=%s", (group["file_hash"], accounts.owner_id()))
                 keys = [resolve_track_id(cursor, row["track_id"]) for row in cursor.fetchall()]
                 key = keys[0]
@@ -431,6 +443,8 @@ def sync_downloads() -> None:
             cursor.execute("""SELECT t.id,t.title,d.filename FROM music_tracks t JOIN music_downloads d ON d.track_id=t.id
                 WHERE t.provider='local' AND d.file_available=TRUE AND t.user_id=%s""", (accounts.owner_id(),))
             for row in cursor.fetchall():
+                if row["filename"] not in permitted:
+                    continue
                 if re.fullmatch(r"Track\s*\d+", row["title"], re.I) or row["title"].startswith("musicverify"):
                     try:
                         metadata = inspect_audio(storage.owned_path("file", row["filename"]))
@@ -442,7 +456,7 @@ def sync_downloads() -> None:
             cursor.execute("SELECT resource_key FROM resources WHERE kind='file' AND deleted=FALSE AND user_id=%s", (accounts.owner_id(),))
             owned = {row["resource_key"] for row in cursor.fetchall()}
         for path in storage.directory().iterdir():
-            if path.is_file() and path.name in owned and path.suffix.lower() in AUDIO_EXTENSIONS and path.name not in known and ".partial" not in path.name:
+            if path.is_file() and path.name in owned and path.name in permitted and path.suffix.lower() in AUDIO_EXTENSIONS and path.name not in known and ".partial" not in path.name:
                 try:
                     record_download(path.name, inspect_audio(path), imported=path.name.startswith("import-"))
                 except (ValueError, OSError, subprocess.SubprocessError):
@@ -467,6 +481,14 @@ def overview() -> dict:
         playlists = cursor.fetchall()
         cursor.execute("SELECT provider,identifier,webpage_url,COALESCE(custom_thumbnail,thumbnail) AS thumbnail FROM music_tracks WHERE user_id=%s LIMIT 1000", (accounts.owner_id(),))
         artwork = cursor.fetchall()
+        if accounts.current().role != "super_admin":
+            # Count only accessible tracks; aggregate numbers must match visible lists.
+            for key, table in (("favorites", "music_favorites"), ("history", "music_history"), ("downloads", "music_downloads"), ("trials", "music_history")):
+                cursor.execute(f"SELECT DISTINCT t.* FROM {table} x JOIN music_tracks t ON t.id=x.track_id WHERE x.user_id=%s" + (" AND x.preview=TRUE" if key == "trials" else ""), (accounts.owner_id(),))
+                counts[key] = sum(platform_access.visible(row) for row in cursor.fetchall())
+            for playlist in playlists:
+                cursor.execute("SELECT t.* FROM music_playlist_tracks pt JOIN music_tracks t ON t.id=pt.track_id WHERE pt.playlist_id=%s", (playlist["id"],))
+                playlist["count"] = sum(platform_access.visible(row) for row in cursor.fetchall())
     return {"profile": profile, "counts": counts, "playlists": playlists, "artwork": artwork}
 
 
