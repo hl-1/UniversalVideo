@@ -4,6 +4,8 @@ import { ref } from 'vue'
 export type MusicTrack = {
   device_id?: string
   device_file?: boolean
+  device_thumbnail?: string
+  device_assets_notice?: string
   server_url?: string | null
   saved_to_device?: boolean
   save_unverified?: boolean
@@ -57,6 +59,7 @@ export function trackKey(track: MusicTrack) {
 }
 export function trackArtwork(track?: MusicTrack | null) {
   if (!track) return null
+  if (track.device_thumbnail) return track.device_thumbnail
   const key = trackKey(track)
   return trackArtworkMap.value.has(key) ? trackArtworkMap.value.get(key) : track.thumbnail
 }

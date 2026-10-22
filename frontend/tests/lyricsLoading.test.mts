@@ -4,13 +4,13 @@ import test from 'node:test'
 import ts from 'typescript'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
-import { activeLyricIndex, audioFilename } from '../src/features/music/lyrics.ts'
+import { activeLyricIndex, audioFilename, parseImportedLrc } from '../src/features/music/lyrics.ts'
 
 const song = { title: '发如雪', artist: '周杰伦', provider: 'qq', identifier: 'one', webpage_url: 'https://example.test/song/one' }
 const result = { lines: [{ time: 0, text: '第一句' }, { time: 3, text: '第二句' }], plain: '', source: 'fixture' }
 const settle = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)) }
 
-function mount(t: any, fetcher: typeof fetch) {
+function mount(t: any, fetcher: typeof fetch, cached?: any) {
   const previous = { fetch: globalThis.fetch, document: globalThis.document }
   globalThis.fetch = fetcher
   globalThis.document = { removeEventListener() {}, body: { style: { overflow: '' } } } as any
@@ -20,7 +20,13 @@ function mount(t: any, fetcher: typeof fetch) {
   const compiled = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const stubs: Record<string, any> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount: (hook: () => void) => hooks.push(hook) },
-    'lucide-vue-next': {}, '../lyrics': { activeLyricIndex, audioFilename },
+    'lucide-vue-next': {}, '../lyrics': { activeLyricIndex, audioFilename, parseImportedLrc },
+    '../deviceLibrary': { hasDeviceFile: () => false, readDeviceLyrics: async () => cached, saveDeviceLyrics: async () => true,
+      requestTrackLyrics: async (track: any, signal: AbortSignal) => {
+        const response = await fetch('/api/music/lyrics/tracks/lookup', { method: 'POST', signal, body: JSON.stringify({ track }) })
+        if (!response.ok) throw new Error((await response.json()).detail)
+        return response.json()
+      } },
     '../../../shared/downloads': {},
   }
   const module: any = {}
@@ -44,12 +50,12 @@ test('progress updates do not cancel or reload lyrics for the same song', async 
     props.currentTime = tick * .75
     await settle()
   }
-  assert.deepEqual(requests, ['/api/music/parse', '/api/music/lyrics/online'])
+  assert.deepEqual(requests, ['/api/music/lyrics/tracks/lookup'])
   assert.deepEqual(state.lyrics.value.lines, result.lines)
   assert.equal(state.loading.value, false)
   props.track = { ...song, identifier: 'two', webpage_url: 'https://example.test/song/two' }
   await settle()
-  assert.equal(requests.length, 4, 'switching songs must still load the new lyrics')
+  assert.equal(requests.length, 2, 'switching songs must still load the new lyrics')
 })
 
 test('a slow lyrics request survives progress updates and repeated manual refresh clicks', async t => {
@@ -68,7 +74,7 @@ test('a slow lyrics request survives progress updates and repeated manual refres
     if (state.refreshLyrics) state.refreshLyrics()
     await settle()
   }
-  assert.equal(requests.length, 2)
+  assert.equal(requests.length, 1)
   assert.equal(lyricsSignal?.aborted, false)
   resolveLyrics(Response.json(result))
   await settle()
@@ -100,7 +106,7 @@ test('lyrics timeout stops the spinner, preserves visible lyrics and allows a ma
   assert.equal(state.loading.value, false)
 })
 
-test('an old parse response cannot launch another lyrics request after switching songs', async t => {
+test('a late lookup cannot replace lyrics after switching songs', async t => {
   let resolveOld!: (response: Response) => void
   const requests: string[] = []
   const { props, state } = mount(t, async input => {
@@ -108,10 +114,43 @@ test('an old parse response cannot launch another lyrics request after switching
     if (requests.length === 1) return new Promise(resolve => { resolveOld = resolve })
     return Response.json(String(input).endsWith('/parse') ? { token: 'new', webpage_url: 'https://example.test/song/two' } : result)
   })
+  await settle()
   props.track = { ...song, identifier: 'two', webpage_url: 'https://example.test/song/two' }
   await settle()
-  resolveOld(Response.json({ token: 'old', webpage_url: song.webpage_url }))
+  resolveOld(Response.json({ ...result, plain: '旧歌曲', lines: [] }))
   await settle()
-  assert.equal(requests.filter(url => url.endsWith('/online')).length, 1)
+  assert.equal(requests.length, 2)
+  assert.deepEqual(state.lyrics.value.lines, result.lines)
   assert.equal(state.loading.value, false)
+})
+
+test('a device filename never becomes a server file lyrics lookup', async t => {
+  const urls: string[] = []
+  const { props, state } = mount(t, async (input, options) => {
+    urls.push(String(input))
+    const body = JSON.parse(String(options?.body))
+    assert.equal(body.track.identifier, 'one')
+    return Response.json(result)
+  })
+  props.track = { ...song, filename: '稻香.mp3', device_file: true } as any
+  await settle()
+  assert.ok(urls.every(url => url === '/api/music/lyrics/tracks/lookup'))
+  assert.deepEqual(state.lyrics.value.lines, result.lines)
+})
+
+test('saved device lyrics remain visible with no network after reopening', async t => {
+  const { state } = mount(t, async () => { assert.fail('cached lyrics must not require a network request') }, result)
+  await settle()
+  assert.deepEqual(state.lyrics.value.lines, result.lines)
+  assert.equal(state.loading.value, false)
+  assert.equal(state.error.value, '')
+})
+
+test('an unsuccessful explicit rematch keeps the saved lyrics visible', async t => {
+  const { state } = mount(t, async () => Response.json({ lines: [], plain: '', source: '', message: '未找到新歌词' }), result)
+  await settle()
+  state.refreshLyrics()
+  await settle()
+  assert.deepEqual(state.lyrics.value.lines, result.lines)
+  assert.match(state.error.value, /未找到新歌词/)
 })

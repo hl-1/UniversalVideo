@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
 from fastapi import FastAPI, HTTPException
@@ -14,6 +15,34 @@ from backend.modules.music import lyric_lookup
 
 
 class LyricsTests(unittest.TestCase):
+    def test_identity_lookup_needs_auth_but_not_a_server_copy_of_the_audio(self):
+        app = FastAPI()
+        app.include_router(lyrics.router)
+        app.add_middleware(accounts.AuthenticationMiddleware)
+        user = accounts.Principal(1, 'lyrics-test', 'user')
+        @contextmanager
+        def database():
+            yield Mock()
+        track = dict(title='稻香', artist='周杰伦', provider='qq', identifier='songmid',
+                     webpage_url='https://y.qq.com/n/ryqq/songDetail/songmid')
+        with TestClient(app) as client, \
+             patch.object(accounts, 'authenticate', return_value=user), \
+             patch.object(accounts, 'settings', return_value=dict(accounts.DEFAULT_SETTINGS)), \
+             patch.object(accounts, 'resource', side_effect=HTTPException(404, '资源不存在。')) as resource, \
+             patch.object(lyrics.library, 'database', database), \
+             patch.object(lyrics.library, 'save_track') as save, \
+             patch.object(lyrics, 'track_lyrics_response', return_value={'plain': '歌词'}) as lookup:
+            self.assertEqual(client.post('/api/music/lyrics/tracks/lookup', json={'track': track}).status_code, 401)
+            client.headers['Authorization'] = 'Bearer test'
+            response = client.post('/api/music/lyrics/tracks/lookup', json={'track': track})
+            self.assertEqual(response.status_code, 200, response.text)
+            save.assert_called_once()
+            resource.assert_not_called()
+            lookup.assert_called_once()
+            save.side_effect = HTTPException(404, '歌曲不存在。')
+            self.assertEqual(client.post('/api/music/lyrics/tracks/lookup', json={'track': track}).status_code, 404)
+            self.assertEqual(lookup.call_count, 1)
+
     def test_online_route_passes_auth_middleware_without_local_file_lookup(self):
         app = FastAPI()
         app.include_router(lyrics.router)

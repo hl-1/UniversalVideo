@@ -217,3 +217,20 @@ def online_lyrics(payload: OnlineLyricsRequest):
     config = accounts.settings()
     allowed = bool(config['music_agent_network_enabled'] and track.provider in config['music_agent_sources'])
     return track_lyrics_response(track.model_dump(), allowed)
+
+
+class TrackLyricsRequest(BaseModel):
+    track: library.TrackInput
+
+
+@router.post('/tracks/lookup')
+def lookup_track_lyrics(payload: TrackLyricsRequest):
+    # Device filenames are not server resource identifiers. Keep ownership and
+    # platform checks on the canonical song, without requiring a server audio copy.
+    with library.database() as cursor:
+        library.save_track(cursor, payload.track)
+    config = accounts.settings()
+    provider = payload.track.provider
+    allowed = bool(config['music_agent_network_enabled'] and
+                   (provider in config['music_agent_sources'] or provider in {'device', 'local', 'site', 'video'}))
+    return track_lyrics_response(payload.track.model_dump(), allowed)

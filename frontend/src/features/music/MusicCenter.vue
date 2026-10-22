@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { activeDownloads, saveRemoteFile, saveMessage } from '../../shared/downloads'
-import { deviceTracks, deviceLibraryRevision, deviceLibraryError, refreshDeviceLibrary, chooseDeviceFiles, importDeviceFiles, removeDeviceTrack } from './deviceLibrary'
+import { deviceTracks, unavailableDeviceTracks, authorizeDeviceTrack, cacheDeviceAssets, deviceLibraryRevision, deviceLibraryError, refreshDeviceLibrary, chooseDeviceFiles, importDeviceFiles, removeDeviceTrack } from './deviceLibrary'
 import { isMusicDownloaded, rememberMusicDownloads, savedMusicHistory, unverifiedMusicHistory, unverifiedMusicCount } from './musicDownloads'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, LayoutGrid, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, Palette } from 'lucide-vue-next'
@@ -250,7 +250,11 @@ async function pollCovers() {
 }
 async function chooseImport() {
   importing.value = true
-  try { await chooseDeviceFiles(() => importInput.value?.click()); await loadContent() }
+  try {
+    const completed = await chooseDeviceFiles(() => importInput.value?.click())
+    if (completed) message(deviceLibraryError.value || '已保存到此浏览器的本机曲库，刷新后可继续读取。')
+    await loadContent()
+  }
   catch (failure) { if (!(failure instanceof DOMException && failure.name === 'AbortError')) error.value = failure instanceof Error ? failure.message : '导入失败。' }
   finally { importing.value = false }
 }
@@ -259,8 +263,14 @@ async function importFiles(event: Event) {
   const files = Array.from(input.files || []); input.value = ''
   if (!files.length) return
   importing.value = true
-  try { await importDeviceFiles(files); message('已加入本设备曲库；此浏览器选择的文件仅在当前页面有效。'); await loadContent() }
+  try { await importDeviceFiles(files); message(deviceLibraryError.value || '已保存到此浏览器的本机曲库，刷新后可继续读取。'); await loadContent() }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '导入失败。' }
+  finally { importing.value = false }
+}
+async function restoreFile(track: MusicTrack) {
+  importing.value = true
+  try { await authorizeDeviceTrack(track); await loadContent() }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '文件授权失败。' }
   finally { importing.value = false }
 }
 async function uploadFiles(event: Event) {
@@ -342,7 +352,30 @@ defineExpose({ download, search })
         <MusicImportWorkspace v-show="view === 'bulk'" :active="view === 'bulk'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" />
         <ScenePlaylist v-if="view === 'scene'" :active="props.active && view === 'scene'" :download-active="Boolean(searchWorkspace?.activeTask)" @batch-created="searchWorkspace?.showBatch($event)" @open-playlist="go('playlist', $event)" />
         <section v-show="view === 'search' || view === 'bulk' || view === 'scene'" class="mc-search-workspace"><MusicWorkspace ref="searchWorkspace" :active="view === 'search' || view === 'bulk' || view === 'scene'" :queue-only="view === 'bulk' || view === 'scene'" :embedded="true" :provider="source" @source-change="source = $event" @track-menu="showMenu" /></section>
-        <template v-if="!['home', 'search', 'bulk', 'scene', 'profile', 'appearance', 'resources', 'downloadManager', 'tools', 'mine'].includes(view)"><p v-if="view === 'downloads'">仅显示当前设备可读取的音频。{{ deviceLibraryError }}<button class="mc-text-button" @click="chooseImport">重新定位或授权文件</button></p><p v-if="view === 'site'">上传到本站的音源，通过网络播放。下载后才会加入本设备曲库。</p><div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div><div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div><MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'site' ? '暂无本站音源，点击上传到本站' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" /></template>
+        <template v-if="!['home', 'search', 'bulk', 'scene', 'profile', 'appearance', 'resources', 'downloadManager', 'tools', 'mine'].includes(view)">
+          <p v-if="view === 'downloads'" class="mc-local-hint">仅显示当前设备可播放的歌曲。</p>
+          <p v-if="view === 'downloads' && deviceLibraryError" class="mc-error" role="alert">{{ deviceLibraryError }}</p>
+          <details v-if="view === 'downloads' && unavailableDeviceTracks.length" class="mc-local-status">
+            <summary><FolderOpen :size="17" /><span>{{ unavailableDeviceTracks.length }} 首歌曲等待恢复文件访问</span><ChevronRight :size="17" class="mc-status-chevron" /></summary>
+            <div class="mc-local-status-body">
+              <p class="mc-local-hint">旧文件暂时无法读取，恢复后会加入可播放列表。可以重新授权，或使用右上角“导入音乐”重新选择原文件。</p>
+              <ul class="mc-local-status-list">
+                <li v-for="item in unavailableDeviceTracks" :key="trackKey(item.track)">
+                  <div class="mc-local-status-song"><strong>{{ item.track.title }}</strong><small>{{ item.canAuthorize ? '需要文件授权' : '需要重新导入文件' }}</small></div>
+                  <div class="mc-local-status-actions"><button v-if="item.canAuthorize" class="mc-command" :disabled="importing" @click="restoreFile(item.track)">重新授权</button><button class="mc-text-button" :disabled="importing" @click="removeDeviceTrack(item.track)">移除记录</button></div>
+                </li>
+              </ul>
+            </div>
+          </details>
+          <details v-if="view === 'downloads' && tracks.some(track => track.device_assets_notice)" class="mc-local-status">
+            <summary><Download :size="17" /><span>封面与歌词保存状态</span><ChevronRight :size="17" class="mc-status-chevron" /></summary>
+            <div class="mc-local-status-body"><ul class="mc-local-status-list"><li v-for="track in tracks.filter(track => track.device_assets_notice)" :key="trackKey(track)"><div class="mc-local-status-song"><strong>{{ track.title }}</strong><small>{{ track.device_assets_notice }}</small></div><button class="mc-command" @click="cacheDeviceAssets(track)">重试保存</button></li></ul></div>
+          </details>
+          <p v-if="view === 'site'">上传到本站的音源，通过网络播放。下载后才会加入本设备曲库。</p>
+          <div class="mc-list-toolbar"><button class="mc-command primary" :disabled="!tracks.length" @click="playTrack(tracks[0]!, tracks)"><Play :size="17" fill="currentColor" />播放全部</button><span>{{ tracks.length }} 首歌曲</span></div>
+          <div v-if="loading" class="mc-loading"><LoaderCircle :size="23" class="spin" /></div>
+          <MusicTrackList v-else :tracks="tracks" :empty="view === 'favorites' ? '暂无喜欢的音乐' : view === 'history' ? '暂无播放记录' : view === 'downloads' ? '暂无本地音乐' : view === 'site' ? '暂无本站音源，点击上传到本站' : view === 'trials' ? '暂无试听记录' : '歌单暂无歌曲'" @more="showMenu" />
+        </template>
         <section v-if="view === 'downloadManager'"><p>仅显示本设备下载任务；保存记录不代表文件仍然可读。</p><p v-for="[key, item] in activeDownloads" :key="key">{{ item.label }} · {{ item.progress }} <button @click="item.cancel()">取消</button></p><MusicTrackList :tracks="savedMusicHistory" empty="暂无本设备保存记录" @more="showMenu" /><details v-if="unverifiedMusicCount"><summary>历史保存记录待核实</summary><MusicTrackList :tracks="unverifiedMusicHistory" /></details><WorkHistory initial-kind="delivery" :downloads-only="true" /></section>
         <section v-if="view === 'tools'" class="mc-hub" aria-label="工具入口"><button @click="go('resources')"><FolderOpen :size="23" /><span><strong>任务与文件</strong><small>查看任务进度与已生成文件</small></span><ChevronRight :size="18" /></button><button @click="emit('openTools', 'video')"><Video :size="23" /><span><strong>视频下载</strong><small>解析链接并下载视频</small></span><ChevronRight :size="18" /></button><button @click="emit('openTools', 'watermark')"><Eraser :size="23" /><span><strong>视频去水印</strong><small>编辑视频并处理水印</small></span><ChevronRight :size="18" /></button></section>
         <section v-if="view === 'mine'" aria-label="我的音乐入口">

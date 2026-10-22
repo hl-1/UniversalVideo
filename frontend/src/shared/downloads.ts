@@ -83,7 +83,11 @@ export async function saveRemoteFile(url: string, name: string, options: SaveOpt
       if (active) { active.progress = progressText(progress); active.detail = progress }
       options.onProgress?.(progress)
     } })
-    if (revision === sessionRevision && result.status === 'saved' && options.track && handle?.getFile) await (await import('../features/music/deviceLibrary')).registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
+    if (revision === sessionRevision && result.status === 'saved' && options.track) {
+      const library = await import('../features/music/deviceLibrary')
+      if (handle?.getFile) await library.registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
+      if (uid === (await import('../features/accounts/auth')).account.value?.id) void library.cacheDeviceAssets(options.track as MusicTrack).catch(() => {})
+    }
     if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
     return result
   } catch (error) {
@@ -190,7 +194,11 @@ export async function downloadMedia(request: MediaRequest, options: SaveOptions 
       result = await saveRemoteFileImpl(plan.url, plan.filename, { ...options, controller, handle, onProgress, fallbackUrl: plan.fallback_url })
     }
     await deliveryComplete(plan.download_id, result.status === 'saved' ? 'completed' : 'handed_off', result.bytes)
-    if (revision === sessionRevision && result.status === 'saved' && options.track && handle?.getFile) await (await import('../features/music/deviceLibrary')).registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
+    if (revision === sessionRevision && result.status === 'saved' && options.track && handle?.getFile) {
+      const library = await import('../features/music/deviceLibrary')
+      await library.registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
+      if (revision === sessionRevision) void library.cacheDeviceAssets(options.track as MusicTrack).catch(() => {})
+    }
     if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
     return { ...result, plan }
   } catch (error) {

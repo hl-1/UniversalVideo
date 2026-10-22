@@ -81,6 +81,22 @@ main.mc-content { width: 100%; max-width: 1380px; margin: 0 auto; padding: 28px 
 .mc-command.primary { color: #fff; border-color: #109b6d; background: #109b6d; }
 .mc-command:hover:not(:disabled) { filter: brightness(.94); }
 .mc-list-toolbar { display: flex; align-items: center; gap: 18px; margin-bottom: 20px; color: #949c91; font-size: 12px; }
+.mc-local-hint { margin: 0 0 16px; color: var(--mc-muted); font-size: 12px; line-height: 1.7; }
+.mc-local-status { margin: 0 0 18px; border: 1px solid var(--music-line, #dce3d9); border-radius: 8px; background: var(--music-surface, #f2f5ef); color: var(--mc-ink); }
+.mc-local-status > summary { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 12px 16px; list-style: none; font-size: 13px; cursor: pointer; }
+.mc-local-status > summary::-webkit-details-marker { display: none; }
+.mc-local-status > summary > svg { flex-shrink: 0; color: var(--mc-muted); }
+.mc-local-status > summary:focus-visible { outline: 2px solid var(--mc-green); outline-offset: 3px; border-radius: 8px; }
+.mc-status-chevron { margin-left: auto; transition: transform .15s; }
+.mc-local-status[open] .mc-status-chevron { transform: rotate(90deg); }
+.mc-local-status-body { padding: 0 16px 8px; }
+.mc-local-status-list { max-height: 310px; margin: 0; padding: 0; list-style: none; overflow-y: auto; scrollbar-width: thin; }
+.mc-local-status-list > li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--music-line, #dce3d9); }
+.mc-local-status-song { min-width: 0; }
+.mc-local-status-song strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.mc-local-status-song small { display: block; margin-top: 5px; color: var(--mc-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.mc-local-status-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; flex-shrink: 0; }
+@media (max-width: 760px) { .mc-local-status-list > li { align-items: flex-start; flex-wrap: wrap; gap: 8px; } .mc-local-status-actions { margin-left: auto; } }
 .mc-empty { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; min-height: 190px; color: #a1aaa0; }
 .mc-empty p { margin: 0; font-size: 13px; }
 .mc-empty.compact { min-height: 90px; }

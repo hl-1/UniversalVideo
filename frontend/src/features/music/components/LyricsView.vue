@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, Download, FileMusic, LoaderCircle, Music2, RefreshCw } from 'lucide-vue-next'
-import { activeLyricIndex, audioFilename, type Lyrics } from '../lyrics'
+import { activeLyricIndex, audioFilename, parseImportedLrc, type Lyrics } from '../lyrics'
 import { chooseFile, saveBlob, saveMessage } from '../../../shared/downloads'
+import { hasDeviceFile, readDeviceLyrics, requestTrackLyrics, saveDeviceLyrics } from '../deviceLibrary'
+import type { MusicTrack } from '../musicLibrary'
 
 const props = defineProps<{
-  track: { title: string; artist?: string | null; album?: string; thumbnail?: string | null; filename?: string | null; download_url?: string | null; webpage_url?: string; token?: string }
+  track: { title: string; artist?: string | null; album?: string; thumbnail?: string | null; device_thumbnail?: string; filename?: string | null; download_url?: string | null; webpage_url?: string; token?: string; provider?: string; identifier?: string; duration?: number | null; device_file?: boolean }
   currentTime: number
   lyricsEndpoint?: string
   resultVersion?: number
@@ -21,6 +23,8 @@ const lyricViewport = ref<HTMLElement | null>(null)
 const dialog = ref<HTMLElement | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
 const filename = computed(() => props.track.filename || audioFilename(props.track.download_url))
+const cover = computed(() => props.track.device_thumbnail || props.track.thumbnail)
+const identityTrack = computed<MusicTrack | null>(() => props.track.provider && props.track.webpage_url ? { ...props.track, filename: props.track.filename || undefined, webpage_url: props.track.webpage_url } : null)
 const activeIndex = computed(() => activeLyricIndex(lyrics.value.lines, props.currentTime))
 let request: AbortController | undefined
 let generation = 0
@@ -32,13 +36,14 @@ async function apiError(response: Response) {
   try { return (await response.json()).detail || '歌词加载失败。' }
   catch { return `歌词加载失败（${response.status}）。` }
 }
-async function loadLyrics(fetchOnline = true) {
+async function loadLyrics(fetchOnline = true, force = false) {
   request?.abort()
   const current = ++generation
   const name = filename.value
   error.value = ''
   if (!name && !props.lyricsEndpoint && !props.track.webpage_url) { loading.value = false; return }
   const track = { ...props.track }
+  const song = identityTrack.value
   request = new AbortController()
   const signal = request.signal
   let timedOut = false
@@ -46,6 +51,24 @@ async function loadLyrics(fetchOnline = true) {
   const timeout = setTimeout(() => { timedOut = true; requestForLoad.abort() }, 30000)
   loading.value = true
   try {
+    if (song && !props.lyricsEndpoint) {
+      const cached = await readDeviceLyrics(song)
+      if (current !== generation || signal.aborted) return
+      if (cached && (cached.lines.length || cached.plain) && (!force || cached.manual)) { lyrics.value = cached; await followCurrentLine(true); return }
+      const data = await requestTrackLyrics(song, signal)
+      if (current !== generation || signal.aborted) return
+      if (!data.lines.length && !data.plain && cached && (cached.lines.length || cached.plain)) {
+        lyrics.value = cached
+        error.value = data.message || '未找到新的匹配歌词，继续使用已保存歌词。'
+        await followCurrentLine(true)
+        return
+      }
+      lyrics.value = data
+      try { await saveDeviceLyrics(song, data) }
+      catch { if (current === generation) error.value = '歌词已加载，但本机保存失败，请检查浏览器存储空间。' }
+      await followCurrentLine(true)
+      return
+    }
     if (props.lyricsEndpoint || !name) {
       let endpoint = props.lyricsEndpoint || '/api/music/lyrics/online'
       let body: Record<string, unknown> = { result_version: props.resultVersion }
@@ -84,7 +107,7 @@ async function loadLyrics(fetchOnline = true) {
     }
   } finally { clearTimeout(timeout); if (current === generation) loading.value = false }
 }
-function refreshLyrics() { if (!loading.value && !importing.value) { void loadLyrics() } }
+function refreshLyrics() { if (!loading.value && !importing.value) { void loadLyrics(true, true) } }
 async function importLyrics(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -98,6 +121,14 @@ async function importLyrics(event: Event) {
   error.value = ''
   request = new AbortController()
   try {
+    const song = identityTrack.value
+    if (song && (props.track.device_file || hasDeviceFile(song))) {
+      const data = parseImportedLrc(await file.text())
+      if (current !== generation) return
+      if (!await saveDeviceLyrics(song, data, true)) throw new Error('请先将歌曲加入本设备曲库。')
+      if (current === generation) { lyrics.value = data; await followCurrentLine(true) }
+      return
+    }
     const response = await fetch(`/api/music/lyrics/${encodeURIComponent(filename.value)}`, {
       method: 'PUT', body: file, signal: request.signal, headers: { 'Content-Type': 'text/plain' },
     })
@@ -145,7 +176,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 // Watch individual metadata values so replacing a track object does not reload the same lyrics.
 watch([() => filename.value, () => props.track.title, () => props.track.artist, () => props.track.album,
-  () => props.track.webpage_url, () => props.lyricsEndpoint, () => props.resultVersion], () => {
+  () => props.track.provider, () => props.track.identifier, () => props.track.webpage_url, () => props.lyricsEndpoint, () => props.resultVersion], () => {
   lyrics.value = { lines: [], plain: '', source: '' }
   coverFailed.value = false
   importing.value = false
@@ -153,6 +184,7 @@ watch([() => filename.value, () => props.track.title, () => props.track.artist, 
   void loadLyrics()
 }, { immediate: true })
 watch(activeIndex, () => { void followCurrentLine() })
+watch(cover, () => { coverFailed.value = false })
 onMounted(() => {
   previousFocus = document.activeElement as HTMLElement | null
   previousOverflow = document.body.style.overflow
@@ -185,7 +217,7 @@ onBeforeUnmount(() => {
       </header>
       <div class="lyrics-stage">
         <div class="lyrics-artwork">
-          <img v-if="track.thumbnail && !coverFailed" :src="track.thumbnail" :alt="`${track.title} 封面`" @error="coverFailed = true" />
+          <img v-if="cover && !coverFailed" :src="cover" :alt="`${track.title} 封面`" @error="coverFailed = true" />
           <div v-else class="lyrics-artwork-empty"><Music2 :size="74" :stroke-width="1" /><span>{{ track.title }}</span></div>
         </div>
         <div class="lyrics-song">
@@ -195,7 +227,7 @@ onBeforeUnmount(() => {
               <button v-for="(line, index) in lyrics.lines" :key="`${line.time}-${index}`" class="lyrics-line" :class="{ current: activeIndex === index, past: index < activeIndex }" :aria-current="activeIndex === index ? 'true' : undefined" type="button" @click="seekLine(line.time)">{{ line.text || '…' }}</button>
             </div>
             <div v-else-if="lyrics.plain" class="lyrics-plain">{{ lyrics.plain }}</div>
-            <div v-else class="lyrics-empty"><LoaderCircle v-if="loading" :size="23" class="spin" /><Music2 v-else :size="27" :stroke-width="1.5" /><p>{{ loading ? '正在匹配歌词' : lyrics.message || '暂无歌词' }}</p></div>
+            <div v-else class="lyrics-empty"><LoaderCircle v-if="loading" :size="23" class="spin" /><Music2 v-else :size="27" :stroke-width="1.5" /><p>{{ loading ? '正在匹配歌词' : error ? '歌词加载失败，可点击匹配歌词重试' : lyrics.message || '暂无歌词' }}</p></div>
           </div>
           <p v-if="lyrics.message && (lyrics.lines.length || lyrics.plain)" class="lyrics-error">{{ lyrics.message }}</p>
           <p v-if="error" class="lyrics-error" role="alert">{{ error }}</p>
