@@ -167,6 +167,8 @@ def parse_music_endpoint(payload: video_schemas.ParseRequest):
 
 @router.post("/api/download", response_model=video_schemas.DownloadResponse)
 def download_endpoint(payload: video_schemas.DownloadRequest) -> video_schemas.DownloadResponse:
+    if payload.media_type == "audio" and payload.destination == "library":
+        raise HTTPException(422, "歌曲下载只保存到当前设备；请使用本站音源入口上传文件。")
     network.public_url(str(payload.url))
     relation = video_history.validate_relation(payload.parse_record_id, video_urls.normalize_url(str(payload.url)))
     if payload.format_id and payload.format_id.startswith(("sniff:", "sniffpair:")):

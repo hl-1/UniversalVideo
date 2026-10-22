@@ -27,6 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from backend.core.paths import ROOT_DIR as PROJECT_ROOT
+from backend.modules.accounts import captcha
 
 
 ROOT = PROJECT_ROOT
@@ -62,6 +63,8 @@ class Principal:
     role: str
     session_id: str = ""
     must_change_password: bool = False
+    device_id: str = ""
+    client_kind: str = ""
 principal: ContextVar[Principal | None] = ContextVar("videodream_principal", default=None)
 data_owner: ContextVar[int | None] = ContextVar("videodream_data_owner", default=None)
 
@@ -297,6 +300,28 @@ def settings(*, use_environment: bool = True) -> dict:
     return config
 
 
+def request_device(request: Request) -> dict:
+    identity = request.headers.get("x-videodream-device", "").lower()
+    kind = request.headers.get("x-videodream-client", "web")
+    if identity and (not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}", identity) or kind not in {"web", "android"}):
+        raise HTTPException(422, "设备标识无效。")
+    return {"device_id": identity, "client_kind": kind if identity else ""}
+
+
+def require_device() -> str:
+    identity = current().device_id
+    if not identity:
+        raise HTTPException(409, "请重新登录以启用本设备下载。")
+    return identity
+
+
+def check_device_resource(row):
+    payload = json.loads(row["payload"])
+    if row["kind"] == "delivery" or (row["kind"] == "download" and payload.get("destination") == "device"):
+        if row["user_id"] != current().id or not row.get("device_id") or row["device_id"] != current().device_id:
+            raise HTTPException(404, "本设备没有此下载记录。")
+
+
 def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: int | None = None):
     uid = uid or (owner_id() if principal.get() else None)
     if uid is None:
@@ -305,6 +330,8 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
     if platform_access._cache.get() is not None:
         platform_access._cache.get().clear()
     payload = dict(payload or {})
+    if kind == "download" and payload.get("destination") == "device" and principal.get() and uid == current().id:
+        payload.update(device_id=current().device_id or None, origin_sid=current().session_id, client_kind=current().client_kind)
     inherited = platform_access.metadata_for(payload)
     if inherited:
         payload.update(inherited)
@@ -323,11 +350,12 @@ def register_resource(kind: str, key: str, payload: dict | None = None, *, uid: 
         previous = cursor.fetchone()
         if previous:
             saved = json.loads(previous["payload"])
+            payload.update({name: saved[name] for name in ("device_id", "origin_sid", "client_kind") if name in saved})
             if saved.get("access_scope") == "super_admin":
                 payload.update({name: saved[name] for name in ("access_scope", "source_platform", "source_task_id", "source_filename", "parse_record_id") if name in saved})
-        cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
+        cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at,device_id) VALUES (%s,%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
-                       (kind, key, uid, json.dumps(payload or {}, ensure_ascii=False, default=str), time.time(), time.time()))
+                       (kind, key, uid, json.dumps(payload or {}, ensure_ascii=False, default=str), time.time(), time.time(), payload.get("device_id")))
 
 
 def resource(kind: str, key: str, *, check: bool = True) -> dict:
@@ -341,6 +369,7 @@ def resource(kind: str, key: str, *, check: bool = True) -> dict:
     if not row or (check and current().role != "super_admin" and row["user_id"] != current().id):
         raise HTTPException(404, "资源不存在。")
     if check:
+        check_device_resource(row)
         from backend.infrastructure import platform_access
         platform_access.require(metadata=platform_access.resource_metadata(kind, key))
     return row
@@ -381,7 +410,7 @@ def authenticate(token: str, *, audience: str = "videodream-web") -> Principal:
         user = get_user(int(claims["sub"]))
         if session.get("version") != str(user["auth_version"]):
             raise HTTPException(401, "会话已撤销，请重新登录。")
-        return Principal(user["id"], user["username"], user["role"], claims["sid"], bool(user["must_change_password"]))
+        return Principal(user["id"], user["username"], user["role"], claims["sid"], bool(user["must_change_password"]), session.get("device_id", ""), session.get("client_kind", ""))
     except (jwt.InvalidTokenError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(401, "登录凭证已过期或无效。") from exc
 
@@ -412,7 +441,7 @@ def media_read(path: str, method: str) -> bool:
     return any(re.fullmatch(pattern, path) for pattern in (
         r"/api/files/[^/]+", r"/api/summary-files/[^/]+", r"/api/thumbnails/[^/]+",
         r"/api/library/images/[^/]+", r"/api/image-proxy", r"/api/music/playback/[^/]+/content",
-        r"/api/previews/[^/]+/content", r"/api/watermarks/videos/[^/]+",
+        r"/api/music/site/[a-f0-9]{24}/content", r"/api/previews/[^/]+/content", r"/api/watermarks/videos/[^/]+",
         r"/api/music/batches/[^/]+/archive",
         r"/api/downloads/[^/]+/content", r"/api/downloads/tasks/[^/]+/file",
         r"/api/downloads/batches/[^/]+/archive",
@@ -440,6 +469,11 @@ def revoke_all(uid: int):
 class Credentials(BaseModel):
     username: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.-]{2,39}$")
     password: str = Field(min_length=8, max_length=128)
+
+
+class CaptchaCredentials(Credentials):
+    captcha_id: str = Field(pattern=r"^[A-Za-z0-9_-]{32}$")
+    captcha_code: str = Field(pattern=r"^[A-Za-z0-9]{4}$")
 
 
 class PasswordChange(BaseModel):
@@ -478,15 +512,27 @@ def status():
             "registration_enabled": settings()["registration_enabled"]}
 
 
+@router.get("/captcha")
+def image_captcha(request: Request, response: Response, purpose: Literal["login", "register"] = "login"):
+    secret = signing_key()
+    if purpose == "register" and not settings()["registration_enabled"]:
+        raise HTTPException(403, "公开注册尚未开启。")
+    rate_limit("captcha-ip:" + (request.client.host if request.client else "unknown"), 30, 60)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return captcha.issue(redis_client(), redis_prefix(), secret, purpose)
+
+
 @router.post("/register", status_code=201)
-def register(payload: Credentials, request: Request):
+def register(payload: CaptchaCredentials, request: Request, response: Response):
     require_csrf(request)
     if not settings()["registration_enabled"]:
         raise HTTPException(403, "公开注册尚未开启。")
     rate_limit("register:" + (request.client.host if request.client else "unknown"), 5, 3600)
+    captcha.verify(redis_client(), redis_prefix(), signing_key(), payload.captcha_id, payload.captcha_code, "register")
     uid = create_user(payload)
     audit("register", str(uid), actor=uid)
-    return {"ok": True}
+    return create_login_session(get_user(uid), request, response)
 
 
 def rate_limit(key: str, limit: int, period: int):
@@ -497,13 +543,14 @@ def rate_limit(key: str, limit: int, period: int):
 
 
 @router.post("/login")
-def login(payload: Credentials, request: Request, response: Response):
+def login(payload: CaptchaCredentials, request: Request, response: Response):
     require_csrf(request)
     signing_key()
     ip = request.client.host if request.client else "unknown"
     rate_limit("login-ip:" + ip, 50, 900)
     if int(redis_client().get(redis_prefix() + "rate:" + digest("login-user:" + payload.username.casefold())) or 0) >= 10:
         raise HTTPException(429, "尝试次数过多，请稍后重试。", headers={"Retry-After": "900"})
+    captcha.verify(redis_client(), redis_prefix(), signing_key(), payload.captcha_id, payload.captcha_code, "login")
     with database() as cursor:
         cursor.execute("SELECT * FROM users WHERE username=%s", (payload.username,))
         user = cursor.fetchone()
@@ -512,14 +559,21 @@ def login(payload: Credentials, request: Request, response: Response):
             rate_limit("login-user:" + payload.username.casefold(), 10, 900)
             audit("login", payload.username, "denied", ip=ip)
             raise HTTPException(401, "用户名或密码错误，或账号已停用。")
+    return create_login_session(user, request, response)
+
+
+def create_login_session(user: dict, request: Request, response: Response):
+    with database() as cursor:
         # Serialize session creation against disabling and password resets.
         cursor.execute("SELECT * FROM users WHERE id=%s FOR UPDATE", (user["id"],))
         latest = cursor.fetchone()
-        if latest["password_hash"] != user["password_hash"] or latest["status"] != "active":
+        if (not latest or latest["password_hash"] != user["password_hash"] or latest["status"] != "active"
+                or latest["auth_version"] != user["auth_version"]):
             raise HTTPException(401, "账号状态已变化，请重新登录。")
+        user = latest
         sid, secret = secrets.token_urlsafe(24), secrets.token_urlsafe(48)
         with redis_client().pipeline() as pipeline:
-            for field, value in {"uid": user["id"], "digest": digest(secret), "version": user["auth_version"]}.items():
+            for field, value in {"uid": user["id"], "digest": digest(secret), "version": user["auth_version"], **request_device(request)}.items():
                 pipeline.hset(session_key(sid), field, value)
             pipeline.expire(session_key(sid), SESSION_TTL)
             pipeline.sadd(user_sessions_key(user['id']), sid)
@@ -527,7 +581,7 @@ def login(payload: Credentials, request: Request, response: Response):
             pipeline.execute()
     response.set_cookie(COOKIE, sid + "." + secret, max_age=SESSION_TTL, **cookie_options())
     set_media_cookie(response, user, sid, redis_client().ttl(session_key(sid)))
-    audit("login", str(user["id"]), actor=user["id"], ip=ip)
+    audit("login", str(user["id"]), actor=user["id"], ip=request.client.host if request.client else "unknown")
     return {"access_token": issue_access(user, sid), "expires_in": ACCESS_TTL, "user": public_user(user)}
 
 
@@ -546,10 +600,16 @@ def refresh(request: Request, response: Response):
     user = get_user(int(session["uid"]))
     if session.get("version") != str(user["auth_version"]):
         raise HTTPException(401, "会话已撤销，请重新登录。")
+    device = request_device(request)
+    if session.get("device_id") and device["device_id"] and device["device_id"] != session["device_id"]:
+        raise HTTPException(401, "设备环境已变化，请重新登录。")
     secret = secrets.token_urlsafe(48)
     ttl = client.eval("""if redis.call('HGET',KEYS[1],'digest') ~= ARGV[1] then return -1 end
         local ttl=redis.call('TTL',KEYS[1]); if ttl<=0 then return -1 end
-        redis.call('HSET',KEYS[1],'digest',ARGV[2]); return ttl""", 1, session_key(sid), digest(old), digest(secret))
+        redis.call('HSET',KEYS[1],'digest',ARGV[2]);
+        local device=redis.call('HGET',KEYS[1],'device_id');
+        if not device or device=='' then redis.call('HSET',KEYS[1],'device_id',ARGV[3],'client_kind',ARGV[4]) end;
+        return ttl""", 1, session_key(sid), digest(old), digest(secret), device["device_id"], device["client_kind"])
     if ttl <= 0:
         raise HTTPException(401, "刷新凭证已失效，请重新登录。")
     response.set_cookie(COOKIE, sid + "." + secret, max_age=ttl, **cookie_options())
@@ -627,7 +687,7 @@ def check_path(path: str):
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/logout"} or request.method == "OPTIONS":
+        if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status", "/api/auth/captcha", "/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/logout"} or request.method == "OPTIONS":
             try:
                 return await call_next(request)
             except redis.RedisError:
@@ -653,6 +713,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 user = await run_in_threadpool(authenticate, request.cookies[MEDIA_COOKIE], audience=MEDIA_AUDIENCE)
             else:
                 raise HTTPException(401, "请先登录。")
+            device = request_device(request)
+            if device["device_id"] and user.device_id and device["device_id"] != user.device_id:
+                raise HTTPException(401, "设备环境已变化，请重新登录。")
             marker = principal.set(user)
             if user.must_change_password and path not in {"/api/auth/me", "/api/auth/password"}:
                 raise HTTPException(403, "请先修改临时密码。")

@@ -173,7 +173,7 @@ class MusicImportTests(unittest.TestCase):
             search.assert_not_called()
         self.assertEqual(job["rows"][0]["title"], "New")
 
-    def test_download_uses_validated_snapshot_after_token_expiry(self):
+    def test_old_import_cloud_download_is_retired_after_token_expiry(self):
         job = self.text("晴天 - 周杰伦")
         with patch.object(music, "search", return_value=self.result([self.track()])):
             imports.run_search(job, "all")
@@ -181,10 +181,8 @@ class MusicImportTests(unittest.TestCase):
             music.sessions.clear()
         row = job["rows"][0]
         response = self.client.post(f"/api/music/imports/{job['import_id']}/download", json={"selections": [{"row_id": row["row_id"], "candidate_id": "netease:1"}], "audio_format": "mp3"})
-        self.assertEqual(response.status_code, 200, response.text)
-        batch = video_tasks.music_batches[response.json()["batch_id"]]
-        self.assertEqual(batch["items"][0]["track"].title, "晴天")
-        self.assertEqual(batch["audio_format"], "mp3")
+        self.assertEqual(response.status_code, 410, response.text)
+        self.assertEqual(video_tasks.music_batches, {})
 
     def test_download_rejects_candidate_outside_results_and_double_selection(self):
         job = self.text("晴天 - 周杰伦")

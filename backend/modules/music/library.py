@@ -39,7 +39,7 @@ AUDIO_EXTENSIONS = {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".opus"}
 class TrackInput(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     artist: str = Field(default="", max_length=255)
-    provider: Literal["qq", "netease", "kugou", "local", "video"]
+    provider: Literal["qq", "netease", "kugou", "local", "video", "site", "device"]
     identifier: str = Field(default="", max_length=255)
     webpage_url: str = Field(min_length=1, max_length=2048)
     thumbnail: str | None = Field(default=None, max_length=4096)
@@ -49,6 +49,8 @@ class TrackInput(BaseModel):
     @field_validator("webpage_url")
     @classmethod
     def validate_url(cls, value: str) -> str:
+        if re.fullmatch(r"device:[a-f0-9-]{36}", value) or re.fullmatch(r"/api/music/site/[a-f0-9]{24}/content", value):
+            return value
         if value.startswith("/api/files/"):
             return value
         parsed = urlparse(value)
@@ -208,6 +210,13 @@ def save_track(cursor, track: TrackInput) -> str:
     if track.thumbnail and track.thumbnail.startswith("/api/") and not track.thumbnail.startswith("/api/image-proxy"):
         kind = "image" if track.thumbnail.startswith("/api/library/images/") else "thumbnail"
         accounts.resource(kind, Path(track.thumbnail).name)
+    if track.provider == "site":
+        from backend.modules.music.site import asset
+        item = asset(track.identifier)
+        if track.webpage_url != f"/api/music/site/{item['id']}/content":
+            raise HTTPException(422, "本站音源标识不匹配。")
+    if track.provider == "device" and track.webpage_url != f"device:{track.identifier}":
+        raise HTTPException(422, "设备文件标识不匹配。")
     key = track_id(track)
     canonical = resolve_track_id(cursor, key)
     if canonical != key:
@@ -259,8 +268,9 @@ def write_lyrics(cursor, key: str, data: dict) -> None:
 def read_lyrics(filename: str) -> dict | None:
     accounts.resource("file", filename)
     with database() as cursor:
-        cursor.execute("""SELECT l.* FROM music_lyrics l JOIN music_downloads d ON d.track_id=l.track_id
-            WHERE d.filename=%s""", (filename,))
+        cursor.execute("""SELECT l.* FROM music_lyrics l WHERE l.track_id IN
+            (SELECT track_id FROM music_downloads WHERE filename=%s
+             UNION SELECT track_id FROM music_server_assets WHERE filename=%s AND status='ready')""", (filename,filename))
         return cursor.fetchone()
 
 
@@ -269,6 +279,9 @@ def store_lyrics(filename: str, data: dict) -> dict | None:
     with database() as cursor:
         cursor.execute("SELECT track_id FROM music_downloads WHERE filename=%s FOR UPDATE", (filename,))
         download = cursor.fetchone()
+        if not download:
+            cursor.execute("SELECT track_id FROM music_server_assets WHERE filename=%s AND status='ready' FOR UPDATE", (filename,))
+            download = cursor.fetchone()
         if not download:
             raise HTTPException(409, "音频尚未加入音乐库，请先导入音乐。")
         write_lyrics(cursor, download["track_id"], data)
@@ -306,6 +319,7 @@ def merge_tracks(cursor, first: str, second: str) -> str:
         selected = max(lyrics, key=lambda row: (bool(row["manual"]), bool(row["text"]), row["updated_at"]))
         write_lyrics(cursor, key, selected)
     cursor.execute("UPDATE music_downloads SET track_id=%s WHERE track_id=%s", (key, previous))
+    cursor.execute("UPDATE music_server_assets SET track_id=%s WHERE track_id=%s", (key, previous))
     cursor.execute("UPDATE music_track_aliases SET track_id=%s WHERE track_id=%s", (key, previous))
     cursor.execute("DELETE FROM music_track_features WHERE track_key IN (%s,%s)", (key, previous))
     cursor.execute("INSERT INTO music_track_aliases VALUES (%s,%s) ON DUPLICATE KEY UPDATE track_id=VALUES(track_id)", (previous, key))
@@ -326,8 +340,13 @@ def serialize_track(row: dict) -> dict:
     result["thumbnail"] = result.get("custom_thumbnail") or result.get("thumbnail")
     if result.get("filename"):
         exists = (storage.owned_path("file", result["filename"], uid=result.get("user_id"))).is_file()
-        result["local_url"] = f"/api/files/{quote(result['filename'], safe='')}" if exists else None
+        result["server_url"] = f"/api/files/{quote(result['filename'], safe='')}" if exists else None
+        result["local_url"] = None
+        result["server_file_available"] = exists
         result["file_available"] = exists
+    if result.get("provider") == "site":
+        result["server_url"] = result["webpage_url"]
+        result["local_url"] = None
     return result
 
 
@@ -505,7 +524,6 @@ def sync_downloads() -> None:
 
 @router.get("")
 def overview() -> dict:
-    sync_downloads()
     with database() as cursor:
         cursor.execute("SELECT nickname, bio, avatar FROM music_profile WHERE id=%s", (accounts.owner_id(),))
         profile = cursor.fetchone()
@@ -541,7 +559,6 @@ def index_track(payload: TrackInput) -> dict:
 
 @router.get("/tracks")
 def tracks(view: Literal["all", "favorites", "history", "downloads", "trials", "playlist"] = "history", playlist_id: str = "") -> dict:
-    sync_downloads()
     with database() as cursor:
         parameters = ()
         if view == "all":
@@ -664,32 +681,8 @@ def update_profile(payload: ProfileRequest) -> dict:
 
 @router.post("/import", status_code=201)
 def import_audio(file: UploadFile) -> dict:
-    original = Path(file.filename or "audio").name
-    extension = Path(original).suffix.lower()
-    if extension not in AUDIO_EXTENSIONS:
-        raise HTTPException(422, "请选择 MP3、M4A、FLAC、WAV、OGG、AAC 或 OPUS 音频。")
-    with database():
-        pass
-    safe_name = re.sub(r'[\\/:*?"<>|]', "_", original)[:160]
-    destination = storage.path("file", f"import-{secrets.token_hex(6)}.{safe_name}")
-    total = 0
-    try:
-        with destination.open("xb") as output:
-            while chunk := file.file.read(256 * 1024):
-                total += len(chunk)
-                if total > 512 * 1024 * 1024:
-                    raise HTTPException(413, "单个音频文件不能超过 512 MB。")
-                output.write(chunk)
-        metadata = inspect_audio(destination)
-        record_download(destination.name, metadata, imported=True)
-    except Exception as exc:
-        destination.unlink(missing_ok=True)
-        if isinstance(exc, HTTPException):
-            raise
-        raise HTTPException(422, "音频文件无法读取，请检查文件是否完整。") from exc
-    finally:
-        file.file.close()
-    return {"filename": destination.name, "track": metadata}
+    from backend.modules.music.site import upload
+    return upload(file)
 
 
 def download_playlist(key: str | None, name: str | None) -> str | None:

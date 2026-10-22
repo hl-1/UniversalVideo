@@ -212,7 +212,10 @@ class AgentIntegrationTests(unittest.TestCase):
             cursor.execute("UPDATE users SET password_hash=%s,must_change_password=FALSE WHERE id=1",(accounts.passwords.hash("Test-admin-123!"),))
         cls.user_id = accounts.create_user(accounts.Credentials(username="agent_user",password="Test-user-123!"))
         cls.client = cls.stack.enter_context(TestClient(application.app,base_url="http://127.0.0.1:8001",headers={"Origin":"http://127.0.0.1:5174","X-VideoDream-CSRF":"1"}))
-        response = cls.client.post("/api/auth/login",json={"username":"agent_user","password":"Test-user-123!"})
+        with patch.object(accounts.captcha, 'make_code', return_value='A2B3'):
+            challenge = cls.client.get('/api/auth/captcha').json()
+        response = cls.client.post("/api/auth/login",json={"username":"agent_user","password":"Test-user-123!",
+            "captcha_id": challenge['captcha_id'], "captcha_code": "A2B3"})
         response.raise_for_status()
         cls.client.headers["Authorization"] = "Bearer "+response.json()["access_token"]
         cls.sid = cls.client.cookies.get(accounts.COOKIE).split(".")[0]

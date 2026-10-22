@@ -28,15 +28,8 @@ watch(() => account.value?.id, () => { cancelDeviceBatch(); deviceBatch.value = 
 export async function createMusicBatch(tracks: MusicTrack[], audioFormat: AudioFormat, signal?: AbortSignal, destination: Destination = {}) {
   const unique = [...new Map(tracks.map(track => [trackKey(track), track])).values()].filter(track => !isMusicDownloaded(track))
   if (!unique.length) throw new Error('所选歌曲已下载，无需重复下载。')
-  if (!destination.cloud) return createDeviceBatch(unique, audioFormat, destination, signal)
-  const requests: Array<{ token: string; webpage_url: string }> = []
-  for (const track of unique) {
-    if (track.provider === 'local' || track.local_url || track.filename) throw new Error('本地歌曲已有文件，请使用歌曲旁的文件下载入口。')
-    const resolved = await api<MusicTrack>('/api/music/parse', { ...jsonRequest('POST', { url: track.webpage_url }), signal })
-    if (!resolved.token) throw new Error(`无法取得“${track.title}”的下载凭据。`)
-    requests.push({ token: resolved.token, webpage_url: resolved.webpage_url })
-  }
-  return api<{ batch_id: string }>('/api/music/batches', { ...jsonRequest('POST', { tracks: requests, audio_format: audioFormat, ...destination }), signal })
+  if (destination.cloud) throw new Error('歌曲下载只保存到当前设备；上传请使用本站音源。')
+  return createDeviceBatch(unique, audioFormat, destination, signal)
 }
 
 declare global { interface Window { showDirectoryPicker?: (options?: { mode: 'readwrite'; startIn: 'downloads' }) => Promise<FileSystemDirectoryHandle> } }
@@ -81,7 +74,7 @@ async function createDeviceBatch(tracks: MusicTrack[], audioFormat: AudioFormat,
         let plan: DeliveryPlan | undefined, targetName: string | undefined, createdTarget = false
         item.status = 'running'; setBatch()
         try {
-          const resolved = await api<MusicTrack>('/api/music/parse', { ...jsonRequest('POST', { url: track.webpage_url }), signal: itemController.signal })
+          const resolved = track.provider === 'site' ? track : await api<MusicTrack>('/api/music/parse', { ...jsonRequest('POST', { url: track.webpage_url }), signal: itemController.signal })
           const request: MediaRequest = { url: resolved.webpage_url, format_id: resolved.token ? `music:${resolved.token}` : resolved.formats?.[0]?.format_id,
             media_type: 'audio', audio_format: audioFormat, title: track.title,
             // A native browser download cannot abort a partial writer when the
@@ -106,7 +99,7 @@ async function createDeviceBatch(tracks: MusicTrack[], audioFormat: AudioFormat,
             target = await directory.getFileHandle(targetName, { create: true })
             createdTarget = true
           }
-          const result = await downloadMedia(request, { handle: target, controller: itemController, preparedPlan: plan,
+          const result = await downloadMedia(request, { track, handle: target, controller: itemController, preparedPlan: plan,
             onProgress(progress) { item.transfer = progress; item.message = progressText(progress); setBatch({ message: `${track.title} · ${item.message}` }) } })
           item.download_id = result.plan.download_id
           item.progress = 100

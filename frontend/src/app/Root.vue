@@ -16,7 +16,7 @@ window.addEventListener('videodream-session-cleared', () => {
   try {
     for (let index = localStorage.length - 1; index >= 0; index--) {
       const key = localStorage.key(index)
-      if (key?.startsWith('videodream.') && !key.startsWith('videodream.music.saved.')) localStorage.removeItem(key)
+      if (key?.startsWith('videodream.') && !key.startsWith('videodream.music.saved.') && !key.startsWith('videodream.device.')) localStorage.removeItem(key)
     }
   } catch { /* Private browsing can restrict local storage. */ }
 })

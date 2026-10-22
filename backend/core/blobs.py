@@ -70,6 +70,9 @@ def collect(*, grace_seconds: int = 86400) -> int:
                     cursor.execute("SELECT 1 FROM music_downloads WHERE file_hash=%s AND file_available=TRUE LIMIT 1", (blob.name,))
                     if cursor.fetchone():
                         continue
+                    cursor.execute("SELECT 1 FROM music_server_assets WHERE sha256=%s AND status='ready' LIMIT 1", (blob.name,))
+                    if cursor.fetchone():
+                        continue
                 blob.unlink()
                 removed += 1
     return removed

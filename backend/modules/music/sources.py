@@ -11,7 +11,7 @@ from typing import Annotated, Callable, Literal
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 from yt_dlp import YoutubeDL
@@ -56,6 +56,7 @@ class TrackSession:
 class PlaybackRequest(BaseModel):
     token: str = Field(min_length=1, max_length=128)
     webpage_url: HttpUrl
+    progressive: bool = False
 
 
 @dataclass
@@ -359,6 +360,12 @@ def resolve(track: Track, options: dict, *, public_only: bool = False,
 @router.post("/playback")
 def create_playback(payload: PlaybackRequest) -> dict:
     track = get_track(payload.token, str(payload.webpage_url))
+    if payload.progressive and accounts.principal.get():
+        from backend.modules.music import streaming
+        try:
+            return streaming.prepare(track)
+        except (RuntimeError, HTTPException):
+            pass  # Uncertain sources retain the complete recording validation.
     try:
         prepared = full_playback.prepare(track)
     except RuntimeError as exc:
@@ -382,8 +389,13 @@ def create_playback(payload: PlaybackRequest) -> dict:
 
 
 @router.api_route("/playback/{token}/content", methods=["GET", "HEAD"])
-def playback_content(token: str, range_header: Annotated[str | None, Header(alias="Range")] = None):
+def playback_content(token: str, request: Request = None, range_header: Annotated[str | None, Header(alias="Range")] = None):
     if accounts.principal.get():
+        if request is not None:
+            from backend.modules.music import streaming
+            response = streaming.content(token, request)
+            if response is not None:
+                return response
         accounts.resource("playback", token)
     with lock:
         session = playback_sessions.get(token)

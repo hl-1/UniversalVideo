@@ -20,6 +20,9 @@ def resources(kind: ResourceKind = "file", page: int = Query(default=1, ge=1), q
     with accounts.database() as cursor:
         args = (uid, kind, "%" + q + "%")
         where = " WHERE user_id=%s AND kind=%s AND deleted=FALSE AND resource_key LIKE %s"
+        if kind in {"delivery", "download"}:
+            where += " AND device_id=%s"
+            args += (accounts.current().device_id or "",)
         cursor.execute("SELECT COUNT(*) AS n FROM resources" + where, args)
         total = cursor.fetchone()["n"]
         cursor.execute("SELECT * FROM resources" + where + " ORDER BY created_at DESC" + (" LIMIT 20 OFFSET %s" if accounts.current().role == "super_admin" else ""), args + (((page - 1) * 20,) if accounts.current().role == "super_admin" else ()))

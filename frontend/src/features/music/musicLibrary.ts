@@ -2,6 +2,9 @@ import { api, jsonRequest } from '../../shared/api/client'
 import { ref } from 'vue'
 
 export type MusicTrack = {
+  device_id?: string
+  device_file?: boolean
+  server_url?: string | null
   saved_to_device?: boolean
   save_unverified?: boolean
   id?: string
@@ -47,7 +50,7 @@ export function resetLibrary() {
   favoriteBusy.clear()
   libraryRevision.value = 0
 }
-export const providers: Record<string, string> = { qq: 'QQ 音乐', netease: '网易云音乐', kugou: '酷狗音乐', video: '视频音轨', local: '本地音乐' }
+export const providers: Record<string, string> = { qq: 'QQ 音乐', netease: '网易云音乐', kugou: '酷狗音乐', video: '视频音轨', local: '历史服务器文件', site: '本站音源', device: '设备导入' }
 
 export function trackKey(track: MusicTrack) {
   return `${track.provider || 'video'}:${track.identifier || track.webpage_url}`
@@ -77,7 +80,7 @@ export async function refreshLibrary() {
     if (revision !== refreshRevision) return
     profile.value = overview.profile
     playlists.value = overview.playlists
-    counts.value = overview.counts
+    counts.value = { ...overview.counts, downloads: 0 }
     trackArtworkMap.value = new Map(overview.artwork.map(track => [trackKey(track), track.thumbnail || null]))
     likedKeys.value = new Set(favorites.tracks.map(trackKey))
     libraryError.value = ''
@@ -104,6 +107,6 @@ export async function getTracks(view: string, playlistId = '') {
   return (await api<{ tracks: MusicTrack[] }>(`/api/library/tracks?view=${view}&playlist_id=${encodeURIComponent(playlistId)}`)).tracks
 }
 export async function renewTrack(track: MusicTrack, signal?: AbortSignal): Promise<MusicTrack> {
-  if (track.provider === 'local' || track.local_url || !track.provider || track.provider === 'video') return track
+  if (['local', 'site', 'device'].includes(track.provider || '') || !track.provider || track.provider === 'video') return track
   return api<MusicTrack>('/api/music/parse', { ...jsonRequest('POST', { url: track.webpage_url }), signal })
 }

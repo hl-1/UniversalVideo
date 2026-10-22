@@ -1,4 +1,4 @@
-# 统一下载、本机保存与云端文件去重
+# 统一下载、设备曲库与本站音源
 
 ## 范围与原因
 
@@ -12,7 +12,7 @@
 
 - 界面默认“选择位置并保存到本机”。支持文件选择 API 时，单文件点击下载立即打开系统保存对话框；批量歌曲先打开一次目录选择器，再逐首保存。选择器在任何解析、状态查询或媒体请求之前调用，取消后不启动下载。按本轮用户明确选择，此模式在网页显示保存进度，不进入浏览器下载记录。本机路径和文件句柄不上传服务器。
 - 不支持文件选择 API 的浏览器使用原生下载管理器，保存路径由浏览器设置或浏览器自己的对话框决定，不能承诺网页能强制弹出路径选择。
-- “保存到云端资料库”是显式目标；不因下载到本机而自动保留云端媒体副本。歌单可只保存在线歌曲引用。
+- 歌曲下载仅面向当前设备。本站音源通过独立“上传到本站”入口创建；歌单和收藏只保存歌曲引用。视频资料库功能继续使用原有目标。
 - 允许匿名读取、无需敏感凭据且探测通过 CORS 的单一媒体源，优先浏览器直连。浏览器实际连接失败时使用同一下载计划的认证转发地址；服务器探测成功不能保证用户网络也能直连。
 - 需要平台请求头的完整 HTTP 媒体由服务器立即流式转发，缓冲有上限，不先下载完整媒体。
 - 单曲音频可通过受控请求进入 FFmpeg 管道，输出原格式或所选 MP3/M4A，并校验时长。输入和输出都采用有界管道；FFmpeg 输入协议仅允许 `pipe`，不能从媒体内容中绕过网络校验发起任意请求。
@@ -49,26 +49,32 @@
 - 用户仍可在搜索多选中显式选择“浏览器下载（逐首）”；不支持目录 API 时也使用此方式，并提示由浏览器管理位置与进度。此路径按顺序为每首准备并校验完整临时文件，再分别交给浏览器，不等待完整批次。保存位置由浏览器设置决定；网页不能强制开启浏览器“下载前询问保存位置”。界面保留每首“保存此歌曲”链接；临时文件到期需重试准备。
 - 一首解析、获取、校验或写入失败，标记该首失败并继续后续歌曲，不将残缺文件记为成功。每首使用独立取消控制器，单曲停滞超时不会取消整个队列；用户主动停止和切换账户才取消活动与后续歌曲。迟到回调不能将旧账户状态写入新账户界面。
 - 队列分别显示已保存、交给浏览器、失败、取消。仅真实写盘关闭成功更新本机历史并隐藏下载按钮；浏览器接管不能确认磁盘完成，不隐藏按钮。部分失败明确展示成功数量，重试只处理失败或取消曲目，不重新下载此前成功或已交给浏览器的歌曲。
-- 批量找歌、场景歌单和搜索多选共用下载能力。保存到歌单只添加在线歌曲引用，可先于下载完成；自建歌单的数量表示条目数，不表示本机文件数，下载失败不撤回用户添加的在线引用。是否保存成功以逐首队列及本机写盘结果为准；云端保存有明确选项。
+- 批量找歌、场景歌单和搜索多选共用下载能力。保存到歌单只添加在线歌曲引用，可先于下载完成；自建歌单的数量表示条目数，不表示本机文件数，下载失败不撤回用户添加的在线引用。是否保存成功以逐首队列及本机写盘结果为准；上传到本站通过独立入口执行。
 - 保留旧 ZIP 接口兼容已有调用方。曾发生音轨在输出部分字节后时长校验失败，导致 ZIP 中央目录未输出、压缩包无法解压；现在每首完全获取及校验到临时文件后才建立 ZIP 条目，单曲失败直接跳过，随后继续。使用 `ZIP_STORED`、ZIP64，单首暂存上限 1 GiB，用完关闭删除，不生成完整云端 ZIP；FFmpeg 管道与兼容任务继续采用各自原有校验。
 - 旧 ZIP 存在失败歌曲时附加 UTF-8 `下载结果.txt`，列出成功／失败数量、失败歌名和不含源凭据的重试说明。全部失败时返回只有说明的有效 ZIP，成功数量为零。只有输出通道故障、磁盘故障、主动取消或会话撤销等批次级错误才终止请求，不能把已开始写入条目的输出故障当成跳过成功。浏览器接管 ZIP 不把曲目标记为本机已保存。
 
 ## 搜索与已下载状态
 
-搜索行、所选歌曲详情和搜索“更多”菜单，对已下载歌曲直接隐藏下载按钮，并区分“已保存到本机”和“已在资料库”。全选、前 10/20/100 首、已选数量和实际提交都排除已下载歌曲，显示跳过数量。下载成功立即更新，无需重新搜索；失败、取消和浏览器接管不作本机完成确认。
+搜索结果仅当当前账号、当前设备索引中存在可读音频时隐藏下载入口。服务器文件、保存凭证、浏览器接管及其他设备下载均不能代替本设备文件。旧 `/api/library/download-status` 只描述历史服务器文件，界面不再把它用于本地判定。
 
-服务端对当前搜索页的歌曲标识批量关联 `music_tracks`、`music_track_aliases`、`music_downloads` 与当前账户的有效文件资源，并核对实际文件存在，不从最多 1000 条的音乐库列表推断全量状态。状态接口每次最多 200 首，前端分批查询。个人状态在公共平台搜索缓存之外附加，避免跨用户共享状态。
+三个入口独立：**本地音乐**仅列出本设备实际可读文件；**下载管理**显示当前设备活动任务、已保存凭证及待核实旧记录；**本站音源**只列出用户明确上传、状态为 ready 的服务器音频。同账号其他设备可在线访问本站音源，但不会因此出现本地下载标记。本站上传不自动下载到设备，本地导入不上传。
 
-云端文件被删或失效后，状态刷新恢复下载入口。其他用户的文件不能导致当前用户隐藏按钮，也不能成为可读的私有下载地址。
+网页设备身份为随机 UUID，保存于 `videodream.device.id`。浏览器、配置文件、站点存储实例相互独立；退出及重新登录保留 UUID，清除站点数据生成新身份。不能使用 IP、硬件指纹或用户提供的任意查询参数代替设备身份。设备标识是归属标签，认证仍由有效会话负责。
 
-本机完成记录只代表当前账户在当前浏览器设备的成功保存历史，不代表网页能够持续检查磁盘文件。用户在系统中删除文件后，网页不能自动获知；可在“本地和下载”的本机保存记录中重新下载。其他设备不会因账户历史而误称该设备已保存。切换账户清空内存状态，并读取该账户自己的浏览器记录。退出登录保留按账号划分的本机历史，其他会话缓存仍按原规则清理；不保存凭据或本机路径。
+网页 IndexedDB `videodream-device-library` v1 的 `tracks` store 按 `uid:device_id:provider:identifier`（无 identifier 时用 URL）保存：`key,uid,device_id,track,handle?,bytes,modified?,added_at`。只保存文件句柄和歌曲元数据；不上传文件句柄或路径。授权持久化可用时重新打开页面后核对文件大小、mtime 和读取权限；普通 File 输入只在当前页面有效。文件缺失、权限撤销或更改后移出可播放列表，提供重新定位/授权入口；本地播放失败不会静默改用网络。移出曲库只移除本设备索引，原文件保留。前台恢复时刷新实际可读状态，播放时再次验证。
 
-旧缓存的数组 key 或 `version:1` 中的 `saved_to_device` 不能证明逐首文件已保存，特别是曾经的 ZIP 和浏览器接管流程。升级后转为“旧保存记录待核实”，恢复搜索按钮、更多菜单和批量选择，不再因旧 key 跳过下载。“本地和下载”将这些元数据放入可展开的待核实记录，不计入本机成功列表；没有元数据的旧 key 仍保留待核实数量。有效资料库文件只依据服务端明确返回 `file_available=true` 且有本人 `local_url` 判定，单有地址或文件名不作为成功依据。
+`videodream.music.saved.{uid}.{device_id}` 保存逐首保存凭证，与真实文件索引独立。旧 uid-only 数据保留原文并转为待核实，绝不自动归属为当前设备已下载。切换账号取消任务、清空播放和文件引用，迟到回调不得写入另一账号。本地音乐数量只来自本设备索引。
+
+在线平台播放使用 `progressive:true` 请求：先解析和探测可播放源，返回短时认证流式地址，支持单段 Range，不先下载整曲到服务器。返回 `full:false,verification:pending`，不冒充完整音源已验证。网页核对播放器实际时长，不匹配时停止并重试一次严格完整校验。无法渐进读取的来源保留严格校验，处理临时文件不会进入本站或设备曲库。外部平台可用性、源速度和浏览器解码仍影响在线起播；本地文件播放不经过服务器。
 
 ## 接口约定
 
 | 接口 | 行为 |
 |---|---|
+| `POST /api/music/site/uploads` | 上传音频到本站（最多 512 MB，探测真实音轨），返回 site 歌曲；旧 `/api/library/import` 作为明确上传的兼容入口。 |
+| `GET /api/music/site/tracks` | 当前账号确认上传且实际存在的服务器音源。 |
+| `GET/HEAD /api/music/site/{asset_id}/content` | 验证资源归属和媒体会话，支持 Range 在线播放及设备保存。 |
+| `POST /api/music/playback` | 新客户端传 progressive:true；旧客户端及严格重试保留完整校验。 |
 | `POST /api/downloads/plan` | 输入 `url,format_id?,parse_record_id?,title?,media_type,audio_format,destination,compatibility?`，返回 `download_id,version,destination,mode,filename,url,fallback_url,expires_at,task_id?`；目标默认本机。 |
 | `GET/HEAD /api/downloads/{id}/content` | 当前会话的既有文件或媒体转发；返回附件名称、适用的长度与 Range 元数据。 |
 | `GET /api/downloads/{id}/state` | 获取准备、传输和终态；计划过期返回 410。 |
@@ -103,7 +109,7 @@ downloads/users/{uid}/files/{原文件名}
 
 ## MySQL 数据明细
 
-本次不新增或修改表、列、索引或外键。以下是涉及数据的现有完整结构摘要，包含原有升级字段，供核对；不是本次要执行的建表语句。实际升级仍由现有幂等迁移管理。
+新增 music_server_assets，resources 增加可空 device_id 和 resource_device 索引。music_tracks 结构不变，provider VARCHAR(12) 使用新增语义 site/device。完整相关结构如下，幂等迁移位于 backend/migrations/device_music.py。
 
 ```sql
 CREATE TABLE resources (
@@ -114,8 +120,21 @@ CREATE TABLE resources (
   created_at DOUBLE NOT NULL,
   updated_at DOUBLE NOT NULL,
   deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  device_id CHAR(36) NULL,
   PRIMARY KEY (kind, resource_key),
-  INDEX resource_owner (user_id, kind)
+  INDEX resource_owner (user_id, kind),
+  INDEX resource_device (user_id, kind, device_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE music_server_assets (
+ id CHAR(24) NOT NULL PRIMARY KEY, user_id BIGINT NOT NULL, track_id CHAR(64) NOT NULL,
+ filename VARCHAR(255) NOT NULL, original_filename VARCHAR(255) NOT NULL,
+ asset_kind VARCHAR(24) NOT NULL, status VARCHAR(16) NOT NULL, mime_type VARCHAR(100) NOT NULL,
+ file_size BIGINT NULL, sha256 CHAR(64) NULL, created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL,
+ UNIQUE KEY asset_owner_file (user_id,filename),
+ KEY asset_owner_kind_status (user_id,asset_kind,status,created_at),
+ KEY asset_track (track_id), KEY asset_hash (sha256),
+ CONSTRAINT asset_track_fk FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE music_tracks (
@@ -162,21 +181,23 @@ CREATE TABLE music_downloads (
 
 既有 `resources` 增加两类数据内容：
 
-- `kind=delivery`，`resource_key=24位下载ID`：初始 JSON 为 `delivery_version:1`、`destination:device|library`、`delivery_mode:file|relay|direct|task|batch`、`status:ready`、`suggested_filename`、可空 `media_identity` 和 `task_id`。终态 JSON 保存状态、阶段、传输字节、完成来源、目标和文件名等。`completed/filesystem` 表示本机写盘关闭成功，`handed_off/browser` 只表示交给浏览器，`library_saved/server` 须核对云端任务已完成；另有 `failed`、`cancelled`。媒体源 URL、Cookie、本机路径和文件句柄不写入下载历史。终态先持久化再设置 Redis 的短 TTL，重复完成不会退回运行态，Redis 状态失效后仍以 MySQL 已持久化终态为准。个人中心与管理员的“下载与保存记录”可查看、删除记录。
+- `kind=delivery`，`resource_key=24位下载ID`：初始 JSON 为 `delivery_version:2`、`destination:device|library`、`delivery_mode:file|relay|direct|task|batch`、`status:ready`、`suggested_filename`、可空 `media_identity` 和 `task_id`。初始及终态均保存 device_id、client_kind、origin_sid；终态 JSON 保存状态、阶段、传输字节、完成来源、目标和文件名等。`completed/filesystem` 表示本机写盘关闭成功，`handed_off/browser` 只表示交给浏览器，`library_saved/server` 须核对云端任务已完成；另有 `failed`、`cancelled`。媒体源 URL、Cookie、本机路径和文件句柄不写入下载历史。终态先持久化再设置 Redis 的短 TTL，重复完成不会退回运行态，Redis 状态失效后仍以 MySQL 已持久化终态为准。个人中心与管理员的“下载与保存记录”可查看、删除记录。
 - `kind=download_variant`，`resource_key=SHA256(uid+页面URL+稳定格式/歌曲标识+媒体类型+音频格式)`：JSON 为 `{ "task_id": "既有下载任务ID" }`。读取时仍检查原任务和文件是否存在、归属是否有效。失败、取消或被删除后可重新登记。
 
-本机下载不为不存在的云端文件创建 `music_downloads` 行。云端保留和导入继续维护既有哈希、大小、可用状态及资源记录。
+本机下载不为不存在的云端文件创建 `music_downloads` 行。新上传只维护 music_server_assets 及歌曲/文件资源，music_downloads 仅保留历史兼容。ready 本站资产参与共享池回收引用检查。
 
 ## Redis 数据明细
 
 | Key 模板和示例 | 类型 | 值与 TTL |
 |---|---|---|
-| `videodream:download:plan:{uid}:{download_id}`；如 `videodream:download:plan:1:0123456789abcdef01234567` | String / JSON | `version,id,uid,sid,destination,mode,filename,expires_at,page,request`，按模式含服务端 `url,headers,audio,output_format,expected_duration,source_filename,task_id,tracks,audio_format`。TTL 为 600 秒与已知源到期剩余时间减 15 秒的较小值。 |
+| `videodream:download:plan:{uid}:{download_id}`；如 `videodream:download:plan:1:0123456789abcdef01234567` | String / JSON | `version:2,policy_version:2,id,uid,sid,origin_sid,device_id,client_kind,source_kind,provider,source_id,destination,mode,filename,expires_at,page,request`，按模式含服务端 `url,headers,audio,output_format,expected_duration,source_filename,task_id,tracks,audio_format`。TTL 为 600 秒与已知源到期剩余时间减 15 秒的较小值。 |
 | `videodream:download:state:{uid}:{download_id}`；如 `videodream:download:state:1:0123456789abcdef01234567` | Hash | `version,status,phase,transferred_bytes,updated_at,completion_source`（完成来源为 `none/filesystem/browser/server`）；旧 ZIP 批量含 JSON `items`、`finished`、`failed`，例如 `finished="2",failed="1"`，items 为歌曲元数据、`status:finished|failed` 及失败 `error`。活动 TTL 24 小时，每次进度刷新；终态（含云端完成 `library_saved`）TTL 1 小时。 |
+| `videodream:session:{sid}`；如 `videodream:session:example-session-id` | Hash | 既有 `uid,digest,version` 新增 `device_id,client_kind`。登录写入，refresh 原子轮换 digest 并为旧会话一次性绑定设备；保留原 7 天上限和剩余 TTL。请求头与已绑定设备冲突返回 401；媒体 Cookie 从会话取得归属。撤销删除整 key。 |
+| `videodream:music:source:{uid}:{token}`；如 `videodream:music:source:1:example-token` | String / JSON | `version:1,uid,sid,track_key,provider,mode:relay,source_url,media_url,headers,expected_duration,verification:pending,expires_at`。TTL 为 600 秒与签名源剩余时间减 15 秒的较小值；凭据仅在服务端，过期重新解析。每次打开验证账号、会话和平台 ACL，传输期间检查会话撤销。 |
 
-计划创建时写入，读取时同时验证当前账户、会话、持久化资源未删除及源权限。源请求头只存在于服务端短期计划，不出现在公共计划响应。取消、源错误和会话撤销阻止后续读取。源已过期时明确重新解析；已经建立的有效响应不因计划 TTL 到期而中途断开。
+计划创建时写入，读取时同时验证当前账户、绑定设备、会话、持久化资源未删除及源权限。源请求头只存在于服务端短期计划，不出现在公共计划响应。取消、源错误和会话撤销阻止后续读取。源已过期时明确重新解析；已经建立的有效响应不因计划 TTL 到期而中途断开。
 
-非终态通过 Lua 防止迟到进度覆盖终态；完成和取消通过短会话锁串行持久化。Redis 丢失不视为下载成功，MySQL 保存历史，本机完成提示以真实写盘结果为准。终态通知可以在源计划过期后依据当前账户的持久化资源完成；过期计划不能重新取得媒体凭据。
+非终态通过 Lua 防止迟到进度覆盖终态；完成和取消通过短会话锁串行持久化。Redis 丢失不视为下载成功，MySQL 保存历史，本机完成提示以真实写盘结果为准。终态通知在源计划过期后仍须验证持久化资源的 uid、device_id、origin_sid；过期计划不能重新取得媒体凭据。
 
 没有为共享媒体本体再引入 Redis 哈希索引；池文件和 MySQL 短锁协调发布与回收，避免缓存失效时错误删除用户文件。
 
@@ -184,7 +205,7 @@ CREATE TABLE music_downloads (
 
 ## 浏览器存储
 
-`localStorage["videodream.music.saved.{uid}"]`，如 `videodream.music.saved.1`，保存以下 JSON，无固定 TTL，由当前账户本机保存或迁移时更新：
+`localStorage["videodream.music.saved.{uid}.{device_id}"]`，如 `videodream.music.saved.1.123e4567-e89b-42d3-a456-426614174000`，保存以下 JSON，无固定 TTL，由当前账号当前设备保存时更新。旧 uid-only key 原样保留，读取时仅作为待核实记录，不作为本设备保存成功证据；设备文件索引另存 IndexedDB，格式见“搜索与已下载状态”。
 
 ```json
 {
@@ -221,7 +242,9 @@ CREATE TABLE music_downloads (
 
 首次读取数组或 v1 数据，先原样备份至 `videodream.music.saved.backup.{uid}.v1`（如 `videodream.music.saved.backup.1.v1`，String，值为原 JSON，无 TTL），已有备份不覆盖，再写入 v2。反复登录、刷新或升级不能把待核实记录提升为成功；账号切换清空内存并分别读取本人数据，迟到回调不写入其他账号。存储满时内存判定仍保持待核实，不强行覆盖未备份记录。备份和凭据均留在当前浏览器，不上传、不含绝对路径、文件句柄或平台凭据。
 
-## 迁移、兼容和回滚
+## 历史版本迁移、兼容和回滚
+
+以下记录描述此前下载优化；本轮设备曲库的 DDL、历史文件分类与回滚以末尾“设备曲库升级与回滚”为准。
 
 1. 上线代码无需 DDL；旧请求、旧任务和云端文件继续保留。新界面明确选择本机或云端。
 2. 新云端文件自动进入共享池。既有用户文件不在服务请求中批量重写。
@@ -287,3 +310,34 @@ CREATE TABLE music_downloads (
 - 账号与下载专项 47 项通过；真实附件响应验证文件内容、可读名称、HEAD、Range、X-Accel 内部路径保留原始资源名及既有认证隔离。使用独立测试 MySQL、Redis 前缀及临时文件目录，不变更业务数据。
 - 在实际共享 Vue 组件的隔离预览页检查桌面及 390px 手机宽度：已知大小显示 50% 和 MB/s、剩余时间，未知大小显示滚动条和 KB/s。390px 时页面宽度为 390px、浮层宽 358px，无横向溢出；预览使用模拟进度，不写入用户下载目录，未自动操作系统保存对话框。
 - 前端 5174、后端 8001 在原端口重启，首页和健康检查返回 200，匿名下载仍返回 401。规格、迁移与回滚说明同步，无 MySQL 或 Redis 结构变更；未部署云端。
+
+## 设备曲库升级与回滚（2026-10-22）
+
+此节和本页更新后的入口、数据契约优先于历史验收记录中的旧行为描述。
+
+- 首次 DDL 前备份 music_* 与 resources，分类前输出旧记录 inventory（含既有大小、hash、owner 和文件名），写入 `.run/library-backups/`。迁移只处理未登记资产，可中断重跑；已确认 imported 的旧文件标为 site_upload，其余 music_downloads 为 legacy_download；缺失标为 missing。未索引的服务器文件保留在旧资源页待核实，不凭文件名自动认定上传。迁移不删除、移动或重新下载音频。
+- 旧歌曲 ID、歌单、收藏、历史、歌词保持 canonical ID；site 身份通过 music_track_aliases 关联。合并歌曲前迁移资产 FK，避免丢失引用。历史无 device_id 的资源保持 NULL，不能自动分配给当前设备，也不进入设备下载列表。
+- resources 的账号及设备归属由服务端写入，任务进度更新保留初始归属。当前设备任务列表在 SQL 过滤 device_id，分页及总数一致；读取、删除、临时文件下载以及过期完成回调都验证设备。管理员管理资源入口可保留服务器历史，但不混入个人本地曲库。
+- 服务端正常曲库读取不再运行 sync_downloads 全盘扫描/hash/解码；旧文件整理保留显式维护调用。平台音源下载不会自动复用历史服务器副本。新歌曲云端创建/批量重试返回 422/410，历史任务查询及文件保留；视频的既有云端工具继续可用。
+- 回滚必须保留新增表/列、asset 数据、别名、设备文件及原始备份；先切回兼容读取实现再重启服务。不要执行 DROP 或将所有 device_id 改成当前设备。Redis 新源令牌自然过期，旧 session/plan 需兼容字段；旧前端如果不能区分三类来源，不应直接恢复旧“已下载”判断。
+- 本功能只完成本地工作区开发与测试，不自动发布云服务器或覆盖手机安装。网页构建与后端接口须配套发布。
+
+
+## 设备曲库本地验收（2026-10-22）
+
+- 网页“本地音乐／下载管理／本站音源”已分开，列表、更多菜单与播放器的下载入口统一以本设备可读文件判定。本地导入不发上传请求，实际播放地址为本机 Blob；缺失文件需要重新定位，保存凭证和服务器文件不充当设备文件。
+- 前端 136 项测试、类型检查和生产构建通过。后端账号、设备权限、下载交付、曲库、上传、歌词、来源解析、严格播放及渐进转发相关回归共 145 个不同用例通过（各批次存在重复运行）。集成测试使用独立 MySQL Unix socket 实例与隔离 Redis 前缀，该测试 MySQL 已停止。
+- Chrome 桌面 1440px 与移动视口 390px 验证真实文件句柄、IndexedDB 刷新恢复、Blob 播放、本地导入无上传、同账号第二个浏览器存储环境为空、服务器歌曲独立显示、下载管理入口，以及本地歌曲在播放器内隐藏下载按钮。账号与业务接口使用隔离模拟响应；服务端鉴权另由集成测试覆盖。本轮没有在实体手机、Safari 或真实外部平台网络上验收。
+- 本工作区 MySQL 已应用幂等迁移：resources.device_id、四列 resource_device 索引及 music_server_assets 均存在；既有 113 条服务器文件登记为 legacy_download / ready，原文件保留，不自动变成本站上传或当前设备本地歌曲。迁移前备份和清单位于 .run/library-backups/。
+- 前端 5174、后端 8001 在原端口重启，首页、健康检查、认证状态返回 200；匿名读取本站音源返回 401。git diff --check 通过。未提交、推送或部署云端；在线起播仍取决于外部音源和网络，实际本地播放不经过服务器。
+
+
+## 网页本地导入校验修正（2026-10-22）
+
+用户提供的 M4A 能读取约 398 秒容器时长，但 Chrome 在首个 AAC 包返回 PIPELINE_ERROR_DECODE；FFmpeg 独立读取原文件同样报 Prediction is not allowed in AAC-LC / Invalid data found when processing input。时长、后缀和文件可读均不能单独证明音频可解码。原导入逻辑还会每次生成 UUID，导致同一文件重复登记；本地 Blob 错误套用网络恢复后显示不准确的“媒体恢复失败”。
+
+- 导入用本机临时 audio 元素读取有效时长并等待首批音频解码数据，超时 10 秒。仅元数据可读不算成功；损坏或浏览器不支持的编码给出文件名及错误原因，不新增可播放条目。校验、去重和播放均留在浏览器，不上传音频。首批解码通过不等于整曲完整性验证，后续解码失败仍需在播放器处理。
+- 相同账号、设备、文件名和大小的候选，优先用 FileSystemFileHandle.isSameEntry 确认同一文件；没有句柄身份时分块比较完整字节，不以同名、同大小、同时间戳自动合并。保留已有歌曲身份及来源，补齐实际时长；重新导入可合并旧版同一文件的多个 UUID。拒绝音频时仅移除已经证明指向同一无效文件的旧索引，原文件保留。多选中一个文件失败不阻止后续有效文件导入。
+- 本地解码失败显示本地文件原因，不执行网络探测、认证刷新或在线替代。浏览器明确返回解码失败/格式不支持时移除对应本设备索引，保留用户原音频文件；再次导入需要有效且当前浏览器可解码的副本。切歌、停止、退出释放 Blob URL，load 中断的 AbortError 不作为媒体故障重复恢复。
+- MySQL：没有新增或修改表、字段、完整表结构、索引或关系；本修正仅执行浏览器文件读取与设备索引更新。Redis：没有新增或修改 key 模板/示例、类型、值、TTL、读写、失效或一致性规则，因为本地文件校验不调用后端。IndexedDB 继续 tracks v1，duration 使用原有 track 字段，无 schema 迁移；兼容旧条目。回滚只涉及网页曲库、音频检查和播放器代码，保留设备 ID、索引、原文件及服务器数据，不执行 DDL、清库或文件重写。
+- 前端 147 项测试、类型检查与生产构建通过。Chrome 使用用户原文件复现旧错误并验证新导入拒绝；文件 SHA-256 前后一致。正常 AAC/M4A 验证实际播放时间推进、时长保存、重复导入、旧 UUID 重复记录合并和 IndexedDB 刷新恢复。账号及业务接口为隔离模拟响应，音频解码、文件句柄及 IndexedDB 为真实浏览器能力；没有音频上传或在线播放回退请求。截图和结果位于 .run/local-import-fixtures/。服务使用原前端 5174、后端 8001，本轮仅修改网页代码与规格。

@@ -13,3 +13,5 @@ def initialize_schema(cursor):
     accounts.migrate(cursor)
     video_store.migrate(cursor)
     agent_store.migrate(cursor)
+    from backend.migrations import device_music
+    device_music.migrate(cursor)

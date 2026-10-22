@@ -16,6 +16,8 @@ from backend.modules.music import batch as music_batch
 from backend.core import paths, storage
 from backend.modules.video import downloads as video_downloads
 from backend.modules.video import tasks as video_tasks
+from backend.modules.video import schemas as video_schemas
+from fastapi import HTTPException
 from backend.modules.music import sources as music
 from backend.tests.support import domain_app
 
@@ -53,10 +55,10 @@ class MusicBatchTests(unittest.TestCase):
                                           provider="netease", identifier=str(identifier)))
 
     def create(self, tracks):
-        response = self.client.post("/api/music/batches", json={"tracks": [
-            {"token": track.token, "webpage_url": track.webpage_url} for track in tracks], "audio_format": "mp3"})
-        self.assertEqual(response.status_code, 200, response.text)
-        return video_tasks.music_batches[response.json()["batch_id"]]
+        # Construct a pre-upgrade batch; public creation is intentionally retired.
+        response = music_batch._create_legacy_music_batch(video_schemas.MusicBatchRequest(
+            tracks=[{"token": track.token, "webpage_url": track.webpage_url} for track in tracks], audio_format="mp3"))
+        return video_tasks.music_batches[response["batch_id"]]
 
     def finish(self, task):
         filename = f"{task.task_id}.mp3"
@@ -102,9 +104,8 @@ class MusicBatchTests(unittest.TestCase):
             music_batch._run_music_batch(batch)
         self.assertEqual(add.call_count, 1)
         self.assertTrue(batch['items'][0]['playlist_pending'])
-        response = self.client.post(f"/api/music/batches/{batch['batch_id']}/retry")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['playlist_id'], 'test-playlist')
+        response = music_batch._retry_legacy_music_batch(batch['batch_id'])
+        self.assertEqual(response['playlist_id'], 'test-playlist')
         with patch.object(video_downloads, '_run_audio_download', side_effect=self.finish) as download, patch.object(library, 'add_to_playlist') as add:
             music_batch._run_music_batch(batch)
         self.assertEqual(download.call_count, 1)
@@ -154,8 +155,7 @@ class MusicBatchTests(unittest.TestCase):
         original_id = batch["items"][1]["task"].task_id
         with music.lock:
             music.sessions[second.token].expires_at = time.time() - 1
-        result = self.client.post(f"/api/music/batches/{batch['batch_id']}/retry")
-        self.assertEqual(result.status_code, 200)
+        music_batch._retry_legacy_music_batch(batch['batch_id'])
         self.assertNotEqual(batch["items"][1]["task"].task_id, original_id)
         with patch.object(video_downloads, '_run_audio_download', side_effect=self.finish) as run:
             music_batch._run_music_batch(batch)
@@ -186,7 +186,7 @@ class MusicBatchTests(unittest.TestCase):
         cases = [[], [{"token": "expired", "webpage_url": track.webpage_url}],
                  [{"token": track.token, "webpage_url": "https://music.163.com/song?id=11"}],
                  [{"token": track.token, "webpage_url": track.webpage_url}] * 101]
-        for items, code in zip(cases, (422, 410, 422, 422)):
+        for items, code in zip(cases, (422, 410, 410, 422)):
             with self.subTest(code=code):
                 response = self.client.post("/api/music/batches", json={"tracks": items})
                 self.assertEqual(response.status_code, code)
@@ -197,8 +197,10 @@ class MusicBatchTests(unittest.TestCase):
         track = self.track(12)
         batch = self.create([track, track])
         self.assertEqual(len(batch["items"]), 1)
-        response = self.client.post("/api/music/batches", json={"tracks": [{"token": track.token, "webpage_url": track.webpage_url}]})
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.client.post("/api/music/batches", json={"tracks": [{"token": track.token, "webpage_url": track.webpage_url}]}).status_code, 410)
+        with self.assertRaises(HTTPException) as error:
+            music_batch._create_legacy_music_batch(video_schemas.MusicBatchRequest(tracks=[{"token": track.token, "webpage_url": track.webpage_url}]))
+        self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(self.client.get(f"/api/music/batches/{batch['batch_id']}/archive").status_code, 409)
 
 

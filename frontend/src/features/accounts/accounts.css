@@ -9,6 +9,15 @@
 .account-form input, .account-password input, .admin-workspace input:not([type=checkbox]), .admin-workspace select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #ccd7d0; border-radius: 6px; background: #fff; color: #25342c; font: inherit; }
 .account-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 10px 16px; border: 0; border-radius: 6px; background: #147b57; color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .account-form .account-primary { width: 100%; }
+.account-captcha { margin-bottom: 18px; }
+.account-form .account-captcha > label { margin-bottom: 8px; }
+.account-captcha-row { display: grid; grid-template-columns: minmax(0, 1fr) 144px; gap: 10px; }
+.account-captcha-row input { text-transform: uppercase; }
+.account-captcha-image { display: flex; align-items: center; justify-content: center; height: 50px; padding: 0; overflow: hidden; border: 1px solid #ccd7d0; border-radius: 6px; background: #edf5ef; color: #147b57; cursor: pointer; }
+.account-captcha-image img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.account-captcha p { margin: 8px 0 0; color: #65776b; font-size: 12px; line-height: 1.6; }
+.account-captcha p.account-captcha-error { color: #a3293e; }
+.account-captcha-image:disabled, .account-text:disabled { opacity: .6; cursor: default; }
 .account-text { display: block; margin: 18px auto 0; padding: 5px; border: 0; background: none; color: #147b57; cursor: pointer; }
 .account-error, .account-note, .account-notice { padding: 12px 14px; border-radius: 6px; font-size: 14px; overflow-wrap: anywhere; line-height: 1.6; }
 .account-error { color: #a3293e; background: #fff0f2; }

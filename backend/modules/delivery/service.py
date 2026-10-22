@@ -60,7 +60,7 @@ def update(plan, **changes):
                     if exc.status_code != 404:
                         raise
             terminal = previous if previous.get("status") in TERMINAL else previous | changes
-            snapshot = terminal | {name: plan.get(name) for name in ("destination", "mode", "filename", "media_identity", "task_id")}
+            snapshot = terminal | {name: plan.get(name) for name in ("destination", "mode", "filename", "media_identity", "task_id", "device_id", "client_kind", "origin_sid", "sid", "source_kind", "provider", "source_id", "policy_version")}
             snapshot.update(source_url=plan.get("page") or plan.get("source_url"), parse_record_id=plan.get("request", {}).get("parse_record_id") or plan.get("parse_record_id"))
             accounts.register_resource("delivery", plan["id"], snapshot, uid=plan["uid"])
             if previous.get("status") in TERMINAL:
@@ -97,7 +97,7 @@ def check(plan):
 
 
 def save_plan(plan):
-    plan.update(id=secrets.token_hex(12), uid=accounts.owner_id(), sid=accounts.current().session_id, version=1)
+    plan.update(id=secrets.token_hex(12), uid=accounts.owner_id(), sid=accounts.current().session_id, origin_sid=accounts.current().session_id, device_id=accounts.require_device(), client_kind=accounts.current().client_kind, version=2, policy_version=2)
     ttl = cache.media_ttl([plan.get("url", "")], ceiling=600)
     if ttl <= 0:
         raise HTTPException(410, "媒体链接已过期，请重新解析。")
@@ -111,7 +111,7 @@ def save_plan(plan):
         pipeline.expire(key("state", plan["uid"], plan["id"]), 86400)
         pipeline.execute()
     accounts.register_resource("delivery", plan["id"], {
-        "delivery_version": 1, "destination": plan["destination"], "delivery_mode": plan["mode"],
+        "delivery_version": 2, "source_kind": plan.get("source_kind"), "provider": plan.get("provider"), "source_id": plan.get("source_id"), "policy_version": 2, "device_id": plan["device_id"], "origin_sid": plan["sid"], "client_kind": plan["client_kind"], "destination": plan["destination"], "delivery_mode": plan["mode"],
         "status": "ready", "suggested_filename": plan["filename"], "media_identity": plan.get("media_identity"), "task_id": plan.get("task_id"),
         "source_url": plan.get("page"), "parse_record_id": plan.get("request", {}).get("parse_record_id")})
     return plan
@@ -122,7 +122,7 @@ def load(identity, *, check_state=True):
     if not raw:
         raise HTTPException(410, "下载链接已过期，请重新点击下载。")
     plan = json.loads(raw)
-    if plan["uid"] != accounts.owner_id() or plan["sid"] != accounts.current().session_id:
+    if plan["uid"] != accounts.owner_id() or plan["sid"] != accounts.current().session_id or plan.get("device_id") != accounts.current().device_id:
         raise HTTPException(404, "下载不存在。")
     accounts.resource("delivery", identity)
     if check_state:
@@ -131,6 +131,15 @@ def load(identity, *, check_state=True):
 
 
 def resolve(payload, *, origin="", allow_direct=True):
+    accounts.require_device()
+    if payload.media_type == "audio" and payload.destination != "device":
+        raise HTTPException(422, "歌曲下载只保存到当前设备；上传本站请使用本站音源入口。")
+    if str(payload.url).startswith("/api/music/site/"):
+        from backend.modules.music.site import asset
+        item = asset(str(payload.url).split("/")[4])
+        return save_plan({"destination": "device", "page": str(payload.url), "request": payload.model_dump(mode="json"),
+            "mode": "file", "source_filename": item["filename"], "filename": item["original_filename"],
+            "media_identity": f"site:{item['id']}", "source_kind": "site", "provider": "site", "source_id": item['id']})
     page = urls.normalize_url(str(payload.url))
     network.public_url(page)
     platform_access.require(page)
@@ -138,6 +147,12 @@ def resolve(payload, *, origin="", allow_direct=True):
     history.validate_relation(payload.parse_record_id, page)
     base = {"destination": payload.destination, "page": page, "request": payload.model_dump(mode="json"),
             "filename": filename(payload.title or "download", "mp4" if payload.media_type == "video" else payload.audio_format if payload.audio_format != "original" else "m4a")}
+    if payload.format_id and payload.format_id.startswith("music:"):
+        source_track = music.get_track(payload.format_id.partition(":")[2], page)
+        base.update(source_kind="platform", provider=source_track.provider, source_id=source_track.identifier,
+                    media_identity=f"{source_track.provider}:{source_track.identifier}")
+    else:
+        base.update(source_kind="video", provider="video", source_id=page)
     if payload.destination == "library" or payload.compatibility:
         from backend.modules.video.api import download_endpoint
         from backend.modules.video.schemas import DownloadRequest
@@ -150,11 +165,6 @@ def resolve(payload, *, origin="", allow_direct=True):
     if selected.startswith("music:"):
         track = music.get_track(selected.partition(":")[2], page)
         base["media_identity"] = f"{track.provider}:{track.identifier}"
-        known = library.downloaded_status([library.TrackInput.model_validate(track.model_dump())])[0]
-        if known["file_available"]:
-            source = storage.resource_path("file", known["filename"])
-            if payload.audio_format == "original" or source.suffix.lstrip(".") == payload.audio_format:
-                return save_plan(base | {"mode": "file", "filename": storage.download_filename(source.name), "source_filename": source.name})
         media, options, _ = music.resolve(track, options)
         headers, title = options.get("http_headers", {}), track.title
         ext = payload.audio_format if payload.audio_format != "original" else (Path(urlparse(media).path).suffix.lstrip(".") or "m4a")
@@ -215,7 +225,7 @@ def resolve(payload, *, origin="", allow_direct=True):
 
 
 def public(plan):
-    return {"download_id": plan["id"], "version": 1, "destination": plan["destination"], "mode": plan["mode"],
+    return {"download_id": plan["id"], "version": 2, "destination": plan["destination"], "mode": plan["mode"],
             "filename": plan["filename"], "expires_at": plan["expires_at"], "task_id": plan.get("task_id"),
             "url": plan["url"] if plan["mode"] == "direct" else f"/api/downloads/{plan['id']}/content",
             "fallback_url": f"/api/downloads/{plan['id']}/content"}

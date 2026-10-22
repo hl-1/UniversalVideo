@@ -75,7 +75,6 @@ const scoreLabels: Record<string, string> = { scene: '场景适配', vocals: '�
 const artistStatuses: Record<string, string> = { qualified: '已有合格候选', no_qualified: '已评估候选均不合格', no_candidates: '本轮检索未找到匹配候选', incomplete: '尚未完成评估（受预算、来源或检索范围限制）' }
 const checked = ref(new Set<string>())
 const downloadBusy = ref(false)
-const cloudSave = ref(false)
 const downloadSelection = ref<RecommendedTrack[] | null>(null)
 const downloadTarget = ref('')
 const downloadName = ref('')
@@ -103,7 +102,7 @@ async function download() {
   if (!selected.length) return
   downloadBusy.value = true; error.value = ''
   try {
-    const result = await createMusicBatch(selected, audioFormat.value, undefined, { ...(downloadTarget.value === 'new' ? { playlist_name: downloadName.value.trim() } : downloadTarget.value ? { playlist_id: downloadTarget.value } : {}), cloud: cloudSave.value })
+    const result = await createMusicBatch(selected, audioFormat.value, undefined, { ...(downloadTarget.value === 'new' ? { playlist_name: downloadName.value.trim() } : downloadTarget.value ? { playlist_id: downloadTarget.value } : {}) })
     downloadSelection.value = null
     void refreshLibrary()
     emit('batchCreated', result.batch_id)
@@ -284,7 +283,7 @@ onBeforeUnmount(() => { disposed = true; selection++; clearInterval(timer) })
           <strong>下载 {{ downloadSelection.length }} 首歌曲</strong>
           <label>保存位置<select v-model="downloadTarget" :disabled="downloadBusy" aria-label="保存位置"><option value="">不加入歌单</option><option v-for="playlist in playlists" :key="playlist.id" :value="playlist.id">{{ playlist.name }}</option><option value="new">＋新建歌单</option></select></label>
           <label v-if="downloadTarget === 'new'">歌单名称<input v-model="downloadName" required maxlength="80" :disabled="downloadBusy" placeholder="输入自定义歌单名称" /></label>
-          <label><input v-model="cloudSave" type="checkbox" />保存到云端资料库</label><small>默认保存到本机；选择歌单只添加歌曲引用。</small>
+          <small>保存到当前设备；选择歌单只添加歌曲引用。</small>
           <div class="scene-actions"><button type="button" class="mc-command" :disabled="downloadBusy" @click="downloadSelection = null">取消</button><button type="submit" class="mc-command primary" :disabled="downloadBusy || downloadActive || !downloadSelection.length || (downloadTarget === 'new' && !downloadName.trim())">{{ downloadBusy ? '正在创建任务…' : '开始下载' }}</button></div>
         </form>
         <div class="scene-tracks"><div v-for="(track, index) in tracks" :key="track.key" class="scene-track"><input :disabled="isMusicDownloaded(track) || track.provider === 'local'" type="checkbox" :aria-label="`选择 ${track.title}`" :checked="checked.has(track.key)" @change="checked.has(track.key) ? checked.delete(track.key) : checked.add(track.key)" /><span class="scene-order">{{ index + 1 }}</span><button class="scene-track-play" :title="`播放 ${track.title}`" :aria-label="`播放 ${track.title}`" @click="play(track)"><TrackCover :src="track.thumbnail" :title="track.title" /><Play :size="16" /></button><div class="scene-track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}</span><small>{{ track.reason }}<span v-if="!track.match?.scoring_version || track.match.scoring_version === 'legacy'"> · 旧版评分，重新生成可应用新规则</span></small></div><span class="scene-provider">{{ providers[track.provider || ''] || track.source.label }}</span><span class="scene-duration">{{ duration(track.validation.duration ?? track.duration) }}</span><span v-if="!track.local_url && !track.filename"></span><a v-if="track.local_url || track.filename" :href="track.local_url || `/api/files/${encodeURIComponent(track.filename!)}`" download @click.prevent="saveRemoteFile(track.local_url || `/api/files/${encodeURIComponent(track.filename!)}`, track.filename || track.title).catch(failure => error = failure.message)" class="mc-command">已有文件</a><button class="mc-icon" title="搜索歌词" aria-label="搜索歌词" @click="showLyrics(track)"><AlignLeft :size="18" /></button><button class="mc-icon" title="匹配证据" aria-label="匹配证据" @click="detail = track"><ChevronRight :size="18" /></button></div><p v-if="!tracks.length" class="scene-empty">暂无合格曲目</p></div>

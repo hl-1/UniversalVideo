@@ -4,6 +4,7 @@ import { Heart, ListMusic, LoaderCircle, Music2, Pause, Play, Repeat, Repeat1, S
 import TrackCover from '../components/TrackCover.vue'
 import LyricsView from '../components/LyricsView.vue'
 import { duration, isLiked, providers, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from '../musicLibrary'
+import { isMusicDownloaded } from '../musicDownloads'
 import { audio, currentTrack, elapsed, total, muted, volume, playMode, playbackError, playbackState, playbackUrl, queue,
   togglePlayback, playTrack, nextTrack, seek, setVolume, toggleMute, stopPlayback, isPlaybackTrack,
   onMetadata, onTime, onPlaying, onPause, onWaiting, onError, onEnded } from './musicPlayer'
@@ -16,6 +17,7 @@ const modes = ['list', 'loop', 'one', 'shuffle'] as const
 const modeNames = { list: '顺序播放', loop: '列表循环', one: '单曲循环', shuffle: '随机播放' }
 const modeIcon = computed(() => playMode.value === 'shuffle' ? Shuffle : playMode.value === 'one' ? Repeat1 : Repeat)
 const playLabel = computed(() => playbackState.value === 'loading' ? '取消加载' : playbackState.value === 'playing' ? '暂停' : playbackState.value === 'error' ? '重试播放' : '播放')
+const canDownload = computed(() => Boolean(currentTrack.value && currentTrack.value.provider !== 'device' && !isMusicDownloaded(currentTrack.value)))
 const lyricTrack = computed(() => currentTrack.value ? { ...currentTrack.value, artist: currentTrack.value.artist || '',
   thumbnail: trackArtwork(currentTrack.value), filename: currentTrack.value.filename, download_url: currentTrack.value.local_url } : null)
 function cycleMode() { playMode.value = modes[(modes.indexOf(playMode.value) + 1) % modes.length]! }
@@ -48,7 +50,7 @@ function volumeClick() {
         <button class="mc-icon" :disabled="!queue.length" title="上一首" aria-label="上一首" @click="nextTrack(-1)"><SkipBack :size="21" fill="currentColor" /></button>
         <button class="player-main-button" :disabled="!currentTrack" :title="playbackState === 'playing' ? '暂停' : playbackState === 'error' ? '重试播放' : '播放'" :aria-label="playbackState === 'playing' ? '暂停' : playbackState === 'error' ? '重试播放' : '播放'" @click="togglePlayback()"><LoaderCircle v-if="playbackState === 'loading'" :size="23" class="spin" /><Pause v-else-if="playbackState === 'playing'" :size="23" fill="currentColor" /><Play v-else :size="23" fill="currentColor" /></button>
         <button class="mc-icon" :disabled="!queue.length" title="下一首" aria-label="下一首" @click="nextTrack()"><SkipForward :size="21" fill="currentColor" /></button>
-        <button class="mc-icon" :disabled="!currentTrack" title="下载歌曲" aria-label="下载歌曲" @click="currentTrack && $emit('download', currentTrack)"><Download :size="18" /></button>
+        <button v-if="canDownload" class="mc-icon" title="下载歌曲" aria-label="下载歌曲" @click="currentTrack && $emit('download', currentTrack)"><Download :size="18" /></button>
       </div>
       <div class="player-progress"><time>{{ duration(elapsed) }}</time><input type="range" min="0" :max="total || 1" step="0.1" :value="elapsed" :disabled="!playbackUrl || !total" aria-label="播放进度" :style="{ '--progress': `${total ? elapsed / total * 100 : 0}%` }" @input="seek(Number(($event.target as HTMLInputElement).value))" /><time>{{ duration(total) }}</time></div>
     </div>
@@ -71,7 +73,7 @@ function volumeClick() {
       <p v-if="playbackError" class="player-full-feedback" role="alert">{{ playbackError }}</p>
       <div class="lyrics-player-controls"><button class="mc-icon" :title="modeNames[playMode]" :aria-label="modeNames[playMode]" @click="cycleMode"><component :is="modeIcon" :size="20" /></button><button class="mc-icon" title="上一首" aria-label="上一首" @click="nextTrack(-1)"><SkipBack :size="23" /></button><button class="player-main-button" :aria-label="playLabel" @click="togglePlayback()"><Pause v-if="playbackState === 'playing'" :size="23" fill="currentColor" /><LoaderCircle v-else-if="playbackState === 'loading'" :size="23" class="spin" /><Play v-else :size="23" fill="currentColor" /></button><button class="mc-icon" title="下一首" aria-label="下一首" @click="nextTrack()"><SkipForward :size="23" /></button><button class="mc-icon" :aria-label="currentTrack && isLiked(currentTrack) ? '取消喜欢' : '喜欢'" :class="{ liked: currentTrack && isLiked(currentTrack) }" @click="currentTrack && toggleFavorite(currentTrack)"><Heart :size="20" :fill="currentTrack && isLiked(currentTrack) ? 'currentColor' : 'none'" /></button></div>
       <div class="player-progress"><time>{{ duration(elapsed) }}</time><input type="range" min="0" :max="total || 1" step="0.1" :value="elapsed" :disabled="!playbackUrl || !total" aria-label="歌词页播放进度" @input="seek(Number(($event.target as HTMLInputElement).value))" /><time>{{ duration(total) }}</time></div>
-      <div class="player-full-actions"><label><Volume2 :size="18" /><input type="range" min="0" max="1" step="0.01" :value="muted ? 0 : volume" aria-label="完整播放页音量" @input="setVolume(Number(($event.target as HTMLInputElement).value))" /></label><button class="mc-icon" aria-label="下载当前歌曲" @click="currentTrack && $emit('download', currentTrack); showLyrics = false"><Download :size="19" /></button></div>
+      <div class="player-full-actions"><label><Volume2 :size="18" /><input type="range" min="0" max="1" step="0.01" :value="muted ? 0 : volume" aria-label="完整播放页音量" @input="setVolume(Number(($event.target as HTMLInputElement).value))" /></label><button v-if="canDownload" class="mc-icon" aria-label="下载当前歌曲" @click="currentTrack && $emit('download', currentTrack); showLyrics = false"><Download :size="19" /></button></div>
     </template>
   </LyricsView>
 </template>

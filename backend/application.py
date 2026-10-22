@@ -55,6 +55,8 @@ app.router.routes.extend(music_agent_mcp.http_app.routes)
 app.include_router(music_imports.router)
 app.include_router(music_lyrics_router)
 app.include_router(music_library_media_router)
+from backend.modules.music.site import router as site_music_router
+app.include_router(site_music_router)
 app.include_router(library.router)
 app.include_router(accounts.router)
 app.include_router(administration_router)

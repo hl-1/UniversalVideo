@@ -41,6 +41,9 @@ async function loadLyrics(fetchOnline = true) {
   const track = { ...props.track }
   request = new AbortController()
   const signal = request.signal
+  let timedOut = false
+  const requestForLoad = request
+  const timeout = setTimeout(() => { timedOut = true; requestForLoad.abort() }, 30000)
   loading.value = true
   try {
     if (props.lyricsEndpoint || !name) {
@@ -51,6 +54,7 @@ async function loadLyrics(fetchOnline = true) {
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: track.webpage_url }) })
         if (!parsed.ok) throw new Error(await apiError(parsed))
         const data = await parsed.json()
+        if (current !== generation || signal.aborted) return
         body = { token: data.token, webpage_url: data.webpage_url }
       }
       const response = await fetch(endpoint, { method: 'POST', signal,
@@ -75,11 +79,12 @@ async function loadLyrics(fetchOnline = true) {
     }
     await followCurrentLine(true)
   } catch (failure) {
-    if (current === generation && !(failure instanceof DOMException && failure.name === 'AbortError')) {
-      error.value = failure instanceof Error ? failure.message : '歌词加载失败。'
+    if (current === generation && (timedOut || !signal.aborted)) {
+      error.value = timedOut ? '歌词加载超时，点击匹配歌词重试。' : failure instanceof Error ? failure.message : '歌词加载失败。'
     }
-  } finally { if (current === generation) loading.value = false }
+  } finally { clearTimeout(timeout); if (current === generation) loading.value = false }
 }
+function refreshLyrics() { if (!loading.value && !importing.value) { void loadLyrics() } }
 async function importLyrics(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -138,7 +143,9 @@ function onKeydown(event: KeyboardEvent) {
   else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-watch(() => [filename.value, props.track.title, props.track.artist, props.track.webpage_url, props.lyricsEndpoint, props.resultVersion], () => {
+// Watch individual metadata values so replacing a track object does not reload the same lyrics.
+watch([() => filename.value, () => props.track.title, () => props.track.artist, () => props.track.album,
+  () => props.track.webpage_url, () => props.lyricsEndpoint, () => props.resultVersion], () => {
   lyrics.value = { lines: [], plain: '', source: '' }
   coverFailed.value = false
   importing.value = false
@@ -171,7 +178,7 @@ onBeforeUnmount(() => {
         <div class="lyrics-tools">
           <span v-if="lyrics.source" class="lyrics-source">{{ lyrics.source }}</span>
           <button class="lyrics-icon" type="button" :disabled="loading || (!lyrics.lines.length && !lyrics.plain)" title="导出歌词" aria-label="导出歌词" @click="exportLyrics"><Download :size="19" /></button>
-          <button class="lyrics-icon" type="button" :disabled="(!filename && !lyricsEndpoint && !track.webpage_url) || loading || importing" title="匹配歌词" aria-label="匹配歌词" @click="loadLyrics()"><LoaderCircle v-if="loading" :size="19" class="spin" /><RefreshCw v-else :size="19" /></button>
+          <button class="lyrics-icon" type="button" :disabled="(!filename && !lyricsEndpoint && !track.webpage_url) || loading || importing" :aria-busy="loading" title="匹配歌词" aria-label="匹配歌词" @click="refreshLyrics"><LoaderCircle v-if="loading" :size="19" class="spin" /><RefreshCw v-else :size="19" /></button>
           <button class="lyrics-icon" type="button" :disabled="!filename || importing" title="导入 LRC 歌词" aria-label="导入 LRC 歌词" @click="importInput?.click()"><LoaderCircle v-if="importing" :size="20" class="spin" /><FileMusic v-else :size="20" /></button>
           <input ref="importInput" type="file" accept=".lrc" hidden @change="importLyrics" />
         </div>

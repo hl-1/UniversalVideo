@@ -2,103 +2,70 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
-
-const song = (id: number) => ({ title: `song ${id}`, artist: 'artist', provider: 'qq', identifier: String(id), webpage_url: `https://example.com/song/${id}` })
-const receipt = { source: 'filesystem', artifact: 'individual_file', status: 'completed', bytes: 100, saved_at: 123 }
-
-function setup(t: any, stored: any) {
+const song = { title: '歌曲', provider: 'qq', identifier: 'one', webpage_url: 'https://y.qq.com/song/one' }
+function setup(t: any) {
   const previous = globalThis.localStorage
-  const data = new Map<string, string>(stored === undefined ? [] : [['videodream.music.saved.1', JSON.stringify(stored)]])
-  globalThis.localStorage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value) } } as Storage
+  const data = new Map<string, string>()
+  globalThis.localStorage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value) } as any
   const account: any = { value: { id: 1 } }
-  let change = (_uid: number | undefined) => {}
+  let device = 'device-A', change = (_?: any) => {}
+  const readable = new Set<string>()
+  const key = (track: any) => `${track.provider}:${track.identifier}`
   const stubs: Record<string, any> = {
-    vue: { ref: (value: any) => ({ value }), watch: (_: any, callback: any) => { change = callback; callback(account.value?.id) } },
+    vue: { ref: (value: any) => ({ value }), watch: (_: any, callback: any) => { change = callback; callback(1) } },
     '../accounts/auth': { account },
+    '../../shared/device': { currentDeviceId: () => device },
+    './deviceLibrary': { hasDeviceFile: (track: any) => readable.has(`${account.value?.id}:${device}:${key(track)}`), refreshDeviceLibrary: async () => {} },
     '../../shared/api/client': { api: async () => ({ tracks: [] }), jsonRequest: (_: any, data: any) => data },
-    './musicLibrary': { trackKey: (track: any) => `${track.provider}:${track.identifier}`, trackPayload: (track: any) => ({ ...track }) },
+    './musicLibrary': { trackKey: key, trackPayload: (track: any) => ({ ...track }) },
   }
   const source = fs.readFileSync(new URL('../src/features/music/musicDownloads.ts', import.meta.url), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const downloads: any = {}
   new Function('require', 'exports', compiled)((id: string) => { assert.ok(id in stubs, id); return stubs[id] }, downloads)
   t.after(() => { globalThis.localStorage = previous })
-  return { downloads, data, switchAccount(id?: number) { account.value = id ? { id } : null; change(id) }, reload() { change(account.value?.id) } }
+  return { downloads, data, readable, reload: () => change(account.value?.id), switchDevice(id: string) { device = id; change(account.value?.id) }, switchAccount(id: number) { account.value = { id }; change(id) } }
 }
-
-test('legacy keys regain download buttons and are backed up instead of accepted as saved files', t => {
-  const { downloads, data, reload } = setup(t, ['qq:1', 'qq:2'])
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
-  assert.equal(downloads.musicDownloadLabel(song(1)), '旧保存记录待核实')
-  assert.equal(downloads.unverifiedMusicCount.value, 2)
-  assert.deepEqual(downloads.savedMusicHistory.value, [])
-  assert.equal(data.get('videodream.music.saved.backup.1.v1'), JSON.stringify(['qq:1', 'qq:2']))
-  assert.equal(JSON.parse(data.get('videodream.music.saved.1')!).version, 2)
+test('server files and filesystem receipts never replace actual device readability', t => {
+  const { downloads, readable, reload } = setup(t)
+  downloads.rememberMusicDownloads([song], 1, { bytes: 100, download_id: 'saved' })
+  assert.equal(downloads.isMusicDownloaded(song), false)
+  assert.equal(downloads.musicDownloadLabel(song), '本设备保存记录')
   reload()
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
-  assert.equal(downloads.unverifiedMusicCount.value, 2)
-  assert.equal(data.get('videodream.music.saved.backup.1.v1'), JSON.stringify(['qq:1', 'qq:2']))
-})
-
-test('old ZIP success flags and metadata become explicitly unverified history', t => {
-  const { downloads } = setup(t, { version: 1, keys: ['qq:1'], tracks: [{ ...song(1), saved_to_device: true }] })
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
-  assert.equal(downloads.savedMusicHistory.value.length, 0)
-  assert.equal(downloads.unverifiedMusicHistory.value[0].save_unverified, true)
-  assert.equal(downloads.unverifiedMusicHistory.value[0].saved_to_device, false)
-})
-
-test('only completed individual files with nonzero bytes remain confirmed after reload', t => {
-  const { downloads } = setup(t, { version: 2, tracks: [
-    { ...song(1), file_confirmation: receipt },
-    { ...song(2), file_confirmation: { ...receipt, artifact: 'zip' } },
-    { ...song(3), file_confirmation: { ...receipt, status: 'handed_off' } },
-    { ...song(4), file_confirmation: { ...receipt, bytes: 0 } },
-    { ...song(5), saved_to_device: true },
-  ] })
-  assert.equal(downloads.isMusicDownloaded(song(1)), true)
-  for (const id of [2, 3, 4, 5]) assert.equal(downloads.isMusicDownloaded(song(id)), false)
   assert.equal(downloads.savedMusicHistory.value.length, 1)
-  assert.equal(downloads.unverifiedMusicCount.value, 4)
+  assert.equal(downloads.isMusicDownloaded({ ...song, local_url: '/api/files/one.mp3', file_available: true }), false)
+  readable.add('1:device-A:qq:one')
+  assert.equal(downloads.isMusicDownloaded(song), true)
+  readable.clear()
+  assert.equal(downloads.isMusicDownloaded(song), false)
 })
-
-test('a newly confirmed single song replaces its unverified entry without confirming the rest', t => {
-  const { downloads, reload, data } = setup(t, { version: 1, keys: ['qq:1', 'qq:2'], tracks: [song(1), song(2)] })
-  downloads.rememberMusicDownloads([song(1)], 1, { bytes: 123, download_id: 'single-file' })
-  assert.equal(downloads.isMusicDownloaded(song(1)), true)
-  assert.equal(downloads.isMusicDownloaded(song(2)), false)
-  assert.equal(downloads.unverifiedMusicCount.value, 1)
+test('same account has separate save history and file states on two devices', t => {
+  const { downloads, readable, switchDevice, data } = setup(t)
+  downloads.rememberMusicDownloads([song], 1, { bytes: 100 })
+  readable.add('1:device-A:qq:one')
+  switchDevice('device-B')
+  assert.equal(downloads.savedMusicHistory.value.length, 0)
+  assert.equal(downloads.isMusicDownloaded(song), false)
+  downloads.rememberMusicDownloads([song], 1, { bytes: 200 })
+  assert.equal(JSON.parse(data.get('videodream.music.saved.1.device-A')!).tracks[0].file_confirmation.bytes, 100)
+  switchDevice('device-A')
+  assert.equal(downloads.isMusicDownloaded(song), true)
+})
+test('unknown-device history is retained as unverified and never confirmed on migration', t => {
+  const { downloads, data, reload } = setup(t)
+  const old = JSON.stringify({ version: 2, tracks: [{ ...song, file_confirmation: { source: 'filesystem', artifact: 'individual_file', status: 'completed', bytes: 100, saved_at: 1 } }] })
+  data.set('videodream.music.saved.1', old)
   reload()
-  assert.equal(downloads.isMusicDownloaded(song(1)), true)
-  assert.equal(downloads.unverifiedMusicHistory.value[0].identifier, '2')
-  const confirmed = JSON.parse(data.get('videodream.music.saved.1')!).tracks[0].file_confirmation
-  assert.equal(confirmed.download_id, 'single-file')
-  assert.equal(confirmed.artifact, 'individual_file')
-})
-
-test('zero bytes and a batch-wide receipt cannot mark songs as downloaded', t => {
-  const { downloads } = setup(t, undefined)
-  downloads.rememberMusicDownloads([song(1)], 1, { bytes: 0 })
-  downloads.rememberMusicDownloads([song(1), song(2)], 1, { bytes: 123 })
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
-  assert.equal(downloads.isMusicDownloaded(song(2)), false)
-})
-
-test('a local URL without explicit server availability cannot hide a download button', t => {
-  const { downloads } = setup(t, undefined)
-  assert.equal(downloads.isMusicDownloaded({ ...song(1), local_url: '/api/files/old.mp3' }), false)
-  assert.equal(downloads.isMusicDownloaded({ ...song(1), local_url: '/api/files/old.mp3', file_available: false }), false)
-  assert.equal(downloads.isMusicDownloaded({ ...song(1), local_url: '/api/files/valid.mp3', file_available: true }), true)
-})
-
-test('switching accounts clears confirmed and unverified state and rejects late saves', t => {
-  const { downloads, switchAccount, data } = setup(t, ['qq:1'])
-  switchAccount(2)
-  downloads.rememberMusicDownloads([song(1)], 1, { bytes: 123 })
-  assert.equal(downloads.unverifiedMusicCount.value, 0)
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
-  assert.equal(data.has('videodream.music.saved.2'), false)
-  switchAccount(1)
+  assert.equal(downloads.savedMusicHistory.value.length, 0)
   assert.equal(downloads.unverifiedMusicCount.value, 1)
-  assert.equal(downloads.isMusicDownloaded(song(1)), false)
+  assert.equal(downloads.isMusicDownloaded(song), false)
+  assert.equal(data.get('videodream.music.saved.1'), old)
+})
+test('late account callbacks and zero byte saves cannot create device records', t => {
+  const { downloads, switchAccount, data } = setup(t)
+  switchAccount(2)
+  downloads.rememberMusicDownloads([song], 1, { bytes: 123 })
+  downloads.rememberMusicDownloads([song], 2, { bytes: 0 })
+  assert.equal(data.size, 0)
+  assert.equal(downloads.savedMusicHistory.value.length, 0)
 })

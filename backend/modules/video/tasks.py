@@ -50,6 +50,9 @@ class DownloadTask:
         self.process: subprocess.Popen | None = None
         self.parse_record_id: str | None = None
         self.destination = "library"
+        self.device_id = accounts.current().device_id if accounts.principal.get() else None
+        self.origin_sid = accounts.current().session_id if accounts.principal.get() else ""
+        self.client_kind = accounts.current().client_kind if accounts.principal.get() else ""
 
     def directory(self, kind="file"):
         if self.destination == "library":
@@ -225,6 +228,8 @@ def _persist_task(task, kind, force=False):
         task.timing.finish(task.status)
     if task.user_id and (force or time.monotonic() - getattr(task, "_saved_at", 0) >= 1 or task.status in {"finished", "failed", "cancelled"}):
         snapshot = task.to_response().model_dump()
+        if kind == "download" and getattr(task, "destination", None) == "device":
+            snapshot.update(device_id=getattr(task, "device_id", None), origin_sid=getattr(task, "origin_sid", ""), client_kind=getattr(task, "client_kind", ""))
         if isinstance(task, SummaryTask):
             snapshot["transcript"] = [segment.model_dump() for segment in task.transcript]
         snapshot.update(parse_record_id=getattr(task, "parse_record_id", None), url=getattr(task, "url", None), worker_id=video_history.WORKER_ID)
@@ -242,6 +247,9 @@ def _persist_task(task, kind, force=False):
             else:
                 cursor.execute("SELECT deleted,payload FROM resources WHERE kind=%s AND resource_key=%s FOR UPDATE", (kind, task.task_id))
                 stored = cursor.fetchone()
+            if stored and kind == "download":
+                previous = json.loads(stored["payload"])
+                snapshot.update({name: previous[name] for name in ("device_id", "origin_sid", "client_kind") if name in previous})
             if stored and stored["deleted"]:
                 task.cancel.set()
                 if isinstance(task, SummaryTask):
@@ -264,9 +272,9 @@ def _persist_task(task, kind, force=False):
             if kind in video_store.TABLES:
                 video_store.save(cursor, kind, task.task_id, task.user_id, snapshot, updated=now)
             else:
-                cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)
+                cursor.execute("""INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at,device_id) VALUES (%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE payload=VALUES(payload),updated_at=VALUES(updated_at)""",
-                               (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now))
+                               (kind, task.task_id, task.user_id, json.dumps(snapshot, ensure_ascii=False), now, now, snapshot.get("device_id")))
         if task.status == "finished" and getattr(task, "filename", None) and getattr(task, "destination", "library") == "library":
             path = storage.owned_path("file", task.filename, uid=task.user_id)
             if path.is_file() and not getattr(task, "_shared_published", False):

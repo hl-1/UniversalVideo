@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { deviceContext } from '../../shared/device'
 
 export type Account = { id: number; username: string; role: 'user' | 'super_admin'; status: 'active' | 'disabled'; must_change_password: boolean; created_at: number }
 export const account = ref<Account | null>(null)
@@ -6,6 +7,8 @@ export const authReady = ref(false)
 export const authError = ref('')
 export const registrationEnabled = ref(false)
 export const initialized = ref(true)
+export type CaptchaChallenge = { captcha_id: string; image: string; expires_in: number }
+export type CaptchaAnswer = { captcha_id: string; captcha_code: string }
 const nativeFetch = window.fetch.bind(window)
 let accessToken = ''
 let expiresAt = 0
@@ -24,8 +27,9 @@ function clearSession(broadcast = false) {
 if (events) events.onmessage = event => { if (event.data === 'logout') clearSession() }
 
 async function authRequest(path: string, body?: unknown) {
+  const device = await deviceContext()
   const response = await nativeFetch(`/api/auth/${path}`, { method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-VideoDream-CSRF': '1' }, body: body ? JSON.stringify(body) : undefined })
+    headers: { 'Content-Type': 'application/json', 'X-VideoDream-CSRF': '1', 'X-VideoDream-Device': device.device_id, 'X-VideoDream-Client': device.client_kind }, body: body ? JSON.stringify(body) : undefined })
   const data = await response.json()
   if (!response.ok) throw Object.assign(new Error(data.detail || '认证服务暂不可用。'), { status: response.status })
   return data
@@ -67,11 +71,14 @@ async function token(force = false) {
 
 export async function authenticatedFetch(input: RequestInfo | URL, options?: RequestInit): Promise<Response> {
   const url = new URL(input instanceof Request ? input.url : String(input), window.location.href)
-  if (url.origin !== location.origin || !url.pathname.startsWith('/api/') || ['/api/auth/status', '/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout'].includes(url.pathname)) return nativeFetch(input, options)
+  if (url.origin !== location.origin || !url.pathname.startsWith('/api/') || ['/api/auth/status', '/api/auth/captcha', '/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout'].includes(url.pathname)) return nativeFetch(input, options)
   const revision = epoch
   const request = new Request(input, options)
   const saved = request.clone()
   const headers = new Headers(request.headers)
+  const device = await deviceContext()
+  headers.set('X-VideoDream-Device', device.device_id)
+  headers.set('X-VideoDream-Client', device.client_kind)
   const credential = await token()
   if (credential) headers.set('Authorization', `Bearer ${credential}`)
   let response = await nativeFetch(new Request(request, { headers, credentials: 'same-origin' }))
@@ -88,15 +95,23 @@ export async function authenticatedFetch(input: RequestInfo | URL, options?: Req
   return response
 }
 
-export async function login(username: string, password: string) {
-  const data = await authRequest('login', { username, password })
+export async function loadCaptcha(purpose: 'login' | 'register'): Promise<CaptchaChallenge> {
+  const response = await nativeFetch(`/api/auth/captcha?purpose=${purpose}`, { cache: 'no-store', credentials: 'same-origin' })
+  const data = await response.json()
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '验证码加载失败，请重试。')
+  return data
+}
+
+export async function login(username: string, password: string, captcha: CaptchaAnswer) {
+  const data = await authRequest('login', { username, password, ...captcha })
   clearSession(true)
   accept(data)
 }
 
-export async function register(username: string, password: string) {
-  await authRequest('register', { username, password })
-  await login(username, password)
+export async function register(username: string, password: string, captcha: CaptchaAnswer) {
+  const data = await authRequest('register', { username, password, ...captcha })
+  clearSession(true)
+  accept(data)
 }
 
 export async function logout() {

@@ -16,7 +16,7 @@ from backend.core import paths, storage
 from backend.modules.accounts import service as accounts
 from backend.modules.music import library
 from backend.modules.music import media
-from backend.modules.music import lyrics
+from backend.modules.music import lyrics, site
 
 
 class MySQLMusicLibraryTests(unittest.TestCase):
@@ -46,6 +46,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         cls.lyrics_directory_patch = patch.object(lyrics, "DOWNLOAD_DIR", cls.storage_root)
         cls.lyrics_directory_patch.start()
         app = FastAPI()
+        app.include_router(site.router)
         app.include_router(library.router)
         app.include_router(media.router)
         app.include_router(lyrics.router)
@@ -67,7 +68,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
 
     def setUp(self):
         with library.database() as cursor:
-            for table in ("music_playlist_tracks", "music_playlists", "music_history", "music_favorites", "music_downloads", "music_tracks"):
+            for table in ("music_server_assets", "music_playlist_tracks", "music_playlists", "music_history", "music_favorites", "music_downloads", "music_tracks"):
                 cursor.execute(f"DELETE FROM {table}")
         self.track = {"title": "晴天", "artist": "周杰伦", "provider": "qq", "identifier": "song1",
                       "webpage_url": "https://y.qq.com/n/ryqq/songDetail/song1", "duration": 269}
@@ -91,6 +92,26 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         response = self.client.put("/api/library/favorites", json={"track": self.track, "liked": liked})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
+
+    def test_reads_do_not_scan_server_files_and_legacy_migration_is_idempotent(self):
+        with patch.object(library, 'sync_downloads', side_effect=AssertionError('read must not scan')):
+            self.client.get('/api/library').raise_for_status()
+            self.client.get('/api/library/tracks').raise_for_status()
+        path = self.directory / 'legacy.mp3'
+        path.write_bytes(b'legacy audio')
+        try:
+            library.record_download(path.name, self.track, imported=False)
+            from backend.migrations import device_music
+            for _ in range(2):
+                with library.database() as cursor: device_music.migrate(cursor)
+            with library.database() as cursor:
+                cursor.execute('SELECT * FROM music_server_assets')
+                rows = cursor.fetchall()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]['asset_kind'], 'legacy_download')
+            self.assertEqual(self.client.get('/api/music/site/tracks').json()['tracks'], [])
+            self.assertTrue(path.is_file())
+        finally: path.unlink(missing_ok=True)
 
     def test_favorite_is_idempotent_and_survives_reconnection(self):
         key = self.favorite()
@@ -208,7 +229,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         try:
             library.record_download(path.name, self.track)
             row = self.client.get("/api/library/tracks?view=downloads").json()["tracks"][0]
-            self.assertEqual((row["provider"], row["identifier"], row["local_url"]), ("qq", "song1", "/api/files/test.mp3"))
+            self.assertEqual((row["provider"], row["identifier"], row["server_url"]), ("qq", "song1", "/api/files/test.mp3"))
             path.unlink()
             row = self.client.get("/api/library/tracks?view=downloads").json()["tracks"][0]
             self.assertIsNone(row["local_url"])
@@ -228,9 +249,11 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         path = self.directory / response.json()["filename"]
         try:
             for _ in range(2):
-                self.assertEqual(self.client.get("/api/library").json()["counts"]["downloads"], 1)
+                self.assertEqual(self.client.get("/api/library").json()["counts"]["downloads"], 0)
             self.assertTrue(path.is_file())
-            row = self.client.get("/api/library/tracks?view=downloads").json()["tracks"][0]
+            row = self.client.get("/api/music/site/tracks").json()["tracks"][0]
+            self.assertEqual(row["provider"], "site")
+            self.assertIsNone(row["local_url"])
             self.assertEqual(row["title"], "测试音频")
             self.assertAlmostEqual(row["duration"], 1, places=2)
         finally:
@@ -288,6 +311,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
             self.assertEqual(library.read_lyrics(paths[1].name)["text"], "[00:01]manual")
             self.assertTrue(all(path.exists() for path in paths))
             paths[1].unlink()
+            library.sync_downloads()  # Explicit maintenance, no scan on normal reads.
             self.assertEqual(self.client.get("/api/library/tracks?view=downloads").json()["tracks"][0]["filename"], paths[0].name)
         finally:
             for path in paths:

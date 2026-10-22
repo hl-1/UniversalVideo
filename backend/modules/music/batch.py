@@ -119,6 +119,10 @@ def _run_music_batch(batch: dict[str, Any]) -> None:
 
 @router.post("/api/music/batches")
 def create_music_batch(payload: video_schemas.MusicBatchRequest) -> dict[str, Any]:
+    raise HTTPException(410, "云端歌曲批量下载已停用，请更新客户端并下载到当前设备。")
+
+
+def _create_legacy_music_batch(payload: video_schemas.MusicBatchRequest) -> dict[str, Any]:
     tracks, identities = [], set()
     for item in payload.tracks:
         track = music.get_track(item.token, str(item.webpage_url))
@@ -171,6 +175,10 @@ def cancel_music_batch(batch_id: str) -> dict[str, Any]:
 
 @router.post("/api/music/batches/{batch_id}/retry")
 def retry_music_batch(batch_id: str) -> dict[str, Any]:
+    raise HTTPException(410, "旧云端下载任务只保留查询，请在当前设备重新下载。")
+
+
+def _retry_legacy_music_batch(batch_id: str) -> dict[str, Any]:
     with video_tasks.music_batches_lock:
         batch = _get_music_batch(batch_id)
         if any(item["status"] in {"pending", "running", "cancelling"} and item.get("user_id") == batch.get("user_id") for item in video_tasks.music_batches.values()):

@@ -23,7 +23,7 @@ class DeliveryTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        marker = accounts.principal.set(accounts.Principal(1, "test", "super_admin"))
+        marker = accounts.principal.set(accounts.Principal(1, "test", "super_admin", device_id="11111111-1111-4111-8111-111111111111", client_kind="web"))
         self.addCleanup(accounts.principal.reset, marker)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.stack.enter_context(patch.object(paths, "DOWNLOAD_DIR", self.root))
@@ -36,12 +36,13 @@ class DeliveryTests(unittest.TestCase):
         self.records = {}
 
         def register(kind, identity, payload=None, **kwargs):
-            self.records[(kind, identity)] = {"user_id": kwargs.get("uid", accounts.owner_id()), "payload": json.dumps(payload or {})}
+            self.records[(kind, identity)] = {"user_id": kwargs.get("uid", accounts.owner_id()), "payload": json.dumps(payload or {}), "kind": kind, "device_id": (payload or {}).get("device_id")}
 
         def resource(kind, identity, **kwargs):
             row = self.records.get((kind, identity))
             if not row or row["user_id"] != accounts.owner_id():
                 raise HTTPException(404, "missing")
+            if kwargs.get("check", True): accounts.check_device_resource(row)
             return row
 
         self.stack.enter_context(patch.object(accounts, "register_resource", side_effect=register))
@@ -49,6 +50,15 @@ class DeliveryTests(unittest.TestCase):
 
     def plan(self, **extra):
         return service.save_plan({"destination": "device", "mode": "relay", "filename": "a.mp4", "page": "https://example.com/a", "url": "https://cdn.example.com/a.mp4", **extra})
+
+    def test_same_account_other_device_cannot_read_or_complete_even_after_plan_expiry(self):
+        plan = self.plan()
+        marker = accounts.principal.set(accounts.Principal(1, "test", "super_admin", device_id="22222222-2222-4222-8222-222222222222", client_kind="web"))
+        try:
+            with self.assertRaises(HTTPException): service.load(plan["id"])
+            self.client.delete(service.key("plan", 1, plan["id"]))
+            with self.assertRaises(HTTPException): api.complete(plan["id"], api.CompletionRequest(status="completed", completion_source="filesystem", transferred_bytes=10))
+        finally: accounts.principal.reset(marker)
 
     def response(self, chunks, length=None):
         return SimpleNamespace(headers={"Content-Length": str(length)} if length is not None else {},

@@ -69,6 +69,9 @@ export type FilePickerWritable = {
 }
 
 export type FilePickerHandle = {
+  getFile?: () => Promise<File>
+  queryPermission?: (options: { mode: 'read' }) => Promise<PermissionState>
+  requestPermission?: (options: { mode: 'read' }) => Promise<PermissionState>
   createWritable(): Promise<FilePickerWritable>
 }
 

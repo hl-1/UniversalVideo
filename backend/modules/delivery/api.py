@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import mimetypes
 import time
 import tempfile
@@ -11,7 +12,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from backend.core import storage
 from backend.modules.accounts import service as accounts
@@ -23,7 +24,14 @@ router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 
 
 class PlanRequest(BaseModel):
-    url: HttpUrl
+    url: str = Field(max_length=4096)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value):
+        if re.fullmatch(r"/api/music/site/[a-f0-9]{24}/content", value):
+            return value
+        return str(HttpUrl(value))
     format_id: str | None = Field(default=None, max_length=4096)
     parse_record_id: str | None = Field(default=None, max_length=64)
     title: str = Field(default="", max_length=255)
@@ -93,6 +101,8 @@ def complete(identity: str, payload: CompletionRequest):
         if row["user_id"] != accounts.owner_id():
             raise HTTPException(404, "下载不存在。")
         old = json.loads(row["payload"])
+        if old.get("origin_sid") != accounts.current().session_id or old.get("device_id") != accounts.current().device_id:
+            raise HTTPException(404, "本设备没有此下载记录。")
         plan = old | {"uid": row["user_id"], "id": identity}
     if payload.status == "completed" and payload.completion_source != "filesystem":
         raise HTTPException(422, "浏览器接管下载不能确认为本机保存完成。")

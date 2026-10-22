@@ -19,3 +19,35 @@ frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
 .DS_Store
+
+# Android client stays local and is not included in repository submissions.
+android/
+scripts/build-android.sh
+spec/features/android-app.md
+frontend/src/shared/native/
+frontend/tests/nativeBridge.test.mts
+frontend/tests/diagnostics.test.mts
+
+# Android local configuration and build caches
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.kotlin/
+android/**/.cxx/
+android/**/.externalNativeBuild/
+android/captures/
+android/**/*.iml
+android/key.properties
+android/keystore.properties
+
+# Android packages and private signing material
+# Local SDK tools and signing credentials are also covered by .run/ and config/*.
+*.apk
+*.aab
+*.apks
+*.xapk
+*.idsig
+*.jks
+*.keystore
+*.p12
+*.pfx

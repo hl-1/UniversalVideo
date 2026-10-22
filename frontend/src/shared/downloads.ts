@@ -1,3 +1,4 @@
+import type { MusicTrack } from '../features/music/musicLibrary'
 import { ref } from 'vue'
 import { saveResponseToFile, waitForFileSave } from '../features/video/fileSave.ts'
 import type { FilePickerHandle } from '../features/video/types.ts'
@@ -5,7 +6,7 @@ import { readApiError } from './api/client.ts'
 
 export type DownloadProgress = { phase: 'preparing' | 'transferring' | 'closing'; bytes: number; total: number | null; speed: number; eta: number | null }
 export type SaveResult = { status: 'saved' | 'handed_off'; bytes: number }
-export type SaveOptions = { handle?: FilePickerHandle | null; controller?: AbortController; fallbackUrl?: string; onProgress?: (progress: DownloadProgress) => void }
+export type SaveOptions = { handle?: FilePickerHandle | null; controller?: AbortController; fallbackUrl?: string; onProgress?: (progress: DownloadProgress) => void; track?: unknown }
 export type MediaRequest = { url: string; title?: string; format_id?: string; parse_record_id?: string; media_type?: 'video' | 'audio'; audio_format?: 'original' | 'm4a' | 'mp3'; destination?: 'device' | 'library'; compatibility?: boolean }
 export type DeliveryPlan = { download_id: string; mode: 'file' | 'relay' | 'direct' | 'task'; filename: string; url: string; fallback_url: string; task_id?: string; destination: 'device' | 'library' }
 export const downloadNotice = ref('')
@@ -73,13 +74,16 @@ export async function saveRemoteFile(url: string, name: string, options: SaveOpt
   const controller = options.controller || new AbortController()
   const id = `save-${Date.now()}-${Math.random()}`
   const revision = sessionRevision
+  const uid = options.track ? (await import('../features/accounts/auth')).account.value?.id : undefined
+  const handle = options.handle === undefined ? await chooseFile(name) : options.handle
   activeDownloads.value.set(id, { label: downloadFilename(name), progress: '正在选择保存位置…', cancel: () => controller.abort(new DOMException('下载已取消', 'AbortError')) })
   try {
-    const result = await saveRemoteFileImpl(url, name, { ...options, controller, onProgress(progress) {
+    const result = await saveRemoteFileImpl(url, name, { ...options, handle, controller, onProgress(progress) {
       const active = activeDownloads.value.get(id)
       if (active) { active.progress = progressText(progress); active.detail = progress }
       options.onProgress?.(progress)
     } })
+    if (revision === sessionRevision && result.status === 'saved' && options.track && handle?.getFile) await (await import('../features/music/deviceLibrary')).registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
     if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
     return result
   } catch (error) {
@@ -148,6 +152,7 @@ export async function prepareMedia(request: MediaRequest, controller: AbortContr
 export async function downloadMedia(request: MediaRequest, options: SaveOptions & { onTask?: (task: any) => void; preparedPlan?: DeliveryPlan } = {}) {
   const controller = options.controller || new AbortController()
   const revision = sessionRevision
+  const uid = options.track ? (await import('../features/accounts/auth')).account.value?.id : undefined
   const ext = request.media_type === 'audio' ? request.audio_format === 'original' ? 'm4a' : request.audio_format || 'm4a' : 'mp4'
   const id = `media-${Date.now()}-${Math.random()}`
   activeDownloads.value.set(id, { label: downloadFilename(`${request.title || 'download'}.${ext}`), progress: '正在选择保存位置…', cancel: () => controller.abort(new DOMException('下载已取消', 'AbortError')) })
@@ -185,6 +190,7 @@ export async function downloadMedia(request: MediaRequest, options: SaveOptions 
       result = await saveRemoteFileImpl(plan.url, plan.filename, { ...options, controller, handle, onProgress, fallbackUrl: plan.fallback_url })
     }
     await deliveryComplete(plan.download_id, result.status === 'saved' ? 'completed' : 'handed_off', result.bytes)
+    if (revision === sessionRevision && result.status === 'saved' && options.track && handle?.getFile) await (await import('../features/music/deviceLibrary')).registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
     if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
     return { ...result, plan }
   } catch (error) {

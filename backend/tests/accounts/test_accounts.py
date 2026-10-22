@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import base64
 import json
 import secrets
 import tempfile
@@ -8,12 +9,14 @@ import time
 import unittest
 import wave
 from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
 import jwt
 import pymysql
 import redis
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from backend import application
@@ -73,6 +76,7 @@ class AccountIntegrationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(accounts, 'cancel_callbacks', callbacks))
         self.prefix = 'videodream:test:' + secrets.token_hex(8) + ':'
         self.stack.enter_context(patch.object(accounts, 'redis_prefix', return_value=self.prefix))
+        self.stack.enter_context(patch.object(accounts.captcha, 'make_code', return_value='A2B3'))
         self.stack.enter_context(patch.object(network, 'public_url', side_effect=lambda value: value))
         self.stack.enter_context(patch.object(video_tasks.executor, 'submit'))
         self.stack.enter_context(patch.object(video_tasks.ai_executor, 'submit'))
@@ -81,7 +85,7 @@ class AccountIntegrationTests(unittest.TestCase):
             from backend.modules.video import store as video_store
             for table in ('video_recent_links', *(item[0] for item in video_store.TABLES.values())):
                 cursor.execute(f'DELETE FROM {table}')
-            for table in ('music_playlists', 'music_favorites', 'music_history', 'music_downloads', 'music_lyrics', 'music_tracks', 'music_theme', 'resources', 'audit_logs'):
+            for table in ('music_server_assets', 'music_playlists', 'music_favorites', 'music_history', 'music_downloads', 'music_lyrics', 'music_tracks', 'music_theme', 'resources', 'audit_logs'):
                 cursor.execute(f'DELETE FROM {table}')
             cursor.execute("DELETE FROM users WHERE id NOT IN (1,%s,%s)", (self.a_id, self.b_id))
             cursor.execute("UPDATE users SET role=IF(id=1,'super_admin','user'),status='active',must_change_password=FALSE,auth_version=0,password_hash=%s WHERE id<>1", (accounts.passwords.hash('Test-user-123!'),))
@@ -105,14 +109,88 @@ class AccountIntegrationTests(unittest.TestCase):
         self.stack.close()
 
     def anonymous(self):
-        return self.stack.enter_context(TestClient(application.app, headers={'Origin': 'http://127.0.0.1:5174', 'X-VideoDream-CSRF': '1'}))
+        return self.stack.enter_context(TestClient(application.app, headers={'Origin': 'http://127.0.0.1:5174', 'X-VideoDream-CSRF': '1', 'X-VideoDream-Device': '11111111-1111-4111-8111-111111111111', 'X-VideoDream-Client': 'web'}))
 
-    def client(self, name, password):
+    def client(self, name, password, device_id=None):
         client = self.anonymous()
-        response = client.post('/api/auth/login', json={'username': name, 'password': password})
+        if device_id: client.headers["X-VideoDream-Device"] = device_id
+        response = client.post('/api/auth/login', json={'username': name, 'password': password} | self.captcha_answer(client))
         self.assertEqual(response.status_code, 200, response.text)
         client.headers['Authorization'] = 'Bearer ' + response.json()['access_token']
         return client
+
+    def captcha_answer(self, client, purpose='login'):
+        response = client.get('/api/auth/captcha', params={'purpose': purpose})
+        self.assertEqual(response.status_code, 200, response.text)
+        return {'captcha_id': response.json()['captcha_id'], 'captcha_code': 'A2B3'}
+
+    def test_captcha_image_is_uncached_and_only_digest_is_stored(self):
+        client = self.anonymous()
+        response = client.get('/api/auth/captcha')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn('no-store', response.headers['cache-control'])
+        data = response.json()
+        self.assertEqual(set(data), {'captcha_id', 'image', 'expires_in'})
+        self.assertEqual(data['expires_in'], 120)
+        with Image.open(io.BytesIO(base64.b64decode(data['image'].split(',', 1)[1]))) as image:
+            self.assertEqual(image.format, 'PNG')
+            self.assertEqual(image.size, (160, 56))
+            image.load()
+        key = self.prefix + 'captcha:' + data['captcha_id']
+        raw = accounts.redis_client().get(key)
+        self.assertNotIn('A2B3', raw)
+        self.assertEqual(set(json.loads(raw)), {'digest', 'purpose'})
+        self.assertGreater(accounts.redis_client().ttl(key), 0)
+        self.assertLessEqual(accounts.redis_client().ttl(key), 120)
+
+    def test_captcha_is_required_case_insensitive_and_consumed_on_error(self):
+        client = self.anonymous()
+        credentials = {'username': 'user_a', 'password': 'Test-user-123!'}
+        self.assertEqual(client.post('/api/auth/login', json=credentials).status_code, 422)
+        answer = self.captcha_answer(client)
+        with patch.object(accounts, 'verify_password') as verify_password:
+            self.assertEqual(client.post('/api/auth/login', json=credentials | answer | {'captcha_code': 'ZZZZ'}).status_code, 400)
+            verify_password.assert_not_called()
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer).status_code, 400)
+        answer = self.captcha_answer(client)
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer | {'password': 'Wrong-password!'}).status_code, 401)
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer).status_code, 400)
+        answer = self.captcha_answer(client)
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer | {'captcha_code': 'a2b3'}).status_code, 200)
+
+    def test_expired_captcha_and_cross_purpose_reuse_are_rejected(self):
+        client = self.anonymous()
+        credentials = {'username': 'user_a', 'password': 'Test-user-123!'}
+        answer = self.captcha_answer(client)
+        accounts.redis_client().expire(self.prefix + 'captcha:' + answer['captcha_id'], 0)
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer).status_code, 400)
+        self.assertEqual(client.get('/api/auth/captcha?purpose=other').status_code, 422)
+        with library.database() as cursor:
+            cursor.execute('UPDATE system_settings SET config=%s WHERE id=1', (json.dumps(accounts.DEFAULT_SETTINGS | {'registration_enabled': True}),))
+        answer = self.captcha_answer(client, 'register')
+        self.assertEqual(client.post('/api/auth/login', json=credentials | answer).status_code, 400)
+        self.assertEqual(client.post('/api/auth/register', json=credentials | answer).status_code, 400)
+
+    def test_one_captcha_cannot_create_two_concurrent_sessions(self):
+        clients = [self.anonymous(), self.anonymous()]
+        credentials = {'username': 'user_a', 'password': 'Test-user-123!'} | self.captcha_answer(clients[0])
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(lambda client: client.post('/api/auth/login', json=credentials).status_code, clients))
+        self.assertEqual(sorted(responses), [200, 400])
+
+    def test_captcha_issuance_is_limited_and_auth_still_checks_csrf(self):
+        client = self.anonymous()
+        answer = self.captcha_answer(client)
+        credentials = {'username': 'user_a', 'password': 'Test-user-123!'} | answer
+        response = client.post('/api/auth/login', json=credentials, headers={'Origin': 'https://untrusted.example'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(client.post('/api/auth/login', json=credentials).status_code, 200)
+        # Setup issued three challenges; this test has now issued one more.
+        for _ in range(26):
+            self.assertEqual(client.get('/api/auth/captcha').status_code, 200)
+        response = client.get('/api/auth/captcha')
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers['retry-after'], '60')
 
     def import_audio(self, client):
         buffer = io.BytesIO()
@@ -170,8 +248,8 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertEqual(self.b.put('/api/music/lyrics/' + filename, content=b'[00:01]stolen').status_code, 404)
         self.assertEqual(self.b.post('/api/music/lyrics/fetch', json={'filename': filename, 'title': 'song', 'artist': 'artist'}).status_code, 404)
         self.assertEqual(self.b.put('/api/library/favorites', json={'liked': True, 'track': {'title': 'stolen', 'provider': 'local', 'webpage_url': '/api/files/' + filename}}).status_code, 404)
-        a_tracks = self.a.get('/api/library/tracks?view=downloads').json()['tracks']
-        b_tracks = self.b.get('/api/library/tracks?view=downloads').json()['tracks']
+        a_tracks = self.a.get('/api/music/site/tracks').json()['tracks']
+        b_tracks = self.b.get('/api/music/site/tracks').json()['tracks']
         self.assertNotEqual(a_tracks[0]['id'], b_tracks[0]['id'])
 
     def test_media_cookie_supports_native_playback_head_and_range_but_not_business(self):
@@ -363,24 +441,28 @@ class AccountIntegrationTests(unittest.TestCase):
             self.assertEqual(self.a.get(image).status_code, 200)
             self.assertEqual(self.b.get(image).status_code, 404)
 
-    def test_administrator_batch_retry_preserves_task_and_worker_owner(self):
-        track = music._register(music.Track(**self.track))
-        response = self.a.post('/api/music/batches', json={'tracks': [{'token': track.token, 'webpage_url': track.webpage_url}]})
-        self.assertEqual(response.status_code, 200, response.text)
-        batch_id = response.json()['batch_id']
-        batch = video_tasks.music_batches[batch_id]
-        video_tasks._set_task(batch['items'][0]['task'], status='failed', error='temporary failure')
-        batch['status'] = 'failed'
-        response = self.admin.post(f'/api/music/batches/{batch_id}/retry')
-        self.assertEqual(response.status_code, 200, response.text)
-        task = batch['items'][0]['task']
-        self.assertEqual(task.user_id, self.a_id)
-        submitted = video_tasks.music_batch_executor.submit.call_args.args
-        self.assertEqual(submitted[0].__self__.run(accounts.owner_id), self.a_id)
-        self.assertEqual(self.a.get('/api/tasks/' + task.task_id).status_code, 200)
-        self.assertEqual(self.b.get('/api/tasks/' + task.task_id).status_code, 404)
-        video_tasks.music_batches.clear()
-        self.assertEqual(self.a.get(f'/api/music/batches/{batch_id}').json()['items'][0]['task_id'], task.task_id)
+    def test_cloud_music_download_creation_and_retry_are_disabled(self):
+        track = music._register(music.Track(title='old', provider='netease', identifier='one', webpage_url='https://music.163.com/song?id=1'))
+        self.assertEqual(self.a.post('/api/music/batches', json={'tracks': [{'token': track.token, 'webpage_url': track.webpage_url}]}).status_code, 410)
+        self.assertIn(self.admin.post('/api/music/batches/legacy/retry').status_code, (404,410))
+        self.assertEqual(self.a.post('/api/download', json={'url': 'https://example.com/song', 'media_type': 'audio', 'destination': 'library'}).status_code, 422)
+
+    def test_same_account_devices_have_separate_tasks_and_cannot_spoof_session_binding(self):
+        urls, identity, _ = self.device_download()
+        other = self.client('user_a', 'Test-user-123!', '22222222-2222-4222-8222-222222222222')
+        own = self.a.get('/api/workspace/resources?kind=delivery').json()
+        self.assertEqual(own['total'], 1)
+        self.assertEqual(other.get('/api/workspace/resources?kind=delivery').json()['total'], 0)
+        self.assertEqual(other.get('/api/workspace/resources?kind=download').json()['total'], 0)
+        for url in urls: self.assertIn(other.get(url).status_code, (404,410))
+        sid = self.a.cookies.get(accounts.COOKIE).split('.')[0]
+        from backend.modules.delivery import service as delivery
+        accounts.redis_client().delete(delivery.key('plan', self.a_id, identity))
+        payload = {'status': 'completed', 'completion_source': 'filesystem', 'transferred_bytes': 100}
+        self.assertEqual(other.post(f'/api/downloads/{identity}/complete', json=payload).status_code, 404)
+        self.assertEqual(self.a.post(f'/api/downloads/{identity}/complete', json=payload).status_code, 200)
+        self.assertEqual(other.get('/api/library', headers={'X-VideoDream-Device': self.a.headers['X-VideoDream-Device']}).status_code, 401)
+        self.assertEqual(accounts.redis_client().hget(accounts.session_key(sid), 'device_id'), self.a.headers['X-VideoDream-Device'])
 
     def test_refresh_rotation_expiry_and_session_loss(self):
         old = self.a.cookies.get(accounts.COOKIE)
@@ -445,7 +527,8 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertEqual(permanent.get('/api/library').status_code, 200)
 
     def test_registration_settings_feature_switches_and_secret_redaction(self):
-        candidate = {'username': 'new_user', 'password': 'New-user-123!', 'role': 'super_admin'}
+        candidate = {'username': 'new_user', 'password': 'New-user-123!', 'role': 'super_admin', 'captcha_id': 'x' * 32, 'captcha_code': 'A2B3'}
+        self.assertEqual(self.anonymous().get('/api/auth/captcha?purpose=register').status_code, 403)
         self.assertEqual(self.anonymous().post('/api/auth/register', json=candidate).status_code, 403)
         config = accounts.DEFAULT_SETTINGS | {'registration_enabled': True, 'music_enabled': False, 'ai_api_key': 'secret-that-must-not-be-shown'}
         local = {key: value for key, value in accounts.local_environment().items() if not key.startswith('LLM_')}
@@ -454,7 +537,18 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertNotIn(config['ai_api_key'], response.text)
         self.assertEqual(self.a.get('/api/music/search?q=song').status_code, 403)
-        self.anonymous().post('/api/auth/register', json=candidate).raise_for_status()
+        registering = self.anonymous()
+        self.assertEqual(registering.post('/api/auth/register', json={'username': 'new_user', 'password': 'New-user-123!'}).status_code, 422)
+        candidate.update(self.captcha_answer(registering, 'register'))
+        registered = registering.post('/api/auth/register', json=candidate)
+        self.assertEqual(registered.status_code, 201, registered.text)
+        self.assertEqual(registered.json()['user']['role'], 'user')
+        self.assertTrue(registering.cookies.get(accounts.COOKIE))
+        self.assertTrue(registering.cookies.get(accounts.MEDIA_COOKIE))
+        self.assertEqual(registering.post('/api/auth/refresh').status_code, 200)
+        registering.headers['Authorization'] = 'Bearer ' + registered.json()['access_token']
+        self.assertEqual(registering.get('/api/auth/me').status_code, 200)
+        self.assertEqual(registering.post('/api/auth/register', json=candidate).status_code, 400)
         with library.database() as cursor:
             cursor.execute("SELECT role,password_hash FROM users WHERE username='new_user'")
             row = cursor.fetchone()
@@ -467,10 +561,13 @@ class AccountIntegrationTests(unittest.TestCase):
         with patch.object(accounts, 'redis_client', side_effect=redis.ConnectionError('offline')):
             self.assertEqual(self.a.get('/api/library').status_code, 503)
             self.assertEqual(self.a.post('/api/auth/refresh').status_code, 503)
-            self.assertEqual(self.anonymous().post('/api/auth/login', json={'username': 'user_a', 'password': 'Test-user-123!'}).status_code, 503)
+            self.assertEqual(self.anonymous().get('/api/auth/captcha').status_code, 503)
+            self.assertEqual(self.anonymous().post('/api/auth/login', json={'username': 'user_a', 'password': 'Test-user-123!', 'captcha_id': 'x' * 32, 'captcha_code': 'A2B3'}).status_code, 503)
         for _ in range(10):
-            self.assertEqual(self.anonymous().post('/api/auth/login', json={'username': 'unknown', 'password': 'Wrong-password!'}).status_code, 401)
-        self.assertEqual(self.anonymous().post('/api/auth/login', json={'username': 'unknown', 'password': 'Wrong-password!'}).status_code, 429)
+            client = self.anonymous()
+            self.assertEqual(client.post('/api/auth/login', json={'username': 'unknown', 'password': 'Wrong-password!'} | self.captcha_answer(client)).status_code, 401)
+        client = self.anonymous()
+        self.assertEqual(client.post('/api/auth/login', json={'username': 'unknown', 'password': 'Wrong-password!'} | self.captcha_answer(client)).status_code, 429)
 
     def test_jwt_claims_algorithms_and_cookie_flags(self):
         cookie = self.a.cookies.get(accounts.COOKIE)
