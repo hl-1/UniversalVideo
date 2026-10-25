@@ -96,7 +96,7 @@ SHOW GRANTS FOR 'videodream_app'@'%';
 EXIT;
 ```
 
-SQL 与 env 中的密码必须一致。不要把替换后的真实密码保存到受版本控制的 SQL 模板。账号只授权 `videodream.*`；首次启动需要在该库内建表、修改结构和读写。对象已存在时先检查，不删除重建。
+SQL 与 env 中的密码必须一致。不要把替换后的真实密码保存到受版本控制的 SQL 模板。账号只授权 `videodream.*`；DDL 由一次性 Flyway 迁移服务执行，应用启动不再建表。可在 env 中配置独立迁移账号，再将应用账号权限限制为业务 DML 和历史表 SELECT。对象已存在时先检查，不删除重建。
 
 ### Redis
 
@@ -204,7 +204,20 @@ docker compose -f deploy/compose.yml run --rm --no-deps app \
   python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); print('Chromium OK'); b.close(); p.stop()"
 ```
 
-初始化管理员，这一步会连接 MySQL，执行项目现有的建表与初始化：
+先构建一次性迁移镜像（以前面已构建的 app 镜像为基础，独立加入 Java 21 和固定 Flyway 13.11.1）：
+
+```bash
+docker compose --progress plain -f deploy/compose.yml build migrate
+```
+
+空库执行以下迁移；已有业务库必须先按第 14 节 preflight、baseline，不能直接套用空库流程：
+
+```bash
+docker compose -f deploy/compose.yml run --rm --no-deps migrate migrate
+docker compose -f deploy/compose.yml run --rm --no-deps migrate validate
+```
+
+迁移失败立即停止发布。成功后初始化管理员，这一步只设置密码，不再建表：
 
 ```bash
 docker compose -f deploy/compose.yml run --rm --no-deps app \
@@ -334,6 +347,11 @@ cd /opt/videodream
 docker image tag videodream:local videodream:previous
 git pull --ff-only
 docker compose -f deploy/compose.yml build app
+docker compose -f deploy/compose.yml build migrate
+docker compose -f deploy/compose.yml stop app
+docker compose -f deploy/compose.yml run --rm --no-deps migrate migrate
+docker compose -f deploy/compose.yml run --rm --no-deps migrate validate
+docker compose -f deploy/compose.yml run --rm --no-deps app python scripts/database.py check
 docker compose -f deploy/compose.yml up -d --no-build --force-recreate app
 docker compose -f deploy/compose.yml logs --tail=100 app
 ```
@@ -410,16 +428,9 @@ docker compose -f deploy/compose.yml -f deploy/compose.inpainting.yml \
 
 ## 12. MySQL / Redis 数据契约与兼容性
 
-本次只增加部署文件，不调整任何业务表的字段、索引或关系。云端为空库，启动时通过现有 [`backend/migrations/__init__.py`](../backend/migrations/__init__.py) 协调器创建项目已有的 22 张表并执行已有迁移：
+当前业务结构共 23 张表：音乐库 10、账号与资源 5、视频 5、场景歌单 2、服务器音源 1（music_server_assets）。完整字段、默认值、索引和外键统一见 [`001_ddl_schema.sql`](sql/prod/v1/001_ddl_schema.sql) 和 [Flyway 完整规格](../spec/Flyway数据库版本管理设计.md)。V1 不改变已有业务表结构，保留已有两种 utf8mb4 排序规则并检查关联字段一致。
 
-| 模块 | 现有表 | 完整表结构与索引来源 |
-| --- | --- | --- |
-| 音乐库 | `music_profile`、`music_tracks`、`music_favorites`、`music_history`、`music_playlists`、`music_playlist_tracks`、`music_downloads`、`music_track_aliases`、`music_lyrics`、`music_theme` | [`library.py`](../backend/modules/music/library.py) 的 `SCHEMA`、`migrate_schema()`；账号归属由下行迁移补齐 |
-| 账号与资源 | `users`、`system_settings`、`audit_logs`、`resources`、`account_migrations` | [`service.py`](../backend/modules/accounts/service.py) 的 `AUTH_SCHEMA`、`migrate()` |
-| 视频 | `video_recent_links`、`video_parse_records`、`video_summaries`、`video_mind_maps`、`video_view_states` | [`store.py`](../backend/modules/video/store.py)；[现有视频规格](../spec/VideoDream-视频模块持久化功能设计.md) |
-| 场景歌单 | `music_recommendation_runs`、`music_track_features` | [`agent/store.py`](../backend/modules/music/agent/store.py)；该迁移也补齐歌单曲目位置列与索引 |
-
-音乐曲目与歌单、下载、歌词存在已有外键关联；Agent 表关联用户、来源任务及已保存歌单。视频关联由已有业务事务维护。本次不复制另一套建表 SQL，避免与自动迁移定义不一致。MySQL 8.4 支持项目使用的 JSON；空库无历史业务数据迁移，初始化日志和备份写入独立 `.run/`。
+接管只新增同库的 flyway_schema_history 管理表，包含 installed_rank 主键、version、description、type、script、checksum、installed_by、installed_on、execution_time、success，以及 success 索引；完整表结构和兼容、回滚见 Flyway 规格。account_migrations 保留原有业务迁移和备份记录。启动时仅检查 Flyway V1，缺失或失败则拒绝启动，不能依靠健康接口触发建表。
 
 Redis 沿用已有 key、类型、值、TTL、读写与失效规则，唯一部署差异是连接专用逻辑数据库。以下为已有契约，非本次新增：
 
@@ -432,7 +443,7 @@ Redis 沿用已有 key、类型、值、TTL、读写与失效规则，唯一部�
 | `videodream:video:preview:{uid}:{token}`（`videodream:video:preview:1:xy...`） | String JSON：用户、媒体地址、referer、到期时间、解析记录 ID | 最长 600 秒；读取检查账号、到期及关联记录，过期重建 |
 | `videodream:video:worker:{worker_id}`（`videodream:video:worker:host:1:abc...`） | String JSON：`{"alive":true}` | 45 秒，每 10 秒续期，正常关闭删除 |
 
-MySQL 是长期数据来源，Redis 不可用时认证拒绝放行；缓存丢失后重新解析，登录会话丢失后重新登录。总结、字幕、导图及任务结果继续按现有事务写入 MySQL，不增加新的缓存一致性规则。完整已有契约见账号代码及视频规格。本次无应用表/key 定义变更，因此无需新增表迁移或 key 转换脚本；部署回滚保留独立库与文件，后续版本升级按第 10 节匹配备份。
+MySQL 是长期数据来源，Redis 不可用时认证拒绝放行；缓存丢失后重新解析，登录会话丢失后重新登录。总结、字幕、导图及任务结果继续按现有事务写入 MySQL，不增加新的缓存一致性规则。完整已有契约见账号代码及视频规格。本次无业务表及 Redis key 变更，仅新增 Flyway 管理表；无需 Redis key 转换。部署回滚保留独立库与文件，数据库恢复包含匹配的 Flyway 历史。
 
 ## 13. 用户文件目录迁移与媒体鉴权更新
 
@@ -483,3 +494,30 @@ docker compose -f deploy/compose.yml run --rm --no-deps app \
 # 已有文件的 Nginx 交付
 
 应用保留默认 FastAPI 文件响应。需要启用 Nginx 文件交付时，先应用 `nginx/compose.override.yml` 中下载目录的只读挂载与 `nginx/xianyue.huanliyu.cn.conf` 中 `/_protected_downloads/` 的 `internal` 配置，再在生产配置中设置 `VIDEODREAM_X_ACCEL_PREFIX=/_protected_downloads` 并重启原服务。该变量只能在经此 Nginx 访问时启用；直接访问后端端口时应保持为空。认证仍由应用完成，不能把下载目录暴露为公开静态目录。
+
+
+## 14. Flyway 首次接管与逐脚本回滚
+
+Flyway 版本 SQL 位于 `backend/migrations/sql/`，逐脚本部署和回滚 SQL 位于 `deploy/sql/prod/v1/`，配置位于 `config/flyway.conf`。迁移资源与现有 Python 后端放在一起，部署资源归入 deploy。migrate 是一次性 profile 服务，复用数据库网络与原挂载，不发布端口；应用仍为 8001。
+
+升级至本版本之前，旧库必须已完成接管前代码的结构迁移与必要的文件目录迁移。先等待任务结束、准备旧镜像与数据库/媒体/.run/env 备份，再构建新 app 和 migrate 镜像，停止应用：
+
+```bash
+docker compose -f deploy/compose.yml build app
+docker compose -f deploy/compose.yml build migrate
+docker compose -f deploy/compose.yml stop app
+docker compose -f deploy/compose.yml run --rm --no-deps migrate preflight
+docker compose -f deploy/compose.yml run --rm --no-deps migrate baseline
+docker compose -f deploy/compose.yml run --rm --no-deps migrate migrate
+docker compose -f deploy/compose.yml run --rm --no-deps migrate validate
+docker compose -f deploy/compose.yml run --rm --no-deps app python scripts/database.py check
+docker compose -f deploy/compose.yml up -d --no-build --force-recreate app
+```
+
+每一步非零退出均停止，不能继续启动。baseline 再次校验结构，先在持久化 `.run/database-backups/` 写入 0600 的数据库 SQL 备份，再登记 V1，不重写业务数据、管理员密码和系统设置。preflight 不会补齐缺失字段/索引，不能忽略差异强行登记。密码通过已挂载的原始 dotenv 读取，兼容其中的字面量特殊字符；迁移账号可使用可选 VIDEODREAM_MIGRATION_USER/PASSWORD。
+
+结构已完整但仍需处理历史数据时，可在停服窗口显式执行 `docker compose -f deploy/compose.yml run --rm --no-deps migrate legacy-data`，先备份再转换；全新库不需要。目录搬迁继续按第 13 节操作。
+
+每个正向 SQL 配套回滚 SQL：001↔999、002↔998、003↔997；回滚按逆序执行，只处理对应脚本的变更。V1 的 999_fallback_drop_all.sql 是初始建表的反向 SQL，后续版本必须编写自身回滚脚本。回滚目录不被 Flyway 扫描。
+
+Flyway 已执行的版本使用新的补偿迁移或恢复包含历史表的匹配备份，不直接删除历史记录，不自动 repair；旧 Agent 直接删表脚本对已接管库拒绝执行。正式环境不得在有业务数据时直接执行 V1 全量反向删表；初始化数据回滚只撤销未被修改的种子记录，发生过用户活动的完整恢复以备份为准。

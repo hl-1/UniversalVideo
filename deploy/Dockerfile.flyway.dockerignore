@@ -1,0 +1,6 @@
+# The migration image extends the already-built app image; no workspace data
+# (downloads, runtime tools, local environments or credentials) enters its context.
+**
+!deploy/
+!deploy/Dockerfile.flyway
+!deploy/Dockerfile.flyway.dockerignore

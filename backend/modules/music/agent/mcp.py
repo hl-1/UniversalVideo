@@ -94,6 +94,8 @@ http_app = Starlette(routes=[Route("/api/music/mcp",endpoint=Transport())])
 
 @asynccontextmanager
 async def lifespan(app):
+    from backend.migrations import check_database
+    await asyncio.to_thread(check_database)
     # FastAPI event hooks predate this mounted MCP transport; preserve their execution.
     instance = FastMCP("VideoDream Music",stateless_http=True,json_response=True,
                        streamable_http_path="/api/music/mcp",max_request_body_size=65536)

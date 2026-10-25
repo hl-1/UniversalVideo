@@ -24,61 +24,6 @@ def worker_scope(run_id, worker):
         yield
     finally:
         execution_lease.reset(marker)
-SCHEMA = [
-    """CREATE TABLE IF NOT EXISTS music_recommendation_runs (
-    run_id CHAR(32) NOT NULL PRIMARY KEY, user_id BIGINT NOT NULL, parent_run_id CHAR(32) NULL,
-    status VARCHAR(24) NOT NULL DEFAULT 'pending', request JSON NOT NULL, context JSON NOT NULL,
-    steps JSON NOT NULL, result JSON NOT NULL, policy_version VARCHAR(40) NOT NULL,
-    skill_version VARCHAR(64) NOT NULL, idempotency_key CHAR(64) NOT NULL,
-    revision INT UNSIGNED NOT NULL DEFAULT 0, result_version INT UNSIGNED NOT NULL DEFAULT 0,
-    saved_playlist_id CHAR(24) NULL, saved_at DOUBLE NULL, worker_id VARCHAR(64) NULL,
-    lease_until DOUBLE NULL, created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
-    UNIQUE KEY rec_request(user_id,idempotency_key), KEY rec_owner(user_id,deleted,created_at),
-    KEY rec_worker(deleted,status,lease_until),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY(parent_run_id) REFERENCES music_recommendation_runs(run_id) ON DELETE SET NULL,
-    FOREIGN KEY(saved_playlist_id) REFERENCES music_playlists(id) ON DELETE SET NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_track_features (
-    user_id BIGINT NOT NULL, track_key CHAR(64) NOT NULL, track_snapshot JSON NOT NULL,
-    features JSON NOT NULL, evidence JSON NOT NULL, content_signature CHAR(64) NOT NULL,
-    analyzer_version VARCHAR(40) NOT NULL, checked_at DOUBLE NOT NULL, expires_at DOUBLE NOT NULL,
-    PRIMARY KEY(user_id,track_key), KEY feature_expiry(expires_at),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-]
-
-
-def migrate(cursor):
-    cursor.execute("SELECT GET_LOCK('videodream-music-agent-migration',30) AS acquired")
-    if cursor.fetchone()["acquired"] != 1:
-        raise HTTPException(503, "场景歌单迁移正在进行")
-    try:
-        cursor.execute("SELECT id FROM account_migrations WHERE id='music-agent-v1'")
-        if cursor.fetchone():
-            return
-        cursor.execute("SELECT VERSION() AS version")
-        version = cursor.fetchone()["version"]
-        numbers = tuple(int(n) for n in version.split("-")[0].split(".")[:2])
-        if numbers < (5,7):
-            raise HTTPException(503, "场景歌单需要支持 JSON 的 MySQL")
-        backup = library.backup_library(cursor)
-        # Match existing collations, otherwise MySQL rejects the foreign keys.
-        cursor.execute("SHOW FULL COLUMNS FROM music_playlists LIKE 'id'")
-        playlist_collation = cursor.fetchone()["Collation"]
-        for statement in SCHEMA:
-            cursor.execute(statement.replace("DEFAULT CHARSET=utf8mb4", f"DEFAULT CHARSET=utf8mb4 COLLATE={playlist_collation}"))
-        cursor.execute("SHOW COLUMNS FROM music_playlist_tracks LIKE 'position'")
-        if not cursor.fetchone():
-            cursor.execute("ALTER TABLE music_playlist_tracks ADD COLUMN position INT UNSIGNED NULL DEFAULT NULL")
-        cursor.execute("SHOW INDEX FROM music_playlist_tracks WHERE Key_name='playlist_position'")
-        if not cursor.fetchone():
-            cursor.execute("CREATE INDEX playlist_position ON music_playlist_tracks(playlist_id,position)")
-        cursor.execute("INSERT INTO account_migrations (id,completed_at,backup_path) VALUES ('music-agent-v1',%s,%s)",
-                       (time.time(), str(backup)))
-    finally:
-        cursor.execute("SELECT RELEASE_LOCK('videodream-music-agent-migration')")
 
 
 def encode(value):
@@ -112,7 +57,7 @@ def get(cursor, run_id, uid=None, lock=False, include_deleted=False):
 
 
 def sync_resource(cursor, row):
-    payload = {"run_id": row["run_id"], "status": row["status"], "need": row["request"]["need"],
+    payload = {"kind": row["request"].get("kind", "scene_playlist"), "run_id": row["run_id"], "status": row["status"], "need": row["request"]["need"],
                "message": row["context"].get("message", ""),
                "result": {"title": row["result"].get("title", row["request"]["need"]),
                           "count": len(row["result"].get("tracks", []))},
@@ -155,9 +100,15 @@ def update(cursor, row, **changes):
 
 
 def recover(cursor):
-    cursor.execute("SELECT * FROM music_recommendation_runs WHERE deleted=FALSE AND status IN ('pending','running') AND lease_until<%s FOR UPDATE", (time.time(),))
-    for row in cursor.fetchall():
-        row = decode(row)
+    from backend.modules.music.discovery import usage
+    cursor.execute("SELECT run_id,user_id FROM music_recommendation_runs WHERE deleted=FALSE AND status IN ('pending','running') AND lease_until<%s ORDER BY user_id", (time.time(),))
+    for candidate in cursor.fetchall():
+        usage.lock(cursor,candidate['user_id'])
+        row=get(cursor,candidate['run_id'],lock=True)
+        if row['status'] not in {'pending','running'} or not row['lease_until'] or row['lease_until']>=time.time(): continue
+        if row['status']=='pending' and row['context'].get('background'):
+            update(cursor,row,lease_until=time.time()+60)
+            continue
         context = row["context"]
         requests = [r | {"state":"unconfirmed", "error":"工作进程中断，用量待确认"}
                     if r["state"] == "in_flight" else r for r in context.get("model_requests", [])]
@@ -165,6 +116,7 @@ def recover(cursor):
             context = context | {"model_requests":requests, "model_stop":"执行中断，模型用量待确认，请手动重试新任务"}
         update(cursor, row, status="interrupted", worker_id=None, lease_until=None,
                context=context | {"message": "服务执行中断，请查看任务状态"})
+        if row['request'].get('kind')=='daily_discovery': usage.sync_candidate(cursor,row['user_id'])
 
 
 def create(request, key, skill_version, parent=None, seed=None):
@@ -175,7 +127,8 @@ def create(request, key, skill_version, parent=None, seed=None):
     config = accounts.settings()
     with library.database() as cursor:
         # A user row serializes concurrent create/continue operations.
-        cursor.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (uid,))
+        from backend.modules.music.discovery import usage
+        usage.lock(cursor,uid)
         recover(cursor)
         cursor.execute("SELECT * FROM music_recommendation_runs WHERE user_id=%s AND idempotency_key=%s", (uid, key_hash))
         existing = decode(cursor.fetchone())
@@ -208,15 +161,30 @@ def create(request, key, skill_version, parent=None, seed=None):
                     track.pop('analysis', None)
                 candidates.append(track)
             row['context'].update(candidates=candidates, fill_missing=True)
-        columns = list(row)
-        cursor.execute("INSERT INTO music_recommendation_runs (" + ",".join(f"`{k}`" for k in columns) + ") VALUES (" + ",".join(["%s"]*len(columns)) + ")",
-                       tuple(encode(row[k]) if k in {"request","context","steps","result"} else row[k] for k in columns))
-        sync_resource(cursor, row)
+        insert(cursor, row)
         return row, True
+
+
+def insert(cursor, row):
+    """Insert using the caller's transaction (daily quota and run are atomic)."""
+    columns = list(row)
+    cursor.execute("INSERT INTO music_recommendation_runs (" + ",".join(f"`{k}`" for k in columns) + ") VALUES (" + ",".join(["%s"]*len(columns)) + ")",
+                   tuple(encode(row[k]) if k in {"request","context","steps","result"} else row[k] for k in columns))
+    sync_resource(cursor, row)
 
 
 def public(row):
     from backend.modules.music.agent import budget, service
+    if row['request'].get('kind') == 'daily_discovery':
+        from backend.modules.music.discovery import store as discovery
+        with library.database() as cursor:
+            cursor.execute('SELECT * FROM music_discovery_batches WHERE run_id=%s AND user_id=%s', (row['run_id'],row['user_id']))
+            batch=cursor.fetchone()
+            if batch:
+                return discovery.public(cursor,batch)
+            return {k:row[k] for k in ('run_id','status','created_at','updated_at')} | {
+                'kind':'candidate_refill','budget':row['context'].get('budget',{}),
+                'message':row['context'].get('message','')}
     context = row["context"]
     candidates = context.get("candidates", [])
     qualified = service.deduplicated(service.qualified(row))

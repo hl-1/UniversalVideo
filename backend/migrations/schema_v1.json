@@ -1,0 +1,2354 @@
+{
+  "account_migrations": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "completed_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "backup_path": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "audit_logs": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "auto_increment",
+        "collation": null
+      },
+      "actor_id": {
+        "type": "bigint",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "action": {
+        "type": "varchar(80)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "target": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "result": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "ip": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "audit_actor": {
+        "unique": false,
+        "columns": [
+          [
+            "actor_id",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "music_downloads": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "char(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "filename": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "imported": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "file_hash": {
+        "type": "char(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "file_size": {
+        "type": "bigint",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "file_mtime": {
+        "type": "bigint",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "file_available": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "file_hash_index": {
+        "unique": false,
+        "columns": [
+          [
+            "file_hash",
+            null
+          ]
+        ]
+      },
+      "filename": {
+        "unique": true,
+        "columns": [
+          [
+            "filename",
+            null
+          ]
+        ]
+      },
+      "music_downloads_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      },
+      "track_id": {
+        "unique": false,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_favorites": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_favorites_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_history": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "played_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "play_count": {
+        "type": "int",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      },
+      "preview": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_history_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_lyrics": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "text": {
+        "type": "mediumtext",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "source": {
+        "type": "varchar(80)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "format": {
+        "type": "varchar(8)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "signature": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "checked_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "manual": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_lyrics_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_playlist_tracks": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "playlist_id": {
+        "type": "char(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "added_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "position": {
+        "type": "int unsigned",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "playlist_position": {
+        "unique": false,
+        "columns": [
+          [
+            "playlist_id",
+            null
+          ],
+          [
+            "position",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "playlist_id",
+            null
+          ],
+          [
+            "track_id",
+            null
+          ]
+        ]
+      },
+      "track_id": {
+        "unique": false,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "playlist_id"
+        ],
+        "table": "music_playlists",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      },
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_playlists": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "char(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "name": {
+        "type": "varchar(80)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "description": {
+        "type": "varchar(300)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "thumbnail": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_playlists_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "music_profile": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "int",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "nickname": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "bio": {
+        "type": "varchar(200)",
+        "nullable": false,
+        "default": "",
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "avatar": {
+        "type": "mediumtext",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_profile_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "music_recommendation_runs": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "run_id": {
+        "type": "char(32)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "parent_run_id": {
+        "type": "char(32)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "status": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": "pending",
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "request": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "context": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "steps": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "result": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "policy_version": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "skill_version": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "idempotency_key": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "revision": {
+        "type": "int unsigned",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "result_version": {
+        "type": "int unsigned",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "saved_playlist_id": {
+        "type": "char(24)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "saved_at": {
+        "type": "double",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "worker_id": {
+        "type": "varchar(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "lease_until": {
+        "type": "double",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "parent_run_id": {
+        "unique": false,
+        "columns": [
+          [
+            "parent_run_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "run_id",
+            null
+          ]
+        ]
+      },
+      "rec_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "rec_request": {
+        "unique": true,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "idempotency_key",
+            null
+          ]
+        ]
+      },
+      "rec_worker": {
+        "unique": false,
+        "columns": [
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "lease_until",
+            null
+          ]
+        ]
+      },
+      "saved_playlist_id": {
+        "unique": false,
+        "columns": [
+          [
+            "saved_playlist_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "table": "users",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      },
+      {
+        "columns": [
+          "parent_run_id"
+        ],
+        "table": "music_recommendation_runs",
+        "references": [
+          "run_id"
+        ],
+        "delete": "SET NULL",
+        "update": "NO ACTION"
+      },
+      {
+        "columns": [
+          "saved_playlist_id"
+        ],
+        "table": "music_playlists",
+        "references": [
+          "id"
+        ],
+        "delete": "SET NULL",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_server_assets": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "char(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "filename": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "original_filename": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "asset_kind": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "status": {
+        "type": "varchar(16)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "mime_type": {
+        "type": "varchar(100)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "file_size": {
+        "type": "bigint",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "sha256": {
+        "type": "char(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "asset_hash": {
+        "unique": false,
+        "columns": [
+          [
+            "sha256",
+            null
+          ]
+        ]
+      },
+      "asset_owner_file": {
+        "unique": true,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "filename",
+            null
+          ]
+        ]
+      },
+      "asset_owner_kind_status": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "asset_kind",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "asset_track": {
+        "unique": false,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "RESTRICT",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_theme": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "int",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "config": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_theme_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "music_track_aliases": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "alias_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "track_id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "alias_id",
+            null
+          ]
+        ]
+      },
+      "track_id": {
+        "unique": false,
+        "columns": [
+          [
+            "track_id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "track_id"
+        ],
+        "table": "music_tracks",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_track_features": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "track_key": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "track_snapshot": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "features": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "evidence": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "content_signature": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "analyzer_version": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "checked_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "expires_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "feature_expiry": {
+        "unique": false,
+        "columns": [
+          [
+            "expires_at",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "track_key",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "table": "users",
+        "references": [
+          "id"
+        ],
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ]
+  },
+  "music_tracks": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "provider": {
+        "type": "varchar(12)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "identifier": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "title": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "artist": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "webpage_url": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "thumbnail": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "duration": {
+        "type": "double",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "access": {
+        "type": "varchar(100)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "custom_thumbnail": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "cover_updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "cover_checked_at": {
+        "type": "double",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": "1",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "music_tracks_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ]
+        ]
+      },
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "resources": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "kind": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "resource_key": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "payload": {
+        "type": "mediumtext",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "device_id": {
+        "type": "char(36)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "kind",
+            null
+          ],
+          [
+            "resource_key",
+            null
+          ]
+        ]
+      },
+      "resource_device": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "kind",
+            null
+          ],
+          [
+            "device_id",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "resource_owner": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "kind",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "system_settings": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "int",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "config": {
+        "type": "mediumtext",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "users": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "auto_increment",
+        "collation": null
+      },
+      "username": {
+        "type": "varchar(40)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "password_hash": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "role": {
+        "type": "varchar(16)",
+        "nullable": false,
+        "default": "user",
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "status": {
+        "type": "varchar(16)",
+        "nullable": false,
+        "default": "active",
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "must_change_password": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "auth_version": {
+        "type": "int",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "id",
+            null
+          ]
+        ]
+      },
+      "username": {
+        "unique": true,
+        "columns": [
+          [
+            "username",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "video_mind_maps": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "task_id": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "parse_record_id": {
+        "type": "varchar(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "summary_task_id": {
+        "type": "varchar(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "version": {
+        "type": "int unsigned",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "status": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "worker_id": {
+        "type": "varchar(255)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "content": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "task_id",
+            null
+          ]
+        ]
+      },
+      "video_map_record": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "parse_record_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "video_map_summary": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "summary_task_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "video_map_version": {
+        "unique": true,
+        "columns": [
+          [
+            "summary_task_id",
+            null
+          ],
+          [
+            "version",
+            null
+          ]
+        ]
+      },
+      "video_map_worker": {
+        "unique": false,
+        "columns": [
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "updated_at",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "video_parse_records": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "record_id": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "url": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "webpage_url": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "title": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "platform": {
+        "type": "varchar(100)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "status": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "worker_id": {
+        "type": "varchar(255)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "snapshot": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "record_id",
+            null
+          ]
+        ]
+      },
+      "video_parse_owner_time": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ],
+          [
+            "record_id",
+            null
+          ]
+        ]
+      },
+      "video_parse_platform": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "platform",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "video_parse_status": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "video_parse_worker": {
+        "unique": false,
+        "columns": [
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "updated_at",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "video_recent_links": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "url_hash": {
+        "type": "char(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "link_id": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "url": {
+        "type": "text",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "submitted_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "url_hash",
+            null
+          ]
+        ]
+      },
+      "video_recent_time": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "submitted_at",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "video_summaries": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "task_id": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "parse_record_id": {
+        "type": "varchar(64)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "webpage_url": {
+        "type": "text",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "status": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "worker_id": {
+        "type": "varchar(255)",
+        "nullable": true,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "content": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "task_id",
+            null
+          ]
+        ]
+      },
+      "video_summary_record": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "parse_record_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "created_at",
+            null
+          ]
+        ]
+      },
+      "video_summary_worker": {
+        "unique": false,
+        "columns": [
+          [
+            "deleted",
+            null
+          ],
+          [
+            "status",
+            null
+          ],
+          [
+            "updated_at",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  },
+  "video_view_states": {
+    "engine": "InnoDB",
+    "collation": "utf8mb4_0900_ai_ci",
+    "columns": {
+      "user_id": {
+        "type": "bigint",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "record_id": {
+        "type": "varchar(64)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "view_key": {
+        "type": "varchar(255)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "selected_tab": {
+        "type": "varchar(24)",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": "utf8mb4_0900_ai_ci"
+      },
+      "playback_time": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "view_state": {
+        "type": "json",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "created_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "updated_at": {
+        "type": "double",
+        "nullable": false,
+        "default": null,
+        "extra": "",
+        "collation": null
+      },
+      "deleted": {
+        "type": "tinyint",
+        "nullable": false,
+        "default": "0",
+        "extra": "",
+        "collation": null
+      }
+    },
+    "indexes": {
+      "PRIMARY": {
+        "unique": true,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "record_id",
+            null
+          ]
+        ]
+      },
+      "video_view_key": {
+        "unique": true,
+        "columns": [
+          [
+            "view_key",
+            null
+          ]
+        ]
+      },
+      "video_view_recent": {
+        "unique": false,
+        "columns": [
+          [
+            "user_id",
+            null
+          ],
+          [
+            "deleted",
+            null
+          ],
+          [
+            "updated_at",
+            null
+          ]
+        ]
+      }
+    },
+    "foreign_keys": []
+  }
+}

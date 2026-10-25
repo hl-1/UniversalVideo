@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import base64
 import json
+import os
 import secrets
 import tempfile
 import time
@@ -52,6 +53,8 @@ class AccountIntegrationTests(unittest.TestCase):
             path.mkdir()
             cls.stack.enter_context(patch.object(paths, field, path))
         cls.stack.enter_context(patch.object(accounts, 'signing_key', return_value=secrets.token_urlsafe(48)))
+        from backend.tests.support import migrate_test_database
+        migrate_test_database(config | {'database': cls.db_name})
         database_store.schema_ready = False
         with library.database() as cursor:
             cursor.execute('UPDATE users SET password_hash=%s,must_change_password=FALSE WHERE id=1', (accounts.passwords.hash('Test-admin-123!'),))
@@ -68,6 +71,8 @@ class AccountIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.stack = ExitStack()
+        from backend.modules.music.discovery import profile_runtime
+        self.stack.enter_context(patch.object(profile_runtime,'start'))
         from backend.infrastructure.browser_sessions import BrowserSessions
         original_browser = browser_session_store.sessions
         browser = BrowserSessions(self.root / ('browser-' + secrets.token_hex(4)))
@@ -527,12 +532,16 @@ class AccountIntegrationTests(unittest.TestCase):
         self.assertEqual(permanent.get('/api/library').status_code, 200)
 
     def test_registration_settings_feature_switches_and_secret_redaction(self):
+        with library.database() as cursor:
+            cursor.execute('UPDATE system_settings SET config=%s WHERE id=1',
+                           (json.dumps(accounts.DEFAULT_SETTINGS | {'registration_enabled': False}),))
         candidate = {'username': 'new_user', 'password': 'New-user-123!', 'role': 'super_admin', 'captcha_id': 'x' * 32, 'captcha_code': 'A2B3'}
         self.assertEqual(self.anonymous().get('/api/auth/captcha?purpose=register').status_code, 403)
         self.assertEqual(self.anonymous().post('/api/auth/register', json=candidate).status_code, 403)
         config = accounts.DEFAULT_SETTINGS | {'registration_enabled': True, 'music_enabled': False, 'ai_api_key': 'secret-that-must-not-be-shown'}
         local = {key: value for key, value in accounts.local_environment().items() if not key.startswith('LLM_')}
-        with patch('backend.infrastructure.network.public_url', side_effect=lambda value: value), patch.object(accounts, 'local_environment', return_value=local):
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('LLM_')}
+        with patch('backend.infrastructure.network.public_url', side_effect=lambda value: value), patch.object(accounts, 'local_environment', return_value=local), patch.dict(os.environ, environment, clear=True):
             response = self.admin.put('/api/admin/settings', json=config)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertNotIn(config['ai_api_key'], response.text)

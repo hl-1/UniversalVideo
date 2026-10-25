@@ -3,10 +3,12 @@ import { ref } from 'vue'
 import { saveResponseToFile, waitForFileSave } from '../features/video/fileSave.ts'
 import type { FilePickerHandle } from '../features/video/types.ts'
 import { readApiError } from './api/client.ts'
+import { isAndroidApp } from './native/bridge.ts'
+import { saveWithAndroid, saveBlobWithAndroid } from './native/downloads.ts'
 
 export type DownloadProgress = { phase: 'preparing' | 'transferring' | 'closing'; bytes: number; total: number | null; speed: number; eta: number | null }
 export type SaveResult = { status: 'saved' | 'handed_off'; bytes: number }
-export type SaveOptions = { handle?: FilePickerHandle | null; controller?: AbortController; fallbackUrl?: string; onProgress?: (progress: DownloadProgress) => void; track?: unknown }
+export type SaveOptions = { handle?: FilePickerHandle | null; controller?: AbortController; fallbackUrl?: string; onProgress?: (progress: DownloadProgress) => void; track?: unknown; nativeTarget?: string }
 export type MediaRequest = { url: string; title?: string; format_id?: string; parse_record_id?: string; media_type?: 'video' | 'audio'; audio_format?: 'original' | 'm4a' | 'mp3'; destination?: 'device' | 'library'; compatibility?: boolean }
 export type DeliveryPlan = { download_id: string; mode: 'file' | 'relay' | 'direct' | 'task'; filename: string; url: string; fallback_url: string; task_id?: string; destination: 'device' | 'library' }
 export const downloadNotice = ref('')
@@ -27,6 +29,7 @@ export function progressText(progress: DownloadProgress) {
 }
 
 export function chooseFile(name: string): Promise<FilePickerHandle | null> {
+  if (isAndroidApp()) return Promise.resolve(null)
   return window.showSaveFilePicker ? window.showSaveFilePicker({ suggestedName: downloadFilename(name), startIn: 'downloads' }) : Promise.resolve(null)
 }
 
@@ -41,6 +44,7 @@ export function nativeDownload(url: string, name: string) {
 
 async function saveRemoteFileImpl(url: string, name: string, options: SaveOptions = {}): Promise<SaveResult> {
   const controller = options.controller || new AbortController()
+  if (isAndroidApp()) return saveWithAndroid('download.file', { url: options.fallbackUrl || url, filename: downloadFilename(name), track: options.track, target: options.nativeTarget }, controller.signal, options.onProgress)
   const handle = options.handle === undefined ? await chooseFile(name) : options.handle
   controller.signal.throwIfAborted()
   if (!handle) {
@@ -75,7 +79,7 @@ export async function saveRemoteFile(url: string, name: string, options: SaveOpt
   const id = `save-${Date.now()}-${Math.random()}`
   const revision = sessionRevision
   const uid = options.track ? (await import('../features/accounts/auth')).account.value?.id : undefined
-  const handle = options.handle === undefined ? await chooseFile(name) : options.handle
+  const handle = isAndroidApp() ? null : options.handle === undefined ? await chooseFile(name) : options.handle
   activeDownloads.value.set(id, { label: downloadFilename(name), progress: '正在选择保存位置…', cancel: () => controller.abort(new DOMException('下载已取消', 'AbortError')) })
   try {
     const result = await saveRemoteFileImpl(url, name, { ...options, handle, controller, onProgress(progress) {
@@ -86,6 +90,7 @@ export async function saveRemoteFile(url: string, name: string, options: SaveOpt
     if (revision === sessionRevision && result.status === 'saved' && options.track) {
       const library = await import('../features/music/deviceLibrary')
       if (handle?.getFile) await library.registerDeviceFile(options.track as MusicTrack, handle as Required<Pick<FilePickerHandle, 'getFile'>>, uid)
+      else if (isAndroidApp()) await library.refreshDeviceLibrary()
       if (uid === (await import('../features/accounts/auth')).account.value?.id) void library.cacheDeviceAssets(options.track as MusicTrack).catch(() => {})
     }
     if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
@@ -104,6 +109,7 @@ if (typeof window !== 'undefined') window.addEventListener?.('videodream-session
 })
 
 export async function saveBlob(blob: Blob, name: string, handle?: FilePickerHandle | null) {
+  if (isAndroidApp()) return saveBlobWithAndroid(blob, downloadFilename(name))
   const target = handle === undefined ? await chooseFile(name) : handle
   if (target) {
     await saveResponseToFile(new Response(blob), target, new AbortController(), () => {}, () => {})
@@ -172,6 +178,18 @@ export async function downloadMedia(request: MediaRequest, options: SaveOptions 
   }
   let plan: DeliveryPlan | undefined
   try {
+    if (isAndroidApp() && request.destination !== 'library') {
+      const result = await saveWithAndroid<SaveResult & { plan: DeliveryPlan }>('download.media', {
+        media: request, filename: downloadFilename(`${request.title || 'download'}.${ext}`), track: options.track, target: options.nativeTarget,
+      }, controller.signal, onProgress)
+      if (revision === sessionRevision && result.status === 'saved' && options.track) {
+        const library = await import('../features/music/deviceLibrary')
+        await library.refreshDeviceLibrary()
+        void library.cacheDeviceAssets(options.track as MusicTrack).catch(() => {})
+      }
+      if (revision === sessionRevision) downloadNotice.value = saveMessage(result)
+      return result
+    }
     // Invoke the picker during the click, before source parsing or any request.
     const handle = request.destination === 'library' ? null : options.handle === undefined ? await chooseFile(`${request.title || 'download'}.${ext}`) : options.handle
     controller.signal.throwIfAborted()

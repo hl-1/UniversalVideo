@@ -31,28 +31,26 @@ def read_password(username: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Back up and assign legacy data to admin, then set its password locally.")
+    parser = argparse.ArgumentParser(description="Set the Flyway-created administrator password locally.")
     parser.add_argument("--username", default="admin")
-    parser.add_argument("--migrate-only", action="store_true", help="Migrate ownership without setting a password.")
     args = parser.parse_args()
     if not accounts.environment("VIDEODREAM_JWT_SECRET"):
         set_key(str(accounts.LOCAL_CONFIG_PATH), "VIDEODREAM_JWT_SECRET", secrets.token_urlsafe(48))
     with library.database() as cursor:
-        cursor.execute("SELECT backup_path FROM account_migrations WHERE id='accounts-v1'")
-        backup = cursor.fetchone()["backup_path"]
         cursor.execute("SELECT id,username FROM users WHERE id=1")
         user = cursor.fetchone()
-    print("Legacy ownership: admin (super_admin)")
-    print("Database backup: " + backup)
-    print("File backup: " + str(Path(backup).with_suffix(".files.zip")))
-    if args.migrate_only:
-        print("Password remains unchanged. Run this script without --migrate-only to set it interactively.")
-        return
+    if not user:
+        parser.error("Administrator is missing. Run scripts/database.py migrate first.")
+    print("Administrator: " + user["username"])
     if args.username != user["username"]:
         parser.error("The initialized administrator is " + user["username"])
     password = read_password(args.username)
     accounts.redis_client().ping()
     with library.database() as cursor:
+        cursor.execute("SELECT password_hash FROM users WHERE id=1 FOR UPDATE")
+        first_initialization = cursor.fetchone()["password_hash"] == "!uninitialized"
+        if first_initialization:
+            cursor.execute("UPDATE system_settings SET config=JSON_SET(config,'$.registration_enabled',CAST('true' AS JSON)) WHERE id=1")
         cursor.execute("UPDATE users SET password_hash=%s,must_change_password=FALSE,auth_version=auth_version+1 WHERE id=1",
                        (accounts.passwords.hash(password),))
     accounts.revoke_all(1)

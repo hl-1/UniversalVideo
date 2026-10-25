@@ -25,15 +25,24 @@ worker_prefix = secrets.token_hex(12)
 
 
 def claim(run_id):
-    config = auth.require_enabled()
+    config = accounts.settings()
     with library.database() as cursor:
         cursor.execute("SELECT config FROM system_settings WHERE id=1 FOR UPDATE")
+        from backend.modules.music.discovery import usage
+        usage.lock(cursor,accounts.current().id)
         store.recover(cursor)
         row = store.get(cursor,run_id,accounts.current().id,lock=True)
+        if row["request"].get("kind") == "daily_discovery":
+            from backend.modules.music.discovery.service import require_enabled
+            require_enabled()
+        else:
+            auth.require_enabled()
         if row["status"]!="pending":
             return None
         cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE deleted=FALSE AND status='running'")
-        if cursor.fetchone()["n"]>=config["music_agent_concurrency"]:
+        count=cursor.fetchone()['n']
+        cursor.execute("SELECT COUNT(*) AS n FROM music_discovery_profile_runs WHERE status='running'")
+        if count+cursor.fetchone()['n']>=config["music_agent_concurrency"]:
             return None
         return store.update(cursor,row,status="running",worker_id=worker_prefix+":"+secrets.token_hex(8),lease_until=time.time()+60,
                             context=row["context"] | {"active_started_at":time.time(),"base_seconds":row["context"].get("budget",{}).get("seconds",0)})
@@ -94,7 +103,10 @@ def run(run_id):
             current = service.current_run(run_id)
             if current["status"]!="pending":
                 return
-            auth.check_session(current["user_id"],current["context"]["session_id"])
+            if current['context'].get('background'):
+                accounts.active_worker(current['user_id'])
+            else:
+                auth.check_session(current["user_id"],current["context"]["session_id"])
             with library.database() as cursor:
                 current = store.get(cursor,run_id,lock=True)
                 if current["status"]=="pending":
@@ -107,7 +119,11 @@ def run(run_id):
         heartbeat.start()
         worker = row["worker_id"]
         with store.worker_scope(run_id, worker):
-            execute_run(row, last)
+            if row["request"].get("kind") == "daily_discovery":
+                from backend.modules.music.discovery.service import execute
+                execute(row)
+            else:
+                execute_run(row, last)
     except (budget.BudgetExceeded, ModelFault) as exc:
         try:
             with library.database() as cursor:
@@ -463,6 +479,10 @@ def _execute_run(row, last):
 
 
 def finish(run_id,last,worker=None):
+    current = service.current_run(run_id)
+    if current["request"].get("kind") == "daily_discovery":
+        from backend.modules.music.discovery.service import finish as daily_finish
+        return daily_finish(run_id)
     with library.database() as cursor:
         row = store.get(cursor,run_id,lock=True)
         if row["status"]!="running" or (worker and row["worker_id"]!=worker) or row["lease_until"]<=time.time():

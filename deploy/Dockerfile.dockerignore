@@ -7,8 +7,13 @@
 !frontend/**
 !scripts/
 !scripts/**
+!config/
+!config/flyway.conf
 !deploy/
+!deploy/sql/
+!deploy/sql/**
 !deploy/Dockerfile
+!deploy/Dockerfile.flyway
 !deploy/Dockerfile.dockerignore
 
 **/__pycache__/

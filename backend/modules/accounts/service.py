@@ -160,24 +160,7 @@ def audit(action: str, target: str, result: str = "success", *, actor: int | Non
         cursor.execute("INSERT INTO audit_logs (actor_id,action,target,result,ip,created_at) VALUES (%s,%s,%s,%s,%s,%s)",
                        (actor if actor is not None else (principal.get().id if principal.get() else None),
                         action[:80], target[:255], result[:40], ip[:64], time.time()))
-AUTH_SCHEMA = [
-    """CREATE TABLE IF NOT EXISTS users (id BIGINT PRIMARY KEY AUTO_INCREMENT, username VARCHAR(40) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL, role VARCHAR(16) NOT NULL DEFAULT 'user', status VARCHAR(16) NOT NULL DEFAULT 'active',
-    must_change_password BOOLEAN NOT NULL DEFAULT FALSE, auth_version INT NOT NULL DEFAULT 0,
-    created_at DOUBLE NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY, config MEDIUMTEXT NOT NULL)
-    ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS audit_logs (id BIGINT PRIMARY KEY AUTO_INCREMENT, actor_id BIGINT,
-    action VARCHAR(80) NOT NULL,target VARCHAR(255) NOT NULL,result VARCHAR(40) NOT NULL,ip VARCHAR(64) NOT NULL,
-    created_at DOUBLE NOT NULL, INDEX audit_actor(actor_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS resources (kind VARCHAR(24) NOT NULL, resource_key VARCHAR(255) NOT NULL,
-    user_id BIGINT NOT NULL, payload MEDIUMTEXT NOT NULL, created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
-    PRIMARY KEY(kind,resource_key), INDEX resource_owner(user_id,kind)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS account_migrations (id VARCHAR(40) PRIMARY KEY, completed_at DOUBLE NOT NULL,
-    backup_path TEXT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-]
-DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video_enabled": True,
+DEFAULT_SETTINGS = {"registration_enabled": True, "music_enabled": True, "video_enabled": True,
                     "summary_enabled": True, "watermark_enabled": True,
                     "ai_base_url": "https://api.openai.com/v1", "ai_model": "gpt-4.1-mini", "ai_api_key": "",
                     "ai_vision_base_url": "", "ai_vision_model": "", "ai_vision_api_key": "",
@@ -185,10 +168,15 @@ DEFAULT_SETTINGS = {"registration_enabled": False, "music_enabled": True, "video
 AI_GROUPS = {"text": ("ai", "LLM", "文字处理"),
              "vision": ("ai_vision", "LLM_VISION", "截图识别"),
              "speech": ("ai_asr", "LLM_ASR", "语音转写")}
-DEFAULT_SETTINGS.update(music_agent_enabled=False, music_agent_network_enabled=True,
+DEFAULT_SETTINGS.update(music_daily_enabled=True, music_agent_enabled=False, music_agent_network_enabled=True,
                         music_agent_sources=["netease", "qq", "kugou"], music_agent_decisions=6,
                         music_agent_network_requests=300, music_agent_search_rounds=5, music_agent_candidates=100, music_agent_seconds=600,
                         music_agent_tokens=150000, music_agent_model_calls=40, music_agent_concurrency=2, music_agent_api="auto")
+DEFAULT_SETTINGS.update(music_daily_tokens=60000,music_daily_model_calls=16,music_daily_network_requests=5000,
+    music_daily_low_water=30,music_daily_refill_interval=1800,music_profile_agent_enabled=True,
+    music_profile_daily_tokens=24000,music_profile_task_tokens=12000,music_profile_daily_tasks=3,
+    music_profile_model_calls=4,music_profile_seconds=120,music_profile_interval=1800,music_profile_concurrency=1,
+    music_profile_fusion_enabled=True)
 
 
 def resolve_ai_settings(saved: dict, *, use_environment: bool = True) -> dict:
@@ -227,8 +215,6 @@ def local_ai_config(modality: Literal["text", "vision", "speech"] = "text") -> d
 
 def migrate(cursor):
     from backend.modules.music import library
-    for statement in AUTH_SCHEMA:
-        cursor.execute(statement)
     cursor.execute("SELECT * FROM account_migrations WHERE id='accounts-v1'")
     if cursor.fetchone():
         return
@@ -246,11 +232,6 @@ def migrate(cursor):
                 if path.is_file() and not path.is_symlink():
                     output.write(path, arcname=str(path.relative_to(library.DOWNLOAD_DIR)))
         cursor.execute("INSERT IGNORE INTO users (id,username,password_hash,role,must_change_password,created_at) VALUES (1,'admin','!uninitialized','super_admin',TRUE,%s)", (time.time(),))
-        for table in ("music_profile", "music_tracks", "music_favorites", "music_history", "music_playlists",
-                      "music_downloads", "music_lyrics", "music_theme"):
-            cursor.execute(f"SHOW COLUMNS FROM `{table}` LIKE 'user_id'")
-            if not cursor.fetchone():
-                cursor.execute(f"ALTER TABLE `{table}` ADD COLUMN user_id BIGINT NOT NULL DEFAULT 1, ADD INDEX {table}_owner(user_id)")
         initial = dict(DEFAULT_SETTINGS)
         ai = ROOT / "config" / "ai.json"
         if ai.is_file():
@@ -679,7 +660,7 @@ def check_path(path: str):
              (r"/api/music/playback/([^/]+)/content", "playback")]
     for pattern, kind in rules:
         match = re.fullmatch(pattern, path)
-        if match and path not in {"/api/music/lyrics/fetch", "/api/music/lyrics/online", "/api/music/imports/text", "/api/music/imports/screenshots"}:
+        if match and path not in {"/api/music/lyrics/fetch", "/api/music/lyrics/online", "/api/music/imports/text", "/api/music/imports/screenshots", "/api/music/imports/playlist"}:
             resource(kind, match[1])
             break
 

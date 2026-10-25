@@ -34,6 +34,8 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         cls.config["database"] = cls.database_name
         cls.config_patch = patch.object(database_store, "database_config", return_value=cls.config)
         cls.config_patch.start()
+        from backend.tests.support import migrate_test_database
+        migrate_test_database(cls.config)
         database_store.schema_ready = False
         cls.work = tempfile.TemporaryDirectory()
         cls.storage_root = Path(cls.work.name)
@@ -73,6 +75,39 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         self.track = {"title": "晴天", "artist": "周杰伦", "provider": "qq", "identifier": "song1",
                       "webpage_url": "https://y.qq.com/n/ryqq/songDetail/song1", "duration": 269}
 
+    def test_playlist_import_persists_restores_and_bulk_save_skips_signals(self):
+        from backend.modules.music import imports
+        from backend.modules.music.discovery import store as discovery
+        job = imports.create_job('reading')
+        try:
+            imports.update(job, input_kind='playlist', playlist={'provider': 'qq', 'playlist_id': '123', 'complete': False})
+            key = job['import_id']
+            imports.jobs.pop(key)
+            restored = imports.get_job(key)
+            self.assertEqual(restored['status'], 'failed')
+            self.assertEqual(restored['playlist']['playlist_id'], '123')
+            playlist = self.client.post('/api/library/playlists', json={'name': '导入验证'}).json()['id']
+            with patch.object(discovery, 'library_signal') as signal:
+                for _ in range(2):
+                    response = self.client.post(f'/api/library/playlists/{playlist}/tracks?bulk_import=true', json=self.track)
+                    self.assertEqual(response.status_code, 200, response.text)
+                signal.assert_not_called()
+            with library.database() as cursor:
+                cursor.execute('SELECT COUNT(*) AS n FROM music_playlist_tracks WHERE playlist_id=%s', (playlist,))
+                self.assertEqual(cursor.fetchone()['n'], 1)
+                cursor.execute("SELECT payload FROM resources WHERE kind='music_import' AND resource_key=%s", (key,))
+                import json
+                self.assertEqual(json.loads(cursor.fetchone()['payload'])['status'], 'failed')
+            marker = accounts.principal.set(accounts.Principal(2, 'other', 'user'))
+            try:
+                with self.assertRaises(Exception) as failure:
+                    imports.get_job(key)
+                self.assertEqual(failure.exception.status_code, 404)
+            finally:
+                accounts.principal.reset(marker)
+        finally:
+            imports.jobs.pop(job['import_id'], None)
+
     def test_download_playlist_destination_and_duplicate_membership(self):
         from fastapi import HTTPException
         self.assertIsNone(library.download_playlist(None, None))
@@ -92,6 +127,32 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         response = self.client.put("/api/library/favorites", json={"track": self.track, "liked": liked})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
+
+    def test_list_time_uses_the_current_lists_relationship_timestamp(self):
+        key = self.favorite()
+        self.client.post('/api/library/history', json={'track': self.track, 'preview': True}).raise_for_status()
+        playlist = self.client.post('/api/library/playlists', json={'name': '时间字段验证'}).json()['id']
+        self.client.post(f'/api/library/playlists/{playlist}/tracks', json=self.track).raise_for_status()
+        with library.database() as cursor:
+            cursor.execute('UPDATE music_favorites SET created_at=100 WHERE track_id=%s', (key,))
+            cursor.execute('UPDATE music_history SET played_at=200 WHERE track_id=%s', (key,))
+            cursor.execute('UPDATE music_playlist_tracks SET added_at=300 WHERE playlist_id=%s AND track_id=%s', (playlist, key))
+        for view, expected in [('favorites', 100), ('history', 200), ('trials', 200), ('playlist', 300), ('all', None)]:
+            with self.subTest(view=view):
+                response = self.client.get(f'/api/library/tracks?view={view}&playlist_id={playlist}')
+                response.raise_for_status()
+                self.assertEqual(response.json()['tracks'][0]['list_time'], expected)
+
+    def test_download_and_site_list_times_use_the_file_record(self):
+        path = self.directory / 'list-time.mp3'
+        path.write_bytes(b'time fixture')
+        self.addCleanup(path.unlink, missing_ok=True)
+        library.record_download(path.name, self.track)
+        with library.database() as cursor:
+            cursor.execute('UPDATE music_downloads SET created_at=400 WHERE filename=%s', (path.name,))
+        self.assertEqual(self.client.get('/api/library/tracks?view=downloads').json()['tracks'][0]['list_time'], 400)
+        row = {'liked': False, 'title': '本站曲目', 'asset_id': 'a' * 24, 'uploaded_at': 500}
+        self.assertEqual(site.serialize(row)['list_time'], 500)
 
     def test_reads_do_not_scan_server_files_and_legacy_migration_is_idempotent(self):
         with patch.object(library, 'sync_downloads', side_effect=AssertionError('read must not scan')):

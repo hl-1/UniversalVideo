@@ -5,7 +5,8 @@ import re
 import secrets
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Callable, Literal
 from urllib.parse import parse_qs, urlparse
@@ -30,11 +31,90 @@ SEARCH_PAGE_SIZE = 20
 RANGE_PATTERN = re.compile(r"^bytes=(?:\d+-\d*|-\d+)$")
 lock = threading.Lock()
 search_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="music-search")
+provider_pools = {p: ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"search-{p}") for p in ("qq", "netease", "kugou")}
+provider_slots = {p: threading.BoundedSemaphore(2) for p in provider_pools}
+search_cancel: ContextVar = ContextVar("music_search_cancel", default=None)
+search_guard = threading.Lock()
+inflight: dict[tuple, Future] = {}
+provider_health = {p: {"failures": 0, "empty": 0, "success": False, "until": 0., "next": 0.} for p in provider_pools}
+SEARCH_REQUEST_INTERVAL = 0.15
+
+
+def check_search_cancel():
+    stop = search_cancel.get()
+    if stop is not None and stop.is_set():
+        raise RuntimeError("搜索已取消")
+
+
+def search_pause(seconds):
+    stop = search_cancel.get()
+    if stop is not None:
+        if stop.wait(seconds):
+            raise RuntimeError("搜索已取消")
+    else:
+        time.sleep(seconds)
+
+
+def _search(provider: Provider, query: str, page: int = 1):
+    check_search_cancel()
+    key = (provider, query, page, search_cancel.get())
+    with search_guard:
+        future = inflight.get(key)
+        leader = future is None
+        if leader:
+            future = Future()
+            inflight[key] = future
+    if not leader:
+        while not future.done():
+            search_pause(.05)
+        return future.result()
+    acquired = False
+    try:
+        while not acquired:
+            check_search_cancel()
+            acquired = provider_slots[provider].acquire(timeout=.05)
+        check_search_cancel()
+        with search_guard:
+            health = provider_health[provider]
+            if time.monotonic() < health["until"]:
+                raise RuntimeError("搜索平台正在退避，请稍后重试")
+            delay = max(0., health["next"] - time.monotonic())
+            health["next"] = time.monotonic() + delay + SEARCH_REQUEST_INTERVAL
+        search_pause(delay)
+        try:
+            tracks = _search_impl(provider, query, page)
+        except Exception as exc:
+            with search_guard:
+                health["failures"] += 1
+                response = getattr(exc, 'response', None)
+                if health["failures"] >= 3 or getattr(response, 'status_code', None) == 429:
+                    health["until"] = time.monotonic() + 30
+            raise
+        with search_guard:
+            health["failures"] = 0
+            health["empty"] = 0 if tracks else health["empty"] + 1
+            if tracks:
+                health["success"] = True
+            elif health["success"] and health["empty"] >= 5:
+                health["until"] = time.monotonic() + 30
+                raise RuntimeError("平台连续返回空结果，暂停请求后可重试")
+        future.set_result(tracks)
+        return tracks
+    except BaseException as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        if acquired:
+            provider_slots[provider].release()
+        with search_guard:
+            inflight.pop(key, None)
+
 
 
 class Track(BaseModel):
     title: str
     artist: str = ""
+    album: str = ""
     duration: float | None = None
     thumbnail: str | None = None
     webpage_url: str
@@ -140,7 +220,7 @@ def _netease_track(item: dict) -> Track:
     fee = item.get("fee")
     access = "会员专享" if fee == 1 else "单曲或专辑付费" if fee == 4 else "权限未核实"
     return Track(title=_clean(item.get("name")), artist=" / ".join(_clean(a.get("name")) for a in artists),
-                 duration=_number(item.get("dt") or item.get("duration"), 1000), thumbnail=album.get("picUrl"),
+                 duration=_number(item.get("dt") or item.get("duration"), 1000), album=_clean(album.get("name")), thumbnail=album.get("picUrl"),
                  webpage_url=f"https://music.163.com/song?id={identifier}", provider="netease", identifier=identifier, access=access)
 
 
@@ -161,7 +241,7 @@ def _qq_track(item: dict) -> Track:
     album_mid = album.get("mid") or item.get("albummid")
     pay = item.get("pay") or {}
     return Track(title=_clean(item.get("title") or item.get("songname")), artist=" / ".join(_clean(a.get("name")) for a in item.get("singer", [])),
-                 duration=_number(item.get("interval")), thumbnail=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg" if album_mid else None,
+                 duration=_number(item.get("interval")), album=_clean(album.get("name") or item.get("albumname")), thumbnail=f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg" if album_mid else None,
                  webpage_url=f"https://y.qq.com/n/ryqq/songDetail/{identifier}", provider="qq", identifier=identifier,
                  access="会员或付费" if pay.get("pay_play") or pay.get("pay_down") else "权限未核实")
 
@@ -175,7 +255,7 @@ def _kugou_track(item: dict) -> Track:
     thumbnail = item.get("img") or item.get("Image") or item.get("album_img") or item.get("imgUrl")
     milliseconds = item.get("timelength") or (item.get("extra") or {}).get("128timelength")
     duration = _number(milliseconds, 1000) if milliseconds else _number(item.get("duration") or item.get("Duration") or item.get("timeLength"))
-    return Track(title=_clean(title), artist=_clean(artist), duration=duration,
+    return Track(title=_clean(title), artist=_clean(artist), duration=duration, album=_clean(item.get("album_name") or item.get("AlbumName")),
                  thumbnail=thumbnail.replace("{size}", "240") if thumbnail else None,
                  webpage_url=f"https://www.kugou.com/song/#hash={identifier}", provider="kugou", identifier=identifier,
                  access="会员或付费" if item.get("privilege") or item.get("Privilege") or item.get("128privilege") else "权限未核实")
@@ -211,7 +291,7 @@ def parse_url(url: str) -> Track:
         raise HTTPException(422, "平台未返回单曲信息，可能要求登录或当前接口不可用。") from exc
 
 
-def _search(provider: Provider, query: str, page: int = 1) -> list[Track]:
+def _search_impl(provider: Provider, query: str, page: int = 1) -> list[Track]:
     cache_key = (provider, query, page)
     with lock:
         cached = search_cache.get(cache_key)
@@ -219,12 +299,18 @@ def _search(provider: Provider, query: str, page: int = 1) -> list[Track]:
         return [_register(track) for track in cached[1]]
     if provider == "netease":
         data = _json("https://music.163.com/api/search/get/web", data={"s": query, "type": 1, "limit": SEARCH_PAGE_SIZE, "offset": (page - 1) * SEARCH_PAGE_SIZE}, referer="https://music.163.com/")
+        if data.get("code", 200) != 200:
+            raise RuntimeError("网易云搜索接口返回业务错误")
         tracks = [_netease_track(item) for item in data.get("result", {}).get("songs", [])]
     elif provider == "qq":
         data = _json("https://c.y.qq.com/soso/fcgi-bin/client_search_cp", params={"w": query, "p": page, "n": SEARCH_PAGE_SIZE, "format": "json", "aggr": 1, "new_json": 1})
+        if data.get("code", 0) != 0:
+            raise RuntimeError("QQ 搜索接口返回业务错误")
         tracks = [_qq_track(item) for item in data.get("data", {}).get("song", {}).get("list", [])]
     else:
         data = _json("https://songsearch.kugou.com/song_search_v2", params={"keyword": query, "page": page, "pagesize": SEARCH_PAGE_SIZE, "platform": "WebFilter", "filter": 2}, referer="https://www.kugou.com/")
+        if data.get("status", 1) != 1 or data.get("error_code", 0) != 0:
+            raise RuntimeError("酷狗搜索接口返回业务错误")
         tracks = []
         for item in data.get("data", {}).get("lists", []):
             try:
@@ -234,9 +320,10 @@ def _search(provider: Provider, query: str, page: int = 1) -> list[Track]:
     with lock:
         for key in [key for key, entry in search_cache.items() if entry[0] <= time.time()]:
             del search_cache[key]
-        if len(search_cache) >= 100:
+        if len(search_cache) >= 1500:
             del search_cache[next(iter(search_cache))]
-        search_cache[cache_key] = (time.time() + 120, tracks)
+        if tracks:
+            search_cache[cache_key] = (time.time() + 120, tracks)
     return [_register(track) for track in tracks]
 
 
@@ -246,7 +333,7 @@ def search(q: str = Query(min_length=1, max_length=100), source: Literal["all", 
     if not q.strip():
         raise HTTPException(422, "请输入歌曲名称。")
     providers = ["qq", "netease", "kugou"] if source == "all" else [source]
-    futures = [(provider, search_pool.submit(_search, provider, q.strip(), page)) for provider in providers]
+    futures = [(provider, accounts.submit(provider_pools[provider], _search, provider, q.strip(), page)) for provider in providers]
     tracks, statuses, has_more = [], [], False
     for provider, future in futures:
         try:

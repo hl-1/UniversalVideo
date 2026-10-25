@@ -19,6 +19,7 @@ function mount(t: any, fetcher: typeof fetch, cached?: any) {
   const script = compileScript(descriptor, { id: 'lyrics-loading-regression' })
   const compiled = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const stubs: Record<string, any> = {
+    '../discoveryEvents': { beginListening() {}, sampleListening() {}, pauseListening() {}, seekListening() {}, endListening() {} },
     vue: { ...vue, onMounted() {}, onBeforeUnmount: (hook: () => void) => hooks.push(hook) },
     'lucide-vue-next': {}, '../lyrics': { activeLyricIndex, audioFilename, parseImportedLrc },
     '../deviceLibrary': { hasDeviceFile: () => false, readDeviceLyrics: async () => cached, saveDeviceLyrics: async () => true,
@@ -28,6 +29,7 @@ function mount(t: any, fetcher: typeof fetch, cached?: any) {
         return response.json()
       } },
     '../../../shared/downloads': {},
+    '../../../shared/native/diagnostics': { diagnosticEvent() {} },
   }
   const module: any = {}
   new Function('require', 'exports', compiled)((id: string) => { assert.ok(id in stubs, id); return stubs[id] }, module)
@@ -38,7 +40,7 @@ function mount(t: any, fetcher: typeof fetch, cached?: any) {
   return { props, state }
 }
 
-test('progress updates do not cancel or reload lyrics for the same song', async t => {
+test('native progress snapshots do not cancel or reload lyrics for the same song', async t => {
   const requests: string[] = []
   const { props, state } = mount(t, async input => {
     requests.push(String(input))
@@ -153,4 +155,37 @@ test('an unsuccessful explicit rematch keeps the saved lyrics visible', async t 
   await settle()
   assert.deepEqual(state.lyrics.value.lines, result.lines)
   assert.match(state.error.value, /未找到新歌词/)
+})
+
+test('native snapshots retain song metadata and object identity while updating progress', async t => {
+  const previous = globalThis.window
+  const listeners = new Map<string, (event: any) => void>()
+  globalThis.window = { addEventListener: (name: string, handler: any) => listeners.set(name, handler) } as any
+  const account = { value: { id: 1 } }
+  const scope = vue.effectScope()
+  const stubs: Record<string, any> = {
+    '../discoveryEvents': { beginListening() {}, sampleListening() {}, pauseListening() {}, seekListening() {}, endListening() {} },
+    vue, '../musicLibrary': { trackKey: (track: any) => `${track.provider}:${track.identifier}` },
+    '../../../shared/api/client': {}, '../../../shared/media': {},
+    '../../../shared/native/bridge': { isAndroidApp: () => true },
+    '../../accounts/auth': { account }, '../deviceLibrary': {}, '../deviceAudio': {},
+  }
+  const source = fs.readFileSync(new URL('../src/features/music/player/musicPlayer.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const player: any = {}
+  scope.run(() => new Function('require', 'exports', compiled)((id: string) => { assert.ok(id in stubs, id); return stubs[id] }, player))
+  t.after(() => { scope.stop(); globalThis.window = previous })
+  player.currentTrack.value = { ...song, filename: '发如雪.mp3', custom_thumbnail: '/api/covers/custom' }
+  const original = player.currentTrack.value
+  for (let tick = 0; tick < 100; tick++) listeners.get('xianyue:player.state')!({ detail: {
+    uid: 1, state: 'playing', track: { ...song }, position: tick * .75, duration: 299,
+  } })
+  assert.equal(player.currentTrack.value, original)
+  assert.equal(player.currentTrack.value.filename, '发如雪.mp3')
+  assert.equal(player.elapsed.value, 74.25)
+  listeners.get('xianyue:player.state')!({ detail: { uid: 1, state: 'playing', track: { ...song, artist: '更新后的歌手' } } })
+  assert.equal(player.currentTrack.value.artist, '更新后的歌手')
+  assert.equal(player.currentTrack.value.custom_thumbnail, '/api/covers/custom')
+  listeners.get('xianyue:player.state')!({ detail: { uid: 2, state: 'playing', track: { ...song, title: '其他账号的歌曲' } } })
+  assert.equal(player.currentTrack.value.title, '发如雪')
 })

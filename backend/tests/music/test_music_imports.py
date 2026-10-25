@@ -1,6 +1,7 @@
 import io
 import json
 import threading
+import time
 import unittest
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -130,7 +131,11 @@ class MusicImportTests(unittest.TestCase):
     def test_search_keeps_rows_after_one_failure_and_reports_progress(self):
         job = self.text()
         job["status"] = "searching"
-        with patch.object(music, "search", side_effect=[self.result([self.track()]), RuntimeError("temporary")]):
+        def search(q, **kwargs):
+            if q.startswith("Hello"):
+                raise RuntimeError("temporary")
+            return self.result([self.track()])
+        with patch.object(music, "search", side_effect=search):
             imports.run_search(job, "all")
         self.assertEqual((job["status"], job["progress"]), ("finished", 100))
         self.assertEqual([row["status"] for row in job["rows"]], ["matched", "error"])
@@ -241,3 +246,46 @@ class AiModalityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParallelImportTests(unittest.TestCase):
+    def test_ten_workers_preserve_order_and_context(self):
+        rows = [{"title": str(i), "artist": ""} for i in range(25)]
+        job = {"status": "searching", "stop": threading.Event(), "rows": rows}
+        gate, guard = threading.Barrier(10), threading.Lock()
+        active = peak = 0
+        from contextvars import ContextVar
+        context = ContextVar("test_import_context", default=None)
+        marker = context.set("owner")
+        def match(row, source):
+            nonlocal active, peak
+            self.assertEqual(context.get(), "owner")
+            with guard:
+                active += 1
+                peak = max(active, peak)
+            try:
+                if int(row["title"]) < 10:
+                    gate.wait(timeout=3)
+                time.sleep((25 - int(row["title"])) / 10000)
+                return {"status": "matched", "result": row["title"]}
+            finally:
+                with guard: active -= 1
+        try:
+            with patch.object(imports, "persist"), patch.object(imports, "match_song", side_effect=match):
+                imports.run_search(job, "all")
+        finally:
+            context.reset(marker)
+        self.assertEqual(peak, 10)
+        self.assertEqual(job["status"], "finished")
+        self.assertEqual([row["result"] for row in rows], [str(i) for i in range(25)])
+
+    def test_timing_freezes_and_retry_keeps_total(self):
+        job = {"status": "searching"}
+        with patch.object(imports.time, "time", return_value=100): imports.timing_phase(job, "search")
+        with patch.object(imports.time, "time", return_value=105): imports.timing_phase(job, None)
+        imports.tick_timing(job, 200)
+        self.assertEqual(job["timing"]["total_seconds"], 5)
+        self.assertEqual(job["timing"]["round_seconds"], 5)
+        with patch.object(imports.time, "time", return_value=200): imports.timing_phase(job, "search")
+        imports.tick_timing(job, 203)
+        self.assertEqual(job["timing"]["total_seconds"], 8)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { diagnosticEvent } from '../../../shared/native/diagnostics'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, Download, FileMusic, LoaderCircle, Music2, RefreshCw } from 'lucide-vue-next'
 import { activeLyricIndex, audioFilename, parseImportedLrc, type Lyrics } from '../lyrics'
@@ -107,7 +108,7 @@ async function loadLyrics(fetchOnline = true, force = false) {
     }
   } finally { clearTimeout(timeout); if (current === generation) loading.value = false }
 }
-function refreshLyrics() { if (!loading.value && !importing.value) { void loadLyrics(true, true) } }
+function refreshLyrics() { if (!loading.value && !importing.value) { diagnosticEvent('lyrics.refresh'); void loadLyrics(true, true) } }
 async function importLyrics(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -174,7 +175,8 @@ function onKeydown(event: KeyboardEvent) {
   else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-// Watch individual metadata values so replacing a track object does not reload the same lyrics.
+// Watch individual values: Android sends a fresh track object with every progress snapshot.
+// A getter returning a fresh array would treat each of those snapshots as a song change.
 watch([() => filename.value, () => props.track.title, () => props.track.artist, () => props.track.album,
   () => props.track.provider, () => props.track.identifier, () => props.track.webpage_url, () => props.lyricsEndpoint, () => props.resultVersion], () => {
   lyrics.value = { lines: [], plain: '', source: '' }
@@ -186,6 +188,7 @@ watch([() => filename.value, () => props.track.title, () => props.track.artist, 
 watch(activeIndex, () => { void followCurrentLine() })
 watch(cover, () => { coverFailed.value = false })
 onMounted(() => {
+  diagnosticEvent('lyrics.open')
   previousFocus = document.activeElement as HTMLElement | null
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
@@ -193,6 +196,7 @@ onMounted(() => {
   dialog.value?.querySelector<HTMLButtonElement>('button')?.focus()
 })
 onBeforeUnmount(() => {
+  diagnosticEvent('lyrics.close')
   generation++
   request?.abort()
   document.removeEventListener('keydown', onKeydown, true)

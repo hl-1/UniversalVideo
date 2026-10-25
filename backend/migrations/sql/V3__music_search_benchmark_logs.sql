@@ -1,0 +1,21 @@
+CREATE TABLE music_search_benchmark_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    benchmark_id CHAR(32) NOT NULL,
+    run_label VARCHAR(64) NOT NULL,
+    record_type VARCHAR(16) NOT NULL,
+    sequence_no INT UNSIGNED NOT NULL,
+    song_concurrency SMALLINT UNSIGNED NOT NULL,
+    provider_concurrency SMALLINT UNSIGNED NULL,
+    provider VARCHAR(12) NULL,
+    query_hash CHAR(64) NULL,
+    queue_ms DOUBLE NULL,
+    network_ms DOUBLE NULL,
+    elapsed_ms DOUBLE NULL,
+    status VARCHAR(24) NOT NULL,
+    payload JSON NOT NULL,
+    recorded_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY benchmark_record (benchmark_id, run_label, record_type, sequence_no),
+    KEY benchmark_run (benchmark_id, run_label),
+    KEY provider_status (provider, status, recorded_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

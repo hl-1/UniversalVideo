@@ -20,45 +20,6 @@ TABLES = {"video_parse": ("video_parse_records", "record_id", "snapshot"),
 KINDS = {*TABLES, "video_search"}
 BACKUP_DIR = PROJECT_ROOT / ".run" / "video-table-backups"
 MIGRATION = "video-tables-v1"
-SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS video_recent_links (
-        user_id BIGINT NOT NULL, url_hash CHAR(64) NOT NULL, link_id VARCHAR(64) NOT NULL,
-        url TEXT NOT NULL, submitted_at DOUBLE NOT NULL,
-        PRIMARY KEY(user_id,url_hash), INDEX video_recent_time(user_id,submitted_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS video_parse_records (
-        record_id VARCHAR(64) PRIMARY KEY, user_id BIGINT NOT NULL,
-        url TEXT NOT NULL, webpage_url TEXT, title TEXT, platform VARCHAR(100) NOT NULL,
-        status VARCHAR(24) NOT NULL, worker_id VARCHAR(255), snapshot JSON NOT NULL,
-        created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL, deleted BOOLEAN NOT NULL DEFAULT FALSE,
-        INDEX video_parse_owner_time(user_id,deleted,created_at,record_id),
-        INDEX video_parse_platform(user_id,deleted,platform,created_at),
-        INDEX video_parse_status(user_id,deleted,status,created_at), INDEX video_parse_worker(deleted,status,updated_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS video_summaries (
-        task_id VARCHAR(64) PRIMARY KEY, user_id BIGINT NOT NULL, parse_record_id VARCHAR(64),
-        webpage_url TEXT, status VARCHAR(24) NOT NULL, worker_id VARCHAR(255), content JSON NOT NULL,
-        created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL, deleted BOOLEAN NOT NULL DEFAULT FALSE,
-        INDEX video_summary_record(user_id,parse_record_id,deleted,created_at),
-        INDEX video_summary_worker(deleted,status,updated_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS video_mind_maps (
-        task_id VARCHAR(64) PRIMARY KEY, user_id BIGINT NOT NULL, parse_record_id VARCHAR(64),
-        summary_task_id VARCHAR(64), version INT UNSIGNED NOT NULL, status VARCHAR(24) NOT NULL,
-        worker_id VARCHAR(255), content JSON NOT NULL, created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT FALSE, UNIQUE KEY video_map_version(summary_task_id,version),
-        INDEX video_map_record(user_id,parse_record_id,deleted,created_at),
-        INDEX video_map_summary(user_id,summary_task_id,deleted,status,created_at),
-        INDEX video_map_worker(deleted,status,updated_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS video_view_states (
-        user_id BIGINT NOT NULL, record_id VARCHAR(64) NOT NULL, view_key VARCHAR(255) NOT NULL,
-        selected_tab VARCHAR(24) NOT NULL, playback_time DOUBLE NOT NULL, view_state JSON NOT NULL,
-        created_at DOUBLE NOT NULL, updated_at DOUBLE NOT NULL, deleted BOOLEAN NOT NULL DEFAULT FALSE,
-        PRIMARY KEY(user_id,record_id), UNIQUE KEY video_view_key(view_key),
-        INDEX video_view_recent(user_id,deleted,updated_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-)
 
 
 def dumps(value) -> str:
@@ -170,8 +131,6 @@ def tombstone(cursor, kind: str, key: str):
 
 
 def migrate(cursor):
-    for statement in SCHEMA:
-        cursor.execute(statement)
     cursor.execute("SELECT DATABASE() AS db")
     lock = "video-migrate:" + hashlib.sha256(cursor.fetchone()["db"].encode()).hexdigest()[:40]
     cursor.execute("SELECT GET_LOCK(%s,30) AS acquired", (lock,))

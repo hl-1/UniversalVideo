@@ -42,7 +42,7 @@ watch(() => account.value?.id, uid => {
     const stored = JSON.parse(raw)
     const tracks: MusicTrack[] = Array.isArray(stored?.tracks) ? stored.tracks.filter(validTrack) : []
     confirmations = stored?.version === 2 ? tracks.filter(validConfirmation) : []
-    savedMusicHistory.value = confirmations.map(track => ({ ...track, saved_to_device: true, save_unverified: false }))
+    savedMusicHistory.value = confirmations.map(track => ({ ...track, list_time: track.file_confirmation.saved_at / 1000, saved_to_device: true, save_unverified: false }))
     saved.value = new Set(confirmations.map(trackKey))
     const legacyKeys = Array.isArray(stored) ? stored : [...(Array.isArray(stored?.keys) ? stored.keys : []), ...(Array.isArray(stored?.unverified_keys) ? stored.unverified_keys : [])]
     const legacyTracks = [...tracks.filter(track => !saved.value.has(trackKey(track))), ...(Array.isArray(stored?.unverified_tracks) ? stored.unverified_tracks.filter(validTrack) : [])]
@@ -72,7 +72,7 @@ export function rememberMusicDownloads(tracks: MusicTrack[], uid: number | undef
     source: 'filesystem', artifact: 'individual_file', status: 'completed', bytes: receipt.bytes, saved_at: Date.now(), download_id: receipt.download_id } }
   confirmations = [...new Map([...confirmations, entry].map(track => [trackKey(track), track])).values()]
   saved.value = new Set(confirmations.map(trackKey))
-  savedMusicHistory.value = confirmations
+  savedMusicHistory.value = confirmations.map(track => ({ ...track, list_time: track.file_confirmation.saved_at / 1000 }))
   unverified.value.delete(key)
   unverifiedMusicHistory.value = unverifiedMusicHistory.value.filter(track => trackKey(track) !== key)
   unverifiedMusicCount.value = unverified.value.size

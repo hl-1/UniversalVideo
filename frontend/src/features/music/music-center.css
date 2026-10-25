@@ -102,6 +102,15 @@ main.mc-content { width: 100%; max-width: 1380px; margin: 0 auto; padding: 28px 
 .mc-empty.compact { min-height: 90px; }
 .mc-loading { display: flex; align-items: center; justify-content: center; min-height: 140px; color: #109b6d; }
 .mc-track-table { width: 100%; }
+.mc-track-table-timed .mc-track-table-head, .mc-track-table-timed .mc-track-row { grid-template-columns: 34px minmax(0, 1fr) 132px 100px 50px 74px; }
+.mc-time-sort { padding: 6px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.mc-time-sort:disabled { cursor: default; opacity: .6; }
+.mc-track-title .mc-mobile-list-time { display: none; }
+.mc-list-time { white-space: nowrap; }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .mc-track-table-timed .mc-track-table-head, .mc-track-table-timed .mc-track-row { grid-template-columns: 26px minmax(0, 1fr) 112px 75px 40px 64px; gap: 10px; }
+  .mc-track-table-timed .mc-list-time { font-size: 10px; }
+}
 .mc-track-table-head, .mc-track-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 100px 50px 74px; align-items: center; gap: 16px; }
 .mc-track-table-head { min-height: 32px; padding: 0 12px; color: #949c92; background: #f2f5ef; font-size: 11px; border-radius: 4px; }
 .mc-track-row { min-height: 70px; padding: 10px 12px; border-bottom: 1px solid #edf0e9; }
@@ -182,7 +191,17 @@ main.mc-content { width: 100%; max-width: 1380px; margin: 0 auto; padding: 28px 
 .player-volume-popup { position: fixed; z-index: 56; right: 18px; bottom: 145px; display: flex; align-items: center; gap: 8px; width: min(280px, calc(100vw - 32px)); padding: 10px; border: 1px solid #dfe7d8; border-radius: 6px; background: #fff; box-shadow: 0 6px 25px #20321520; }
 .player-volume-popup input { width: 100%; min-width: 0; accent-color: #109b6d; }
 .player-volume-popup > span { color: #87937c; font-size: 11px; }
-.player-queue { position: fixed; z-index: 55; right: 18px; bottom: 112px; width: min(390px, calc(100vw - 32px)); max-height: min(570px, calc(100dvh - 145px)); overflow: hidden; border: 1px solid #e2e9dc; border-radius: 7px; color: #58614d; background: #fff; box-shadow: 0 10px 45px #20321520; }
+.player-queue { position: fixed; z-index: 55; right: 18px; bottom: 112px; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); max-height: min(570px, calc(100dvh - 145px)); overflow: hidden; border: 1px solid #e2e9dc; border-radius: 7px; color: #58614d; background: #fff; box-shadow: 0 10px 45px #20321520; }
+.player-queue > .music-list-controls { flex-shrink: 0; margin: 10px; }
+@media (min-width: 761px) {
+  .player-queue > .music-list-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .player-queue .ml-search { grid-column: 1 / -1; }
+  .player-queue .ml-count { grid-column: 1; grid-row: 4; }
+  .player-queue .ml-reset { grid-column: 2; grid-row: 4; justify-self: end; }
+  .player-queue .music-list-controls select { flex: 1; width: 0; }
+}
+.player-queue > .queue-heading { flex-shrink: 0; }
+.player-queue > ol { min-height: 0; }
 .queue-heading { display: flex; align-items: center; gap: 6px; padding: 14px 15px; border-bottom: 1px solid #edf1e7; }
 .queue-heading h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; }
 .queue-heading h2 span { margin-left: 6px; color: #99a28e; font-size: 11px; }

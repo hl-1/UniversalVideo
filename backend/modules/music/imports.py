@@ -8,7 +8,7 @@ import secrets
 import threading
 import time
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from difflib import SequenceMatcher
 from typing import Literal
 
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from backend.modules.accounts import service as accounts
 from backend.infrastructure import ai
 from backend.modules.music import sources as music
+from backend.modules.music import playlists
 
 
 router = APIRouter(prefix="/api/music/imports", tags=["music-imports"])
@@ -31,8 +32,10 @@ MAX_IMAGES = 8
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_TILES = 32
-SEARCH_INTERVAL = 0.4
-ACTIVE = {"recognizing", "searching"}
+SEARCH_INTERVAL = 0.4  # Legacy baseline; concurrent scheduling does not sleep per song.
+SONG_CONCURRENCY = 10
+search_workers = ThreadPoolExecutor(max_workers=20, thread_name_prefix="import-song")
+ACTIVE = {"recognizing", "reading", "searching"}
 
 
 class SongInput(BaseModel):
@@ -40,6 +43,7 @@ class SongInput(BaseModel):
     artist: str = Field(default="", max_length=100)
     original: str = Field(default="", max_length=300)
     uncertain: bool = False
+    row_id: str | None = Field(default=None, max_length=32)
 
     @field_validator("title", "artist", "original")
     @classmethod
@@ -59,8 +63,18 @@ class TextImport(BaseModel):
     order: Literal["title_artist", "artist_title"] = "title_artist"
 
 
+class PlaylistImport(BaseModel):
+    share_text: str = Field(min_length=1, max_length=4096)
+    source: Literal["all", "qq", "netease", "kugou"] = "all"
+    auto_search: bool = True
+    start: int = Field(default=1, ge=1, le=100000)
+    limit: int = Field(default=500, ge=1, le=500)
+    explicit_range: bool = False
+
+
 class SearchImport(BaseModel):
-    songs: list[SongInput] = Field(min_length=1, max_length=MAX_ROWS)
+    songs: list[SongInput] | None = Field(default=None, min_length=1, max_length=500)
+    retry_failed: bool = False
     source: Literal["all", "qq", "netease", "kugou"] = "all"
 
 
@@ -70,7 +84,7 @@ class SongSelection(BaseModel):
 
 
 class ImportDownload(BaseModel):
-    selections: list[SongSelection] = Field(min_length=1, max_length=MAX_ROWS)
+    selections: list[SongSelection] = Field(min_length=1, max_length=500)
     audio_format: Literal["m4a", "mp3"] = "m4a"
 
 
@@ -180,7 +194,33 @@ def recognize(tiles: list[str], config: dict) -> list[SongInput]:
 
 
 def snapshot(job: dict) -> dict:
-    return json.loads(json.dumps({key: value for key, value in job.items() if key not in {"stop", "user_id", "updated_at"}}))
+    with lock:
+        if job.get("timing") and job["status"] in ACTIVE:
+            tick_timing(job)
+        return json.loads(json.dumps({key: value for key, value in job.items() if key not in {"stop", "user_id", "updated_at"}}))
+
+
+def tick_timing(job, now=None):
+    timing = job.get("timing")
+    if not timing or timing.get("active_since") is None:
+        return
+    now = time.time() if now is None else now
+    delta = max(0, now - timing["active_since"])
+    phase = timing["phase"]
+    timing[phase + "_seconds"] = timing.get(phase + "_seconds", 0) + delta
+    timing["total_seconds"] = timing.get("total_seconds", 0) + delta
+    timing["active_since"] = now
+    if phase == "search":
+        timing["round_seconds"] = timing.get("search_seconds", 0) - timing.get("round_search_base", 0)
+
+
+def timing_phase(job, phase):
+    if phase is None and not job.get("timing"):
+        return
+    tick_timing(job)
+    timing = job.setdefault("timing", {"total_seconds": 0})
+    timing["phase"] = phase
+    timing["active_since"] = time.time() if phase else None
 
 
 def persist(job: dict) -> None:
@@ -200,6 +240,8 @@ def create_job(status: str, songs: list[SongInput] | None = None, duplicates: in
         job = {"import_id": secrets.token_hex(6), "user_id": uid, "status": status, "progress": 0,
                "rows": make_rows(songs or []), "duplicates": duplicates, "warnings": [], "error": None,
                "stop": threading.Event(), "updated_at": time.time()}
+        if status in ACTIVE:
+            timing_phase(job, "queue")
         persist(job)
         jobs[job["import_id"]] = job
         return job
@@ -217,10 +259,15 @@ def get_job(import_id: str) -> dict:
         if job and accounts.principal.get() and job["user_id"] != accounts.owner_id():
             raise HTTPException(404, "歌曲导入任务不存在。")
         if not job and stored:
+            if stored["user_id"] != accounts.owner_id():
+                raise HTTPException(404, "歌曲导入任务不存在。")
             job = {**json.loads(stored["payload"]), "user_id": stored["user_id"],
                    "stop": threading.Event(), "updated_at": time.time()}
             if job["status"] in ACTIVE:
-                job.update(status="failed", error="服务重启，导入任务已中断，请重新处理。")
+                if job.get("timing"):
+                    job["timing"].update(active_since=None, interrupted=True)
+                job.update(status="failed", error="服务重启，导入任务已中断，请重试未完成项或重新读取歌单。")
+                persist(job)
             jobs[import_id] = job
         if not job:
             raise HTTPException(404, "歌曲导入任务不存在。")
@@ -231,6 +278,8 @@ def update(job: dict, *, expected_stop: threading.Event | None = None, **changes
     with lock:
         if job["stop"].is_set() or expected_stop is not None and job["stop"] is not expected_stop:
             return False
+        if changes.get("status") in {"finished", "failed", "cancelled", "draft"}:
+            timing_phase(job, None)
         job.update(changes, updated_at=time.time())
         persist(job)
         return True
@@ -240,6 +289,10 @@ def run_recognition(job: dict, images: list[list[str]], config: dict, stop: thre
     songs, warnings = [], []
     stop = stop if stop is not None else job["stop"]
     try:
+        with lock:
+            if stop.is_set() or job["stop"] is not stop:
+                return
+            timing_phase(job, "recognize")
         for index, tiles in enumerate(images):
             if stop.is_set():
                 return
@@ -268,13 +321,28 @@ def versions(title: str) -> set[str]:
 
 def match_song(song: dict, source: str) -> dict:
     result = music.search(q=f"{song['title']} {song['artist']}".strip()[:100], source=source)
-    candidates = []
-    for track in result["tracks"]:
+    origin = song.get("origin") or {}
+    original_track = origin.get("track") or {}
+    origin_unchanged = normalized(song["title"]) == normalized(original_track.get("title", "")) and normalized(song["artist"]) == normalized(original_track.get("artist", ""))
+    tracks = list(result["tracks"])
+    if origin_unchanged and source in {"all", original_track.get("provider")}:
+        tracks.insert(0, music.Track.model_validate(original_track))
+    candidates, seen = [], set()
+    for track in tracks:
+        key = (track.provider, track.identifier)
+        if key in seen:
+            continue
+        seen.add(key)
         same_version = versions(song["title"]) == versions(track.title)
         title_score = SequenceMatcher(None, normalized(song["title"]), normalized(track.title)).ratio()
         artist_score = SequenceMatcher(None, normalized(song["artist"]), normalized(track.artist)).ratio() if song["artist"] else 0
         exact = bool(song["artist"]) and normalized(song["title"]) == normalized(track.title) and normalized(song["artist"]) == normalized(track.artist) and same_version
+        same_id = origin_unchanged and track.provider == original_track.get("provider") and track.identifier == original_track.get("identifier")
+        duration_conflict = bool(origin_unchanged and original_track.get("duration") and track.duration and abs(original_track["duration"] - track.duration) > 5)
+        album_conflict = bool(origin_unchanged and original_track.get("album") and track.album and normalized(original_track["album"]) != normalized(track.album))
+        exact = same_id or (exact and not duration_conflict and not album_conflict)
         score = title_score * 0.7 + artist_score * 0.3 - (0 if same_version else 0.4)
+        score += 1 if same_id else (-0.2 if duration_conflict else 0)
         if title_score < 0.45:
             continue
         candidate = track.model_dump(exclude={"token"})
@@ -284,7 +352,7 @@ def match_song(song: dict, source: str) -> dict:
     candidates = candidates[:6]
     selected = candidates[0] if candidates and candidates[0]["exact"] and not song["uncertain"] else None
     exact = [item for item in candidates if item["exact"]]
-    if len(exact) > 1 and (any(not item["duration"] for item in exact) or max(item["duration"] for item in exact) - min(item["duration"] for item in exact) > 5):
+    if not (selected and origin_unchanged and selected["provider"] == original_track.get("provider") and selected["identifier"] == original_track.get("identifier")) and len(exact) > 1 and (any(not item["duration"] for item in exact) or max(item["duration"] for item in exact) - min(item["duration"] for item in exact) > 5):
         selected = None
     unavailable = all(not item.get("available", True) for item in result["sources"])
     return {"candidates": candidates, "selected_id": selected["candidate_id"] if selected else None,
@@ -295,24 +363,112 @@ def match_song(song: dict, source: str) -> dict:
 def run_search(job: dict, source: str, stop: threading.Event | None = None, rows: list[dict] | None = None) -> None:
     stop = stop if stop is not None else job["stop"]
     rows = rows if rows is not None else job["rows"]
+    pending, next_index, completed = {}, 0, 0
+    def work(row):
+        marker = music.search_cancel.set(stop)
+        try:
+            if stop.is_set():
+                return None
+            try:
+                return match_song(row, source)
+            except Exception:
+                return {"status": "error", "error": "歌曲搜索失败，可稍后重试。", "candidates": [], "selected_id": None, "sources": []}
+        finally:
+            music.search_cancel.reset(marker)
     try:
-        for index, row in enumerate(rows):
+        with lock:
+            if stop.is_set() or job["stop"] is not stop:
+                return
+            timing_phase(job, "search")
+            job["timing"].update(round_seconds=0, round_started_at=time.time(), round_search_base=job["timing"].get("search_seconds", 0))
+            persist(job)
+        last_saved = time.monotonic()
+        while completed < len(rows):
             if stop.is_set():
                 return
-            try:
-                result = match_song(row, source)
-            except Exception:
-                result = {"status": "error", "error": "歌曲搜索失败，可稍后重试。", "candidates": [], "selected_id": None, "sources": []}
-            with lock:
-                if stop.is_set() or job["stop"] is not stop:
-                    return
-                row.update(result)
-                update(job, expected_stop=stop, progress=round((index + 1) / len(rows) * 100))
-            if index < len(rows) - 1 and stop.wait(SEARCH_INTERVAL):
-                return
-        update(job, expected_stop=stop, status="finished", progress=100)
+            while next_index < len(rows) and len(pending) < SONG_CONCURRENCY:
+                row = rows[next_index]
+                pending[accounts.submit(search_workers, work, row)] = row
+                next_index += 1
+            done, _ = wait(pending, timeout=.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                row = pending.pop(future)
+                result = future.result()
+                with lock:
+                    if stop.is_set() or job["stop"] is not stop:
+                        return
+                    if result is not None:
+                        row.update(result)
+                    completed += 1
+                    job.update(progress=round(completed / len(rows) * 100), searched=completed, search_total=len(rows), updated_at=time.time())
+                    tick_timing(job)
+                    job["timing"]["round_seconds"] = job["timing"].get("search_seconds", 0) - job["timing"]["round_search_base"]
+                    if time.monotonic() - last_saved >= .5:
+                        persist(job)
+                        last_saved = time.monotonic()
+        update(job, expected_stop=stop, status="finished", progress=100, partial=any(row["status"] in {"error", "not_found", "draft"} for row in job["rows"]) or bool(job.get("playlist") and not job["playlist"].get("complete")))
     except Exception:
         update(job, expected_stop=stop, status="failed", error="批量搜索中断，请重试。")
+    finally:
+        for future in pending:
+            future.cancel()
+
+
+def playlist_rows(tracks):
+    rows, seen = [], set()
+    for track in tracks:
+        key = (track["provider"], track["identifier"])
+        if key in seen:
+            continue
+        seen.add(key)
+        song = SongInput(title=track["title"][:100], artist=track["artist"][:100], original=f"{track['title']} - {track['artist']}"[:300],
+                         uncertain=len(track["title"]) > 100 or len(track["artist"]) > 100)
+        row = make_rows([song])[0]
+        row["origin"] = {"position": track["position"], "album": track.get("album", ""), "track": track}
+        rows.append(row)
+    return rows, len(tracks) - len(rows)
+
+
+def run_playlist(job, payload, stop):
+    try:
+        if stop.is_set():
+            return
+        with lock:
+            if job["stop"] is not stop:
+                return
+            timing_phase(job, "read")
+        provider, identifier = playlists.resolve(payload.share_text, stop)
+        def progress(metadata, tracks, warnings):
+            rows, duplicates = playlist_rows(tracks)
+            # Reuse row IDs on subsequent read checkpoints.
+            previous = {r["origin"]["track"]["identifier"]: r["row_id"] for r in job["rows"] if r.get("origin")}
+            for row in rows:
+                row["row_id"] = previous.get(row["origin"]["track"]["identifier"], row["row_id"])
+            total = min(payload.limit, max(0, metadata["total"] - payload.start + 1)) if metadata["total"] is not None else None
+            update(job, expected_stop=stop, playlist=metadata, rows=rows, duplicates=duplicates,
+                   warnings=warnings, progress=min(99, round(len(tracks) / total * 100)) if total else 0)
+        data = playlists.read(provider, identifier, stop, start=payload.start, limit=payload.limit,
+                              explicit_range=payload.explicit_range, progress=progress)
+        if not update(job, expected_stop=stop, playlist=data["playlist"], warnings=data["warnings"],
+                      status="searching" if payload.auto_search and job["rows"] else "draft", progress=0,
+                      search_total=len(job["rows"]), searched=0):
+            return
+        if payload.auto_search and job["rows"]:
+            run_search(job, payload.source, stop, job["rows"])
+    except playlists.RangeRequired as exc:
+        update(job, expected_stop=stop, status="draft", playlist=exc.metadata, range_required=True, error=str(exc))
+    except Exception as exc:
+        message = exc.detail if isinstance(exc, HTTPException) else str(exc) if isinstance(exc, playlists.PlaylistError) else "歌单读取失败，请稍后重试或使用截图、文本导入。"
+        update(job, expected_stop=stop, status="failed", error=message)
+
+
+@router.post("/playlist")
+def import_playlist(payload: PlaylistImport):
+    job = create_job("reading")
+    update(job, input_kind="playlist", schema_version=2, source=payload.source, searched=0, search_total=0)
+    response = snapshot(job)
+    accounts.submit(executor, run_playlist, job, payload, job["stop"])
+    return response
 
 
 @router.post("/text")
@@ -367,12 +523,40 @@ def search_import(import_id: str, payload: SearchImport):
             raise HTTPException(409, "已有歌曲导入任务正在处理。")
         if sum(other["status"] in ACTIVE for other in jobs.values()) >= 10:
             raise HTTPException(429, "歌曲导入任务较多，请稍后重试。")
-        songs, duplicates = unique_songs(payload.songs)
+        if payload.retry_failed:
+            if payload.songs is not None:
+                raise HTTPException(422, "重试未完成项时不要同时提交新的名单。")
+            search_rows = [row for row in job["rows"] if row["status"] in {"error", "not_found", "draft"}]
+            if not search_rows:
+                raise HTTPException(422, "没有需要重试的歌曲。")
+        else:
+            if not payload.songs:
+                raise HTTPException(422, "请提供歌曲名单。")
+            if job.get("input_kind") != "playlist":
+                songs, duplicates = unique_songs(payload.songs)
+                rows = make_rows(songs)
+            else:
+                previous = {row["row_id"]: row for row in job["rows"]}
+                rows, duplicates, seen = [], 0, set()
+                for song in payload.songs:
+                    if song.row_id and song.row_id in seen:
+                        raise HTTPException(422, "歌曲行不能重复提交。")
+                    seen.add(song.row_id)
+                    row = make_rows([song])[0]
+                    original = previous.get(song.row_id)
+                    if original:
+                        row["row_id"] = original["row_id"]
+                        if original.get("origin"):
+                            row["origin"] = original["origin"]
+                    rows.append(row)
+            job["rows"] = rows
+            job["duplicates"] += duplicates
+            search_rows = rows
         job["stop"] = threading.Event()
-        update(job, rows=make_rows(songs), duplicates=job["duplicates"] + duplicates,
-               status="searching", progress=0, error=None)
+        timing_phase(job, "queue")
+        update(job, status="searching", progress=0, error=None, searched=0, search_total=len(search_rows), source=payload.source)
         response = snapshot(job)
-        accounts.submit(executor, run_search, job, payload.source, job["stop"], job["rows"])
+        accounts.submit(executor, run_search, job, payload.source, job["stop"], search_rows)
         return response
 
 
@@ -382,6 +566,7 @@ def cancel_import(import_id: str):
         job = get_job(import_id)
         if job["status"] in ACTIVE:
             job["stop"].set()
+            timing_phase(job, None)
             job.update(status="cancelled", updated_at=time.time())
             persist(job)
         return snapshot(job)
@@ -411,6 +596,7 @@ def cancel_user_imports(uid: int, key: str | None = None):
         for job in jobs.values():
             if job["user_id"] == uid and (key is None or key == job["import_id"]) and job["status"] in ACTIVE:
                 job["stop"].set()
+                timing_phase(job, None)
                 job.update(status="cancelled", updated_at=time.time())
                 persist(job)
 accounts.cancel_callbacks.append(cancel_user_imports)

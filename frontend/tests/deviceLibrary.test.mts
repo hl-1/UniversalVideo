@@ -35,6 +35,7 @@ function setup(t: any, storage = storageFixture()) {
     vue: { ref: (value: any) => ({ value }), watch: (_: any, callback: any) => { changed = callback } },
     '../accounts/auth': { account },
     '../../shared/device': { currentDeviceId: () => device, deviceContext: async () => ({ device_id: device, client_kind: 'web' }) },
+    '../../shared/native/bridge': { isAndroidApp: () => false },
     './musicLibrary': { trackKey: (track: any) => `${track.provider}:${track.identifier}`, trackPayload: (track: any) => ({ ...track }) },
     './deviceAudio': { inspectDeviceAudio: (file: File) => inspection.run(file) },
   }

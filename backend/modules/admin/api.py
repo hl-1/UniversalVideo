@@ -34,6 +34,21 @@ class PasswordReset(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
+    music_daily_enabled: bool = True
+    music_daily_tokens: int = Field(default=60000,ge=2000,le=60000)
+    music_daily_model_calls: int = Field(default=16,ge=1,le=16)
+    music_daily_network_requests: int = Field(default=5000,ge=1,le=5000)
+    music_daily_low_water: int = Field(default=30,ge=1,le=100)
+    music_daily_refill_interval: int = Field(default=1800,ge=1800,le=86400)
+    music_profile_agent_enabled: bool = True
+    music_profile_fusion_enabled: bool = True
+    music_profile_daily_tokens: int = Field(default=24000,ge=1000,le=24000)
+    music_profile_task_tokens: int = Field(default=12000,ge=1000,le=12000)
+    music_profile_daily_tasks: int = Field(default=3,ge=1,le=3)
+    music_profile_model_calls: int = Field(default=4,ge=1,le=4)
+    music_profile_seconds: int = Field(default=120,ge=10,le=120)
+    music_profile_interval: int = Field(default=1800,ge=1800,le=86400)
+    music_profile_concurrency: int = Field(default=1,ge=1,le=8)
     music_agent_enabled: bool = False
     music_agent_network_enabled: bool = True
     music_agent_sources: list[Literal["netease", "qq", "kugou"]] = Field(default_factory=lambda: ["netease", "qq", "kugou"])
@@ -46,7 +61,7 @@ class SettingsUpdate(BaseModel):
     music_agent_tokens: int = Field(default=150000, ge=2000, le=150000)
     music_agent_concurrency: int = Field(default=2, ge=1, le=8)
     music_agent_api: Literal["auto", "chat", "responses"] = "auto"
-    registration_enabled: bool
+    registration_enabled: bool = True
     music_enabled: bool
     video_enabled: bool
     summary_enabled: bool

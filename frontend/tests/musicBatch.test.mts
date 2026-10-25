@@ -12,10 +12,17 @@ function setup(t: any, directory = true) {
   const events: string[] = [], saved: number[] = [], handedOff: number[] = [], plans: any[] = []
   const failedPrepare = new Set<number>(), failedSave = new Set<number>(), timedOut = new Set<number>()
   const names = new Set(['song 1.mp3'])
-  const hooks = { onPrepare: (_: any) => {}, active: 0, maxActive: 0, sameName: false }
+  const hooks = { onPrepare: (_: any) => {}, active: 0, maxActive: 0, sameName: false, android: false, nativeStates: [] as any[], cached: [] as number[] }
   const account = { value: { id: 1 } }
   const watchers: Array<() => void> = []
   const stubs: Record<string, any> = {
+    '../../shared/native/bridge': { isAndroidApp: () => hooks.android, nativeCall: async (action: string, payload: any) => {
+      assert.equal(hooks.android, true, 'browser batches must not invoke Android')
+      if (action === 'download.enqueueBatch') return { items: payload.tracks.map((row: any, index: number) => ({ id: row.identifier, index })) }
+      if (action === 'download.states') return { items: hooks.nativeStates }
+      assert.fail(`unexpected native action: ${action}`)
+    } },
+    './deviceLibrary': { refreshDeviceLibrary: async () => { events.push('refresh-device') }, cacheDeviceAssets: async (row: any) => { hooks.cached.push(Number(row.identifier)) } },
     vue: { ref: (value: any) => ({ value }), watch: (_: any, callback: () => void) => watchers.push(callback) },
     '../accounts/auth': { account },
     './musicLibrary': { trackKey: (row: any) => `qq:${row.identifier}`, trackPayload: (row: any) => row },
@@ -106,6 +113,16 @@ test('explicit directory batch chooses once before requests, keeps successes and
   await fixture.batch.retryDeviceBatch()
   assert.equal(fixture.batch.deviceBatch.value.total, 1)
   assert.deepEqual(fixture.plans.map(idOf), [1, 2, 3, 2])
+})
+
+test('native batch completion caches companions only for successfully saved songs', async t => {
+  const fixture = setup(t)
+  fixture.hooks.android = true
+  fixture.hooks.nativeStates = [1, 2, 3].map(id => ({ id: String(id), status: id === 2 ? 'failed' : 'completed', bytes: 10, total: 10, error: id === 2 ? 'failed audio' : '', plan: { download_id: `id-${id}` } }))
+  await fixture.batch.createMusicBatch([track(1), track(2), track(3)], 'mp3', undefined, { local_mode: 'files' })
+  assert.equal(fixture.batch.deviceBatch.value.finished, 2)
+  assert.deepEqual(fixture.hooks.cached, [1, 3])
+  assert.ok(fixture.events.includes('refresh-device'))
 })
 
 test('unsupported directory API validates and hands off separate songs, continuing after a failure', async t => {

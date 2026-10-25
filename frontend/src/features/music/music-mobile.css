@@ -86,7 +86,7 @@
   .mc-text-button { min-height: 44px; font-size: 12px !important; }
   .mc-home-tracks { grid-template-columns: 1fr; gap: 0; }
   .mc-home-track { min-height: 68px; border-bottom: 1px solid var(--music-line, #e4e9df); }
-  .mc-home-track:nth-child(n+4) { display: none; }
+  .mc-home-track:not(.daily-home-track):nth-child(n+4) { display: none; }
   .mc-home-track > button:first-child { min-height: 64px; gap: 12px; }
   .mc-home-track .track-art { width: 44px; height: 44px; border-radius: 9px; }
   .mc-home-track strong { font-size: 14px; }
@@ -102,6 +102,9 @@
   .mc-track-table-head, .mc-track-row { grid-template-columns: 32px minmax(0, 1fr) 88px; gap: 6px; padding-left: 0; padding-right: 0; }
   .mc-track-table-head span:nth-child(3), .mc-track-table-head span:nth-child(4), .mc-track-source, .mc-track-row > time { display: none; }
   .mc-track-row { min-height: 68px; }
+  .mc-track-table-timed .mc-track-table-head, .mc-track-table-timed .mc-track-row { grid-template-columns: 32px minmax(0, 1fr) 88px; }
+  .mc-track-table-timed .mc-track-table-head span:nth-child(5) { display: none; }
+  .mc-track-title .mc-mobile-list-time { display: block; }
   .mc-track-title { gap: 9px; }
   .track-number-play > svg { display: block; }
   .track-number-play > span { display: none; }
@@ -144,3 +147,6 @@
   .mc-track-title .track-art { display: none; }
   .lyrics-player-controls { gap: 8px; }
 }
+
+/* The enclosing search field already supplies the keyboard focus indicator. */
+.music-center .mc-search-field input:focus-visible { outline: none; box-shadow: none; }

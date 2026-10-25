@@ -15,7 +15,7 @@ services:
     stop_grace_period: 60s
     security_opt:
       - no-new-privileges:true
-    volumes:
+    volumes: &application-data
       - type: bind
         source: ../downloads
         target: /app/downloads
@@ -52,6 +52,23 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  migrate:
+    image: videodream-flyway:13.11.1
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.flyway
+      args:
+        JAVA_IMAGE: ${VIDEODREAM_JAVA_IMAGE:-eclipse-temurin:21-jre-jammy@sha256:affcab5356e1270ac35d2361ee83135af2f03e8d580eca78a6d5d6fdbf048db0}
+    profiles: [migration]
+    restart: "no"
+    cpus: "1.0"
+    mem_limit: 1g
+    volumes: *application-data
+    networks:
+      database: {}
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   ingress:

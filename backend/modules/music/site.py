@@ -32,14 +32,15 @@ def asset(identity: str):
 def serialize(row):
     track = library.serialize_track(dict(row, liked=row.get('liked', False)))
     track.update(provider='site', identifier=row['asset_id'], webpage_url=f"/api/music/site/{row['asset_id']}/content",
-                 server_url=f"/api/music/site/{row['asset_id']}/content", local_url=None, device_file=False)
+                 server_url=f"/api/music/site/{row['asset_id']}/content", local_url=None, device_file=False,
+                 list_time=row.get('uploaded_at'))
     return track
 
 
 @router.get('/tracks')
 def tracks():
     with database() as cursor:
-        cursor.execute("""SELECT t.*,a.id AS asset_id,a.filename FROM music_server_assets a
+        cursor.execute("""SELECT t.*,a.id AS asset_id,a.filename,a.created_at AS uploaded_at FROM music_server_assets a
             JOIN music_tracks t ON t.id=a.track_id JOIN resources r ON r.kind='file' AND r.resource_key=a.filename
             AND r.user_id=a.user_id AND r.deleted=FALSE
             WHERE a.user_id=%s AND a.asset_kind='site_upload' AND a.status='ready' ORDER BY a.created_at DESC LIMIT 1000""", (accounts.owner_id(),))

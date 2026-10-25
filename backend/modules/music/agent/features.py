@@ -51,7 +51,7 @@ def base_input(track):
         identity["file"] = [path.stat().st_size, path.stat().st_mtime_ns]
     lyrics = None
     with library.database() as cursor:
-        cursor.execute("SELECT text,source,updated_at,manual,signature,checked_at FROM music_lyrics WHERE track_id=%s AND user_id=%s", (track["key"], track["user_id"]))
+        cursor.execute("SELECT text,source,updated_at,`manual`,signature,checked_at FROM music_lyrics WHERE track_id=%s AND user_id=%s", (track["key"], track["user_id"]))
         lyrics = cursor.fetchone()
     if lyrics:
         identity["lyrics_signature"] = hashlib.sha256(lyrics["text"].encode()).hexdigest()
@@ -212,6 +212,8 @@ def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None)
     snapshot = {k: track.get(k) for k in ("provider", "identifier", "title", "artist", "duration", "webpage_url")}
     with library.database() as cursor:
         # The task can be cancelled while external analysis is in flight.
+        from backend.modules.music.discovery import store as discovery
+        discovery.lock_user(cursor,track['user_id'])
         row = store.get(cursor, run_id, lock=True)
         if row["status"] != "running":
             from fastapi import HTTPException
@@ -222,6 +224,9 @@ def _analyze(run_id, track, charge, allow_network, need_audio=False, check=None)
             track_snapshot=VALUES(track_snapshot),features=VALUES(features),evidence=VALUES(evidence),
             content_signature=VALUES(content_signature),analyzer_version=VALUES(analyzer_version),checked_at=VALUES(checked_at),expires_at=VALUES(expires_at)""",
             (track["user_id"], track["key"], store.encode(snapshot), store.encode(features), store.encode(evidence), signature, ANALYZER_VERSION, now, now+(604800 if known else 86400)))
+        old_features=cache and (json.loads(cache['features']) if isinstance(cache['features'],str) else cache['features'])
+        if old_features!=features:
+            discovery.invalidate(cursor,track['user_id'])
     return {"features": features, "evidence": evidence, "checked_at": now, "cached": False}
 
 

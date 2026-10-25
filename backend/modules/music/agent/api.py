@@ -39,9 +39,9 @@ def list_runs(page:int=Query(default=1,ge=1)):
     uid = accounts.current().id
     with library.database() as cursor:
         store.recover(cursor)
-        cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE",(uid,))
+        cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE AND (JSON_EXTRACT(request,'$.kind') IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(request,'$.kind'))<>'daily_discovery')",(uid,))
         total = cursor.fetchone()["n"]
-        cursor.execute("SELECT * FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE ORDER BY created_at DESC LIMIT 20 OFFSET %s",(uid,(page-1)*20))
+        cursor.execute("SELECT * FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE AND (JSON_EXTRACT(request,'$.kind') IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(request,'$.kind'))<>'daily_discovery') ORDER BY created_at DESC LIMIT 20 OFFSET %s",(uid,(page-1)*20))
         rows = [store.public(store.decode(r)) for r in cursor.fetchall()]
     return {"items":rows,"total":total}
 
@@ -62,6 +62,7 @@ def continue_run(run_id:str,payload:ContinueRun):
         cursor.execute("SELECT id FROM users WHERE id=%s FOR UPDATE",(uid,))
         store.recover(cursor)
         row = store.get(cursor,run_id,uid,lock=True)
+        reject_daily(row)
         if row["status"] not in RESUMABLE:
             raise HTTPException(409,"当前任务不可继续，请创建重试任务")
         if row["policy_version"] != POLICY_VERSION or row["context"].get("model_stop"):
@@ -97,6 +98,7 @@ def retry_run(run_id:str,payload:ContinueRun,idempotency_key:str=Header(min_leng
     auth.require_enabled()
     with library.database() as cursor:
         old = store.get(cursor,run_id,accounts.current().id)
+        reject_daily(old)
     request = {"need":payload.need or old["request"]["need"],"preferences":old["request"].get("preferences",{}) | payload.preferences}
     CreateRun.model_validate(request)
     row,created = store.create(request,idempotency_key,skill.load()["version"],run_id)
@@ -111,6 +113,7 @@ def fill_run(run_id: str, payload: SaveRun, idempotency_key: str = Header(min_le
     auth.check_session(accounts.current().id, accounts.current().session_id)
     with library.database() as cursor:
         old = store.get(cursor, run_id, accounts.current().id)
+        reject_daily(old)
     if old['status'] != 'partial' or old['result_version'] != payload.result_version:
         raise HTTPException(409, '只能补齐当前版本的部分完成结果')
     row, created = store.create(old['request'], idempotency_key, skill.load()['version'], run_id,
@@ -122,6 +125,16 @@ def fill_run(run_id: str, payload: SaveRun, idempotency_key: str = Header(min_le
 
 @router.post("/{run_id}/save")
 def save_run(run_id:str,payload:SaveRun):
+    with library.database() as cursor:
+        row = store.get(cursor,run_id,accounts.current().id)
+        if row["request"].get("kind") == "daily_discovery":
+            cursor.execute("SELECT batch_id FROM music_discovery_batches WHERE run_id=%s",(run_id,))
+            batch_id=cursor.fetchone()["batch_id"]
+        else:
+            batch_id=None
+    if batch_id:
+        from backend.modules.music.discovery.api import save
+        return save(batch_id,payload)
     auth.require_enabled()
     auth.check_session(accounts.current().id,accounts.current().session_id)
     with library.database() as cursor:
@@ -172,3 +185,8 @@ def result_lyrics(run_id: str, key: str, payload: LyricsResultRequest):
     allowed = bool(row['request']['parsed']['network_allowed'] and config['music_agent_network_enabled']
                    and track['provider'] in config['music_agent_sources'])
     return music_lyrics.track_lyrics_response(track, allowed, check=checked_track)
+
+
+def reject_daily(row):
+    if row["request"].get("kind") == "daily_discovery":
+        raise HTTPException(409,"今日推荐须通过创建批次接口重新生成，并计入每日次数")

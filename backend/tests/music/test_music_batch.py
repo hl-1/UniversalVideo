@@ -208,7 +208,8 @@ class MusicSearchPaginationTests(unittest.TestCase):
     def test_native_search_passes_page_and_uses_separate_cache_entries(self):
         with music.lock:
             music.search_cache.clear()
-        with patch.object(music, "_json", return_value={}) as fetch:
+        response = {'data': {'song': {'list': [{'mid': 'cached-song', 'title': 'Cached song'}]}}}
+        with patch.object(music, "_json", return_value=response) as fetch:
             music._search("qq", "page-test", 1)
             music._search("qq", "page-test", 2)
             self.assertEqual(fetch.call_args.kwargs["params"]["p"], 2)

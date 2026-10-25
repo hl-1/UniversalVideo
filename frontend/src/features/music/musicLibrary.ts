@@ -2,6 +2,10 @@ import { api, jsonRequest } from '../../shared/api/client'
 import { ref } from 'vue'
 
 export type MusicTrack = {
+  /** Unix seconds; the owning list determines whether this is favorite, play, import or save time. */
+  list_time?: number | null
+  key?: string
+  discovery?: { batch_id?: string; feed_id?: string; position: number; recording_key: string; work_key: string | null; match_score: number; reason: string; evidence_refs: string[]; exploration: boolean; validation_stale?: boolean }
   device_id?: string
   device_file?: boolean
   device_thumbnail?: string

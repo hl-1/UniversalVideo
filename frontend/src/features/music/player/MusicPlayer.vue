@@ -2,7 +2,11 @@
 import { computed, ref } from 'vue'
 import { Heart, ListMusic, LoaderCircle, Music2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X, Download, AlignLeft, ChevronUp, Trash2 } from 'lucide-vue-next'
 import TrackCover from '../components/TrackCover.vue'
+import MusicListControls from '../components/MusicListControls.vue'
+import { useMusicList } from '../useMusicList'
 import LyricsView from '../components/LyricsView.vue'
+import { isAndroidApp } from '../../../shared/native/bridge'
+import { useAndroidBack } from '../../../shared/native/navigation'
 import { duration, isLiked, providers, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from '../musicLibrary'
 import { isMusicDownloaded } from '../musicDownloads'
 import { audio, currentTrack, elapsed, total, muted, volume, playMode, playbackError, playbackState, playbackUrl, queue,
@@ -10,9 +14,16 @@ import { audio, currentTrack, elapsed, total, muted, volume, playMode, playbackE
   onMetadata, onTime, onPlaying, onPause, onWaiting, onError, onEnded } from './musicPlayer'
 
 defineEmits<{ download: [track: MusicTrack] }>()
+const { filters: queueFilters, artists: queueArtists, filtered: visibleQueue, hasTime: queueHasTime } = useMusicList(() => queue.value, () => 'player-queue')
 const showQueue = ref(false)
 const showLyrics = ref(false)
 const showVolume = ref(false)
+useAndroidBack(() => {
+  if (showLyrics.value) { showLyrics.value = false; return true }
+  if (showQueue.value) { showQueue.value = false; return true }
+  if (showVolume.value) { showVolume.value = false; return true }
+  return false
+}, 100)
 const modes = ['list', 'loop', 'one', 'shuffle'] as const
 const modeNames = { list: '顺序播放', loop: '列表循环', one: '单曲循环', shuffle: '随机播放' }
 const modeIcon = computed(() => playMode.value === 'shuffle' ? Shuffle : playMode.value === 'one' ? Repeat1 : Repeat)
@@ -33,7 +44,7 @@ function volumeClick() {
 </script>
 
 <template>
-  <audio ref="audio" :src="playbackUrl || undefined" preload="metadata" @loadedmetadata="onMetadata" @durationchange="onMetadata"
+  <audio v-if="!isAndroidApp()" ref="audio" :src="playbackUrl || undefined" preload="metadata" @loadedmetadata="onMetadata" @durationchange="onMetadata"
     @timeupdate="onTime" @playing="onPlaying" @pause="onPause" @waiting="onWaiting" @error="onError" @ended="onEnded" />
   <footer v-if="currentTrack" class="global-player" :style="{ '--played': `${total ? elapsed / total * 100 : 0}%` }" aria-label="音乐播放器">
     <button class="player-art-button" :disabled="!currentTrack" aria-label="展开歌曲" title="展开歌曲" @click="showLyrics = true">
@@ -65,8 +76,10 @@ function volumeClick() {
   <div v-if="showVolume" class="player-volume-popup" aria-label="调节音量"><button class="mc-icon" :title="muted ? '取消静音' : '静音'" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted || volume === 0" :size="18" /><Volume2 v-else :size="18" /></button><input type="range" min="0" max="1" step="0.01" :value="muted ? 0 : volume" aria-label="调节音量" @input="setVolume(Number(($event.target as HTMLInputElement).value))" /><span>{{ Math.round((muted ? 0 : volume) * 100) }}%</span><button class="mc-icon" title="关闭音量设置" aria-label="关闭音量设置" @click="showVolume = false"><X :size="16" /></button></div>
   <aside v-if="showQueue" class="player-queue" aria-label="播放队列">
     <div class="queue-heading"><h2>播放队列 <span>{{ queue.length }}</span></h2><button class="mc-icon" :disabled="!queue.length" title="清空播放队列" aria-label="清空播放队列" @click="clearQueue"><Trash2 :size="17" /></button><button class="mc-icon" title="关闭播放队列" aria-label="关闭播放队列" @click="showQueue = false"><X :size="19" /></button></div>
+    <MusicListControls v-model="queueFilters" :artists="queueArtists" :total="queue.length" :count="visibleQueue.length" :has-time="queueHasTime" />
+    <p v-if="queue.length && !visibleQueue.length" role="status">没有匹配的歌曲，请调整筛选条件</p>
     <div v-if="!queue.length" class="mc-empty"><Music2 :size="30" /><p>播放队列为空</p></div>
-    <ol v-else><li v-for="track in queue" :key="trackKey(track)" :class="{ active: isPlaybackTrack(track) }"><button class="queue-song" @click="playTrack(track)"><TrackCover :src="trackArtwork(track)" :title="track.title" /><span><strong>{{ track.title }}</strong><small>{{ track.artist || providers[track.provider || 'video'] }}</small></span><Play :size="15" /></button><button class="mc-icon" :title="`移出队列 ${track.title}`" :aria-label="`移出队列 ${track.title}`" @click="removeQueueTrack(track)"><X :size="15" /></button></li></ol>
+    <ol v-else><li v-for="track in visibleQueue" :key="trackKey(track)" :class="{ active: isPlaybackTrack(track) }"><button class="queue-song" @click="playTrack(track)"><TrackCover :src="trackArtwork(track)" :title="track.title" /><span><strong>{{ track.title }}</strong><small>{{ track.artist || providers[track.provider || 'video'] }}</small></span><Play :size="15" /></button><button class="mc-icon" :title="`移出队列 ${track.title}`" :aria-label="`移出队列 ${track.title}`" @click="removeQueueTrack(track)"><X :size="15" /></button></li></ol>
   </aside>
   <LyricsView v-if="showLyrics && lyricTrack" :track="lyricTrack" :current-time="elapsed" @close="showLyrics = false" @seek="seek">
     <template #controls>

@@ -71,6 +71,8 @@ RUN groupadd --gid 10001 videodream \
 
 COPY --chown=10001:10001 backend/ ./backend/
 COPY --chown=10001:10001 scripts/ ./scripts/
+COPY --chown=10001:10001 config/flyway.conf ./config/flyway.conf
+COPY --chown=10001:10001 deploy/sql/ ./deploy/sql/
 COPY --chown=10001:10001 frontend/public/ ./frontend/public/
 COPY --from=frontend-build --chown=10001:10001 /build/frontend/dist/ ./frontend/dist/
 

@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue'
 import { account } from '../accounts/auth'
 import { currentDeviceId, deviceContext } from '../../shared/device'
+import { isAndroidApp, nativeCall } from '../../shared/native/bridge'
 import { trackKey, trackPayload, type MusicTrack } from './musicLibrary'
 import { inspectDeviceAudio } from './deviceAudio'
 import type { Lyrics } from './lyrics'
@@ -55,7 +56,7 @@ function publish() {
         if (previous) URL.revokeObjectURL(previous.url)
         coverUrls.set(entry.key, { blob: entry.cover, url: URL.createObjectURL(entry.cover) })
       }
-      return { ...entry.track, device_id: device, device_file: true, saved_to_device: true,
+      return { ...entry.track, list_time: entry.added_at > 0 ? entry.added_at / 1000 : null, device_id: device, device_file: true, saved_to_device: true,
         device_thumbnail: coverUrls.get(entry.key)?.url, device_assets_notice: entry.asset_notice }
     })
   unavailableDeviceTracks.value = [...unavailable.values()].filter(({ entry }) => entry.uid === uid && entry.device_id === device)
@@ -107,19 +108,34 @@ export async function refreshDeviceLibrary() {
   try {
     const context = await deviceContext()
     if (!current()) return
-    let readError = ''
-    const saved: DeviceEntry[] = await store('readonly', storage => storage.getAll()).catch(() => { readError = '浏览器曲库读取失败，请检查站点存储权限后重试。'; return [] })
-    if (!current()) return
-    for (const entry of new Map([...saved, ...[...unavailable.values()].map(item => item.entry), ...entries.values()].map(entry => [entry.key, entry])).values()) {
-      if (entry.uid !== uid || entry.device_id !== context.device_id) continue
-      try {
-        const file = await readable(entry)
-        if (!current()) return
-        if (file) { entries.set(entry.key, entry); unavailable.delete(entry.key) }
-        else retainUnavailable(entry)
-      } catch (failure) { if (!current()) return; retainUnavailable(entry, failure) }
+    if (isAndroidApp()) {
+      const result = await nativeCall<{ tracks: MusicTrack[] }>('library.tracks')
+      const saved: DeviceEntry[] = await store('readonly', storage => storage.getAll()).catch(() => [])
+      if (!current()) return
+      const assets = new Map([...saved, ...entries.values()].map(entry => [entry.key, entry]))
+      entries.clear()
+      for (const track of result.tracks) {
+        if (track.device_id !== context.device_id || !track.device_file) continue
+        const key = entryKey(uid, context.device_id, track)
+        const cached = assets.get(key)
+        entries.set(key, { key, uid, device_id: context.device_id, track, bytes: 0, added_at: track.list_time ? track.list_time * 1000 : 0,
+          cover: cached?.cover, lyrics: cached?.lyrics, manual_lyrics: cached?.manual_lyrics, asset_notice: cached?.asset_notice })
+      }
+    } else {
+      let readError = ''
+      const saved: DeviceEntry[] = await store('readonly', storage => storage.getAll()).catch(() => { readError = '浏览器曲库读取失败，请检查站点存储权限后重试。'; return [] })
+      if (!current()) return
+      for (const entry of new Map([...saved, ...[...unavailable.values()].map(item => item.entry), ...entries.values()].map(entry => [entry.key, entry])).values()) {
+        if (entry.uid !== uid || entry.device_id !== context.device_id) continue
+        try {
+          const file = await readable(entry)
+          if (!current()) return
+          if (file) { entries.set(entry.key, entry); unavailable.delete(entry.key) }
+          else retainUnavailable(entry)
+        } catch (failure) { if (!current()) return; retainUnavailable(entry, failure) }
+      }
+      deviceLibraryError.value = readError || [...persistenceErrors.values()][0] || ''
     }
-    deviceLibraryError.value = readError || [...persistenceErrors.values()][0] || ''
     if (!current()) return
     publish()
   } catch (error) { if (current()) deviceLibraryError.value = error instanceof Error ? error.message : '设备曲库读取失败。' }
@@ -142,7 +158,7 @@ export async function authorizeDeviceTrack(track: MusicTrack) {
   await refreshDeviceLibrary()
 }
 export function hasDeviceFile(track: MusicTrack) {
-  void deviceLibraryRevision.value // Vue consumers update when file availability changes.
+  void deviceLibraryRevision.value // Vue consumers update when native/file availability changes.
   const uid = account.value?.id, device = currentDeviceId()
   return Boolean(uid && device && entries.has(entryKey(uid, device, track)))
 }
@@ -258,6 +274,7 @@ export async function cacheDeviceAssets(track: MusicTrack) {
   }
 }
 export async function chooseDeviceFiles(fallback: () => void) {
+  if (isAndroidApp()) { await importDeviceFiles([]); return true }
   const picker = (window as any).showOpenFilePicker
   if (!picker) { fallback(); return false }
   const uid = account.value?.id
@@ -322,6 +339,7 @@ async function sameFileBytes(a: File, b: File) {
 }
 export async function importDeviceFiles(selected: FileList | File[]) {
   const uid = account.value?.id
+  if (isAndroidApp()) { await nativeCall('library.import', {}, { timeout: 0 }); await refreshDeviceLibrary(); return }
   await importSelection(Array.from(selected), uid)
 }
 async function importSelection(selected: Array<File | FileHandle>, uid: number | undefined) {
@@ -355,11 +373,12 @@ export async function removeDeviceTrack(track: MusicTrack) {
   if (!uid) return
   const key = entryKey(uid, currentDeviceId(), track)
   refreshSequence++
+  if (isAndroidApp()) await nativeCall('library.remove', { track })
   await forgetEntry(key)
   await refreshDeviceLibrary(); publish()
 }
 watch(() => account.value?.id, () => { reset(); void refreshDeviceLibrary() }, { immediate: true })
 if (typeof window !== 'undefined') {
-  window.addEventListener('focus', () => { void refreshDeviceLibrary() })
+  for (const event of ['xianyue:download.state', 'xianyue-resume', 'focus']) window.addEventListener(event, () => { void refreshDeviceLibrary() })
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void refreshDeviceLibrary() })
 }

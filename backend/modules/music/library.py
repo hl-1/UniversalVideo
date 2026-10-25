@@ -111,53 +111,6 @@ class ProfileRequest(BaseModel):
                           or re.fullmatch(r"/api/library/images/[a-f0-9]{32}\.webp", value)):
             raise ValueError("头像需为 PNG、JPEG 或 WebP 图片")
         return value
-SCHEMA = [
-    """CREATE TABLE IF NOT EXISTS music_profile (
-        id INT PRIMARY KEY, nickname VARCHAR(40) NOT NULL, bio VARCHAR(200) NOT NULL DEFAULT '', avatar MEDIUMTEXT
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_tracks (
-        id CHAR(64) PRIMARY KEY, provider VARCHAR(12) NOT NULL, identifier VARCHAR(255) NOT NULL,
-        title VARCHAR(255) NOT NULL, artist VARCHAR(255) NOT NULL, webpage_url TEXT NOT NULL,
-        thumbnail TEXT, duration DOUBLE, access VARCHAR(100) NOT NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_favorites (
-        track_id CHAR(64) PRIMARY KEY, created_at DOUBLE NOT NULL,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_history (
-        track_id CHAR(64) PRIMARY KEY, played_at DOUBLE NOT NULL, play_count INT NOT NULL DEFAULT 1,
-        preview BOOLEAN NOT NULL DEFAULT FALSE,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_playlists (
-        id CHAR(24) PRIMARY KEY, name VARCHAR(80) NOT NULL, description VARCHAR(300) NOT NULL,
-        created_at DOUBLE NOT NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_playlist_tracks (
-        playlist_id CHAR(24) NOT NULL, track_id CHAR(64) NOT NULL, added_at DOUBLE NOT NULL,
-        PRIMARY KEY (playlist_id, track_id),
-        FOREIGN KEY (playlist_id) REFERENCES music_playlists(id) ON DELETE CASCADE,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_downloads (
-        id CHAR(24) PRIMARY KEY, track_id CHAR(64) NOT NULL, filename VARCHAR(255) NOT NULL UNIQUE,
-        created_at DOUBLE NOT NULL, imported BOOLEAN NOT NULL DEFAULT FALSE,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_track_aliases (
-        alias_id CHAR(64) PRIMARY KEY, track_id CHAR(64) NOT NULL,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_lyrics (
-        track_id CHAR(64) PRIMARY KEY, text MEDIUMTEXT NOT NULL, source VARCHAR(80) NOT NULL,
-        format VARCHAR(8) NOT NULL, signature TEXT NOT NULL, checked_at DOUBLE NOT NULL,
-        manual BOOLEAN NOT NULL DEFAULT FALSE, updated_at DOUBLE NOT NULL,
-        FOREIGN KEY (track_id) REFERENCES music_tracks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-    """CREATE TABLE IF NOT EXISTS music_theme (
-        id INT PRIMARY KEY, config TEXT NOT NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-]
 
 
 def backup_library(cursor) -> Path:
@@ -174,26 +127,6 @@ def backup_library(cursor) -> Path:
     return path
 
 
-def migrate_schema(cursor) -> None:
-    additions = {
-        "music_tracks": {"custom_thumbnail": "TEXT", "cover_updated_at": "DOUBLE NOT NULL DEFAULT 0",
-                         "cover_checked_at": "DOUBLE NOT NULL DEFAULT 0"},
-        "music_playlists": {"thumbnail": "TEXT"},
-        "music_downloads": {"file_hash": "CHAR(64)", "file_size": "BIGINT", "file_mtime": "BIGINT",
-                            "file_available": "BOOLEAN NOT NULL DEFAULT TRUE"},
-    }
-    missing = []
-    for table, columns in additions.items():
-        cursor.execute(f"SHOW COLUMNS FROM `{table}`")
-        existing = {row["Field"] for row in cursor.fetchall()}
-        missing.extend((table, name, definition) for name, definition in columns.items() if name not in existing)
-    if missing:
-        backup_library(cursor)
-        for table, name, definition in missing:
-            cursor.execute(f"ALTER TABLE `{table}` ADD COLUMN `{name}` {definition}")
-        cursor.execute("SHOW INDEX FROM music_downloads WHERE Key_name='file_hash_index'")
-        if not cursor.fetchone():
-            cursor.execute("CREATE INDEX file_hash_index ON music_downloads(file_hash)")
 
 
 def track_id(track: TrackInput) -> str:
@@ -254,9 +187,9 @@ def write_lyrics(cursor, key: str, data: dict) -> None:
         return
     text = data.get("text", "")
     cursor.execute("""INSERT INTO music_lyrics
-        (track_id,text,source,format,signature,checked_at,manual,updated_at,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (track_id,text,source,format,signature,checked_at,`manual`,updated_at,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON DUPLICATE KEY UPDATE text=VALUES(text),source=VALUES(source),format=VALUES(format),
-        signature=VALUES(signature),checked_at=VALUES(checked_at),manual=VALUES(manual),updated_at=VALUES(updated_at)""",
+        signature=VALUES(signature),checked_at=VALUES(checked_at),`manual`=VALUES(`manual`),updated_at=VALUES(updated_at)""",
         (key, text, data.get("source", ""), "lrc" if re.search(r"\[\d+:\d+", text) else "plain",
          data.get("signature", ""), data.get("checked_at", time.time()), manual, data.get("updated_at", time.time()), accounts.owner_id()))
 
@@ -325,8 +258,8 @@ def merge_tracks(cursor, first: str, second: str) -> str:
     cursor.execute("INSERT INTO music_track_aliases VALUES (%s,%s) ON DUPLICATE KEY UPDATE track_id=VALUES(track_id)", (previous, key))
     cursor.execute("DELETE FROM music_tracks WHERE id=%s", (previous,))
     return key
-TRACK_SELECT = """SELECT t.*, (f.track_id IS NOT NULL) AS liked, h.played_at, h.play_count, h.preview,
-    d.filename, d.imported FROM music_tracks t
+TRACK_SELECT = """SELECT t.*, (f.track_id IS NOT NULL) AS liked, f.created_at AS favorited_at, h.played_at, h.play_count, h.preview,
+    d.filename, d.imported, d.created_at AS downloaded_at FROM music_tracks t
     LEFT JOIN music_favorites f ON f.track_id=t.id
     LEFT JOIN music_history h ON h.track_id=t.id
     LEFT JOIN music_downloads d ON d.id=(SELECT x.id FROM music_downloads x
@@ -574,21 +507,27 @@ def tracks(view: Literal["all", "favorites", "history", "downloads", "trials", "
             query = TRACK_SELECT + "WHERE t.user_id=%s AND d.id IS NOT NULL ORDER BY d.created_at DESC"
         else:
             require_playlist(cursor, playlist_id)
-            query = TRACK_SELECT + "JOIN music_playlist_tracks pt ON pt.track_id=t.id WHERE t.user_id=%s AND pt.playlist_id=%s ORDER BY pt.position IS NULL,pt.position,pt.added_at,pt.track_id"
+            query = "SELECT pt.added_at AS playlist_added_at," + TRACK_SELECT.removeprefix("SELECT ") + "JOIN music_playlist_tracks pt ON pt.track_id=t.id WHERE t.user_id=%s AND pt.playlist_id=%s ORDER BY pt.position IS NULL,pt.position,pt.added_at,pt.track_id"
             parameters = (playlist_id,)
         cursor.execute(query + " LIMIT 1000", (accounts.owner_id(),) + parameters)
-        result = [serialize_track(row) for row in cursor.fetchall()]
+        time_field = {"favorites": "favorited_at", "history": "played_at", "trials": "played_at", "downloads": "downloaded_at", "playlist": "playlist_added_at"}.get(view)
+        result = [serialize_track(row) | {"list_time": row.get(time_field) if time_field else None} for row in cursor.fetchall()]
     return {"tracks": result}
 
 
 @router.put("/favorites")
 def favorite(payload: FavoriteRequest) -> dict:
+    from backend.modules.music.discovery import store as discovery
     with database() as cursor:
+        discovery.lock_user(cursor, accounts.owner_id())
         key = save_track(cursor, payload.track)
         if payload.liked:
             cursor.execute("INSERT IGNORE INTO music_favorites (track_id,created_at,user_id) VALUES (%s,%s,%s)", (key, time.time(), accounts.owner_id()))
         else:
             cursor.execute("DELETE FROM music_favorites WHERE track_id=%s", (key,))
+        changed = cursor.rowcount == 1
+        if changed:
+            discovery.library_signal(cursor, accounts.owner_id(), payload.track, "favorite_change", result={'liked':payload.liked})
     return {"id": key, "liked": payload.liked}
 
 
@@ -649,14 +588,18 @@ def delete_playlist(key: str) -> dict:
 
 
 @router.post("/playlists/{key}/tracks")
-def add_to_playlist(key: str, payload: TrackInput) -> dict:
+def add_to_playlist(key: str, payload: TrackInput, bulk_import: bool = False) -> dict:
+    from backend.modules.music.discovery import store as discovery
     with database() as cursor:
+        discovery.lock_user(cursor, accounts.owner_id())
         require_playlist(cursor, key)
         track_key = save_track(cursor, payload)
         cursor.execute("SELECT MAX(position) AS last_position FROM music_playlist_tracks WHERE playlist_id=%s", (key,))
         last = cursor.fetchone()["last_position"]
         cursor.execute("INSERT IGNORE INTO music_playlist_tracks (playlist_id,track_id,added_at,position) VALUES (%s,%s,%s,%s)",
                        (key, track_key, time.time(), last + 1 if last is not None else None))
+        if cursor.rowcount and not bulk_import:
+            discovery.library_signal(cursor, accounts.owner_id(), payload, "playlist_add")
     return {"id": track_key}
 
 

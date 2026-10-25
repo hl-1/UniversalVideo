@@ -133,6 +133,22 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
         </template>
         <form v-else-if="view === 'settings' && settings" class="admin-settings" @submit.prevent="saveSettings">
           <h2>场景歌单 Agent</h2>
+          <label class="admin-toggle"><span>启用今日推荐</span><input v-model="settings.music_daily_enabled" type="checkbox" /></label>
+          <label>候选增强每日 Token 上限<input v-model.number="settings.music_daily_tokens" type="number" min="2000" max="60000" required /></label>
+          <label>候选增强每日模型请求上限<input v-model.number="settings.music_daily_model_calls" type="number" min="1" max="16" required /></label>
+          <label>候选补充每日网络请求上限<input v-model.number="settings.music_daily_network_requests" type="number" min="1" max="5000" required /></label>
+          <label>候选补充低水位<input v-model.number="settings.music_daily_low_water" type="number" min="1" max="100" required /></label>
+          <label>候选补充间隔（秒）<input v-model.number="settings.music_daily_refill_interval" type="number" min="1800" max="86400" required /></label>
+          <h2>音乐画像学习</h2>
+          <label class="admin-toggle"><span>启用画像 Agent</span><input v-model="settings.music_profile_agent_enabled" type="checkbox" /></label>
+          <label class="admin-toggle"><span>使用画像推断参与推荐</span><input v-model="settings.music_profile_fusion_enabled" type="checkbox" /></label>
+          <label>画像每日 Token 上限<input v-model.number="settings.music_profile_daily_tokens" type="number" min="1000" max="24000" required /></label>
+          <label>画像单任务 Token 上限<input v-model.number="settings.music_profile_task_tokens" type="number" min="1000" max="12000" required /></label>
+          <label>画像每日付费任务上限<input v-model.number="settings.music_profile_daily_tasks" type="number" min="1" max="3" required /></label>
+          <label>画像单任务模型请求上限<input v-model.number="settings.music_profile_model_calls" type="number" min="1" max="4" required /></label>
+          <label>画像单任务秒数<input v-model.number="settings.music_profile_seconds" type="number" min="10" max="120" required /></label>
+          <label>画像评估间隔（秒）<input v-model.number="settings.music_profile_interval" type="number" min="1800" max="86400" required /></label>
+          <label>画像任务并发数<input v-model.number="settings.music_profile_concurrency" type="number" min="1" max="8" required /></label>
           <label class="admin-toggle"><span>启用场景歌单</span><input v-model="settings.music_agent_enabled" type="checkbox" /></label>
           <label class="admin-toggle"><span>允许网络检索与分析</span><input v-model="settings.music_agent_network_enabled" type="checkbox" /></label>
           <label>允许来源<select v-model="settings.music_agent_sources" multiple aria-label="场景歌单允许来源"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option><option value="kugou">酷狗音乐</option></select></label>

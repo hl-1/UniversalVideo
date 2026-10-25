@@ -10,5 +10,7 @@ $backendPython = Resolve-BackendPython -PythonPath $PythonPath
 & $backendPython -c "import fastapi, uvicorn, mcp"
 if ($LASTEXITCODE -ne 0) { throw 'Backend dependencies are missing. Run scripts/setup.ps1 first.' }
 Write-Host "Backend Python: $backendPython"
+& $backendPython scripts/database.py check
+if ($LASTEXITCODE -ne 0) { throw 'Database schema is not ready. Run scripts/database.py migrate, or preflight/baseline for an existing database.' }
 & $backendPython -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
 exit $LASTEXITCODE

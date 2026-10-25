@@ -24,8 +24,15 @@ def current_run(run_id):
 def check_active(run_id):
     row = current_run(run_id)
     try:
-        auth.check_session(row["user_id"], row["context"]["session_id"])
-        auth.require_enabled()
+        if row['context'].get('background'):
+            accounts.active_worker(row['user_id'])
+        else:
+            auth.check_session(row["user_id"], row["context"]["session_id"])
+        if row["request"].get("kind") == "daily_discovery":
+            from backend.modules.music.discovery.service import require_enabled
+            require_enabled()
+        else:
+            auth.require_enabled()
     except HTTPException as exc:
         exc.agent_policy_error = True
         raise
@@ -36,7 +43,7 @@ def check_active(run_id):
     total = row["context"].get("base_seconds",0) + time.time()-row["context"].get("active_started_at",time.time())
     if total > row["context"]["limits"]["seconds"]:
         raise budget.BudgetExceeded("已达到执行时长预算上限")
-    if row["context"].get("model_stop"):
+    if row["context"].get("model_stop") and row["request"].get("kind") != "daily_discovery":
         raise ModelFault(row["context"]["model_stop"])
     return row
 
@@ -264,6 +271,14 @@ def result(row):
 
 
 def save(run_id, result_version, name=None):
+    current = current_run(run_id)
+    if current['request'].get('kind') == 'daily_discovery':
+        from backend.modules.music.discovery.api import save as daily_save
+        from backend.modules.music.agent.models import SaveRun
+        with library.database() as cursor:
+            cursor.execute('SELECT batch_id FROM music_discovery_batches WHERE run_id=%s',(run_id,))
+            batch_id=cursor.fetchone()['batch_id']
+        return daily_save(batch_id,SaveRun(result_version=result_version,name=name))
     with library.database() as cursor:
         row = store.get(cursor, run_id, accounts.current().id, lock=True)
         if row["status"] not in {"finished","partial"} or row["result_version"]!=result_version:

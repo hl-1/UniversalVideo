@@ -7,6 +7,7 @@ import { currentTrack, pausePlayback } from '../features/music/player/musicPlaye
 import type { MusicTrack } from '../features/music/musicLibrary'
 import VideoWorkspace from '../features/video/VideoWorkspace.vue'
 import AdminWorkspace from '../features/admin/AdminWorkspace.vue'
+import { useAndroidBack } from '../shared/native/navigation'
 
 const appPage = ref<'music' | 'tools' | 'admin'>('music')
 const musicCenter = ref<InstanceType<typeof MusicCenter> | null>(null)
@@ -46,6 +47,7 @@ function returnMusicCenter() {
   appPage.value = 'music'
   void nextTick(() => window.scrollTo({ top: 0 }))
 }
+useAndroidBack(() => { if (appPage.value === 'music') return false; returnMusicCenter(); return true }, 10)
 function downloadFromPlayer(track: MusicTrack) {
   returnMusicCenter()
   void musicCenter.value?.download(track)

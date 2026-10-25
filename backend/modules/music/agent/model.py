@@ -50,7 +50,7 @@ def json_value(text):
 def input_tokens(messages, tools=None):
     payload = store.encode({"messages": messages, "tools": tools or []})
     tokenizer = tiktoken.get_encoding("cl100k_base")
-    return max(len(tokenizer.encode(payload, disallowed_special=())) + 256, len(payload.encode()) // 2)
+    return max(int(len(tokenizer.encode(payload, disallowed_special=())) * 1.25) + 512, len(payload.encode()) // 2)
 
 
 async def _mark_dispatched(request):
@@ -59,6 +59,8 @@ async def _mark_dispatched(request):
         # HTTPX calls this immediately before handing the request to its transport.
         # It proves dispatch began, not that the provider received/billed it.
         attempt["dispatched"] = True
+        if attempt.get('on_dispatch'):
+            await asyncio.to_thread(attempt['on_dispatch'])
 
 
 async def _request(config, mode, messages, tools, max_output, structured):
@@ -95,27 +97,38 @@ async def _request(config, mode, messages, tools, max_output, structured):
         actual = getattr(getattr(response, "usage", None), "total_tokens", None)
         if not isinstance(actual, int) or isinstance(actual, bool) or actual < 0:
             actual = None
+        usage = getattr(response, 'usage', None)
+        details = {}
+        for target, names in {'input_tokens': ('input_tokens','prompt_tokens'), 'output_tokens': ('output_tokens','completion_tokens')}.items():
+            value = next((getattr(usage, n, None) for n in names if getattr(usage,n,None) is not None), None)
+            if isinstance(value,int) and not isinstance(value,bool) and value >= 0: details[target] = value
+        output_details = getattr(usage,'output_tokens_details',None) or getattr(usage,'completion_tokens_details',None)
+        reasoning = getattr(output_details,'reasoning_tokens',None)
+        if isinstance(reasoning,int) and not isinstance(reasoning,bool) and reasoning >= 0: details['reasoning_tokens'] = reasoning
+        attempt = _attempt.get()
+        if attempt is not None: attempt['usage'] = details
         # total_tokens already includes reasoning; never add it a second time.
         return {"role": "assistant", "content": text, "finish_reason": finish,
                 **({"tool_calls": calls} if calls else {})}, actual
 
 
-async def _drive(run_id, deadline, *args):
+async def _drive(run_id, deadline, *args, check=None):
     from backend.modules.music.agent.service import check_active
+    check = check or check_active
     event = asyncio.Event()
     loop = asyncio.get_running_loop()
     with _inflight_lock:
         _inflight[run_id] = (loop, event)
     async def watch():
         while True:
-            await asyncio.to_thread(check_active, run_id)
+            await asyncio.to_thread(check, run_id)
             from backend.modules.accounts import service as accounts
             config = await asyncio.to_thread(accounts.settings)
             if not config["music_agent_network_enabled"]:
                 raise budget.BudgetExceeded("网络分析已关闭，已中断模型请求")
             await asyncio.sleep(.5)
     async def dispatch():
-        await asyncio.to_thread(check_active, run_id)
+        await asyncio.to_thread(check, run_id)
         if event.is_set():
             raise ModelFault("模型请求已取消，已停止后续调用")
         return await _request(*args)
@@ -197,12 +210,14 @@ def complete(run_id, messages, tools=None, max_output=4000, decision=False, json
         raise ModelFault("模型连接或协议异常，已停止调用；用量待确认") from None
     finally:
         _attempt.reset(marker)
-    budget.settle(run_id, request["id"], actual=actual, dispatched=True)
+    budget.settle(run_id, request["id"], actual=actual, dispatched=True, usage_details=attempt.get("usage"))
     if actual is None:
         raise ModelFault("模型未返回用量，已保留待确认占用并停止调用")
     check_active(run_id)  # Late results can settle accounting, never revive task output.
-    if actual > request["reserved"]:
-        raise ModelFault("模型实际用量超过本次预留，已如实记账并停止调用")
+    with library.database() as cursor:
+        stopped = store.get(cursor, run_id)["context"].get("model_stop")
+    if stopped:
+        raise ModelFault(stopped)
     logger.info("Music model response: run=%s phase=%s finish=%s actual_tokens=%s", run_id, phase, result["finish_reason"], actual)
     return result
 
@@ -216,7 +231,9 @@ def structured(run_id, messages, validator, *, phase="semantic", max_output=4000
             if response.get("finish_reason") in {"length", "incomplete", "content_filter", "failed"}:
                 raise ValueError("模型输出被截断或未完成")
             return validator(json_value(response.get("content", "")))
-        except (ValueError, ValidationError, TypeError, KeyError):
+        except (ValueError, ValidationError, TypeError, KeyError) as exc:
+            logger.warning('Music model schema rejection: run=%s phase=%s attempt=%s error_type=%s',
+                           run_id, phase, attempt+1, type(exc).__name__)
             if attempt:
                 raise ModelOutputError("模型格式校验失败，已重试一次并停止调用") from None
             # Same original evidence, one short correction instruction; no unbounded history.

@@ -181,8 +181,25 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         video_tasks.mind_map_tasks.clear()
         restored_summary = self.a.get(f"/api/summaries/{task.task_id}").json()
         restored_map = self.a.get(path).json()
-        self.assertEqual(restored_summary["timing"], finished_summary["timing"])
-        self.assertEqual(restored_map["timing"], finished_map["timing"])
+
+        def assert_frozen_timing(actual, expected, path="timing"):
+            if isinstance(expected, dict):
+                self.assertEqual(actual.keys(), expected.keys(), path)
+                for key in expected:
+                    assert_frozen_timing(actual[key], expected[key], path + "." + key)
+            elif isinstance(expected, list):
+                self.assertEqual(len(actual), len(expected), path)
+                for index, (left, right) in enumerate(zip(actual, expected)):
+                    assert_frozen_timing(left, right, f"{path}[{index}]")
+            elif isinstance(expected, float):
+                # MySQL JSON can change the last float bit of epoch milliseconds.
+                # Allow one microsecond; all fields and non-float values stay exact.
+                self.assertAlmostEqual(actual, expected, delta=0.001, msg=path)
+            else:
+                self.assertEqual(actual, expected, path)
+
+        assert_frozen_timing(restored_summary["timing"], finished_summary["timing"])
+        assert_frozen_timing(restored_map["timing"], finished_map["timing"])
         self.assertEqual(restored_summary["mind_map_task_id"], restored_map["task_id"])
         self.assertIsNotNone(restored_map["timing"]["finished_at_ms"])
 
@@ -459,7 +476,7 @@ class VideoHistoryIntegrationTests(fixtures.AccountIntegrationTests):
         legacy = {'task_id': 'legacy-summary', 'status': 'finished', 'result': {'summary_markdown': '保留正文'}}
         with library.database() as cursor:
             cursor.execute('DELETE FROM account_migrations WHERE id=%s', (video_store.MIGRATION,))
-            cursor.execute("INSERT INTO resources VALUES ('summary','legacy-summary',%s,%s,1,2,FALSE)",
+            cursor.execute("INSERT INTO resources (kind,resource_key,user_id,payload,created_at,updated_at,deleted) VALUES ('summary','legacy-summary',%s,%s,1,2,FALSE)",
                            (self.a_id, json.dumps(legacy, ensure_ascii=False)))
         folder = self.root / 'failed-table-backup'
         save = video_store.save

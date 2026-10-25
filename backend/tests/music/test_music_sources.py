@@ -116,3 +116,65 @@ class AT38SourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchConcurrencyTests(unittest.TestCase):
+    def setUp(self):
+        for state in music.provider_health.values():
+            state.update(failures=0, empty=0, success=False, until=0., next=0.)
+        self.addCleanup(lambda: [state.update(failures=0, empty=0, success=False, until=0., next=0.) for state in music.provider_health.values()])
+
+    def test_provider_has_at_most_two_requests(self):
+        import threading
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        active = peak = 0
+        guard = threading.Lock()
+        def search(*args):
+            nonlocal active, peak
+            with guard:
+                active += 1
+                peak = max(active, peak)
+            time.sleep(.02)
+            with guard: active -= 1
+            return ["track"]
+        with patch.object(music, "_search_impl", side_effect=search), patch.object(music, "SEARCH_REQUEST_INTERVAL", 0), ThreadPoolExecutor(max_workers=10) as pool:
+            results = list(pool.map(lambda i: music._search("qq", str(i)), range(20)))
+        self.assertEqual(peak, 2)
+        self.assertEqual(len(results), 20)
+
+    def test_failures_open_circuit(self):
+        with patch.object(music, "_search_impl", side_effect=RuntimeError("405")) as search, patch.object(music, "SEARCH_REQUEST_INTERVAL", 0):
+            for i in range(5):
+                with self.assertRaises(RuntimeError): music._search("netease", str(i))
+            self.assertEqual(search.call_count, 3)
+
+    def test_business_errors_are_not_cached_as_empty_success(self):
+        for provider, payload in [('netease', {'code': 405}), ('qq', {'code': 1}), ('kugou', {'status': 0, 'error_code': 300})]:
+            with self.subTest(provider=provider), patch.object(music, '_json', return_value=payload):
+                with self.assertRaises(RuntimeError):
+                    music._search_impl(provider, 'business-error-test', 1)
+                self.assertNotIn((provider, 'business-error-test', 1), music.search_cache)
+
+    def test_identical_inflight_queries_share_one_request(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        entered, release, follower = threading.Event(), threading.Event(), threading.Event()
+        original_pause = music.search_pause
+        def pause(seconds):
+            if seconds == .05: follower.set()
+            original_pause(seconds)
+        def search(*args):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return ['track']
+        with patch.object(music, '_search_impl', side_effect=search) as request, patch.object(music, 'search_pause', side_effect=pause), ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(music._search, 'qq', 'same-query')
+            self.assertTrue(entered.wait(3))
+            second = pool.submit(music._search, 'qq', 'same-query')
+            try:
+                self.assertTrue(follower.wait(3))
+            finally:
+                release.set()
+            self.assertEqual(first.result(), second.result())
+            self.assertEqual(request.call_count, 1)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import asyncio
 import json
-import runpy
 import secrets
 import sys
 import tempfile
@@ -25,7 +24,6 @@ from pydantic import ValidationError
 from backend import application
 from backend.infrastructure import database as database_store
 from backend.core import paths
-from backend.core.paths import ROOT_DIR as PROJECT_ROOT
 from backend.modules.accounts import service as accounts
 from backend.modules.admin import api as administration
 from backend.modules.music import library
@@ -54,6 +52,14 @@ class SettingsTests(unittest.TestCase):
         for count in (159, 601):
             with self.assertRaises(ValidationError):
                 administration.SettingsUpdate.model_validate(payload | {'music_agent_network_requests': count})
+        daily = dict(accounts.DEFAULT_SETTINGS)
+        daily.pop('music_daily_network_requests')
+        self.assertEqual(administration.SettingsUpdate.model_validate(daily).music_daily_network_requests, 5000)
+        for count in (1, 480, 5000):
+            self.assertEqual(administration.SettingsUpdate.model_validate(daily | {'music_daily_network_requests': count}).music_daily_network_requests, count)
+        for count in (0, 5001):
+            with self.assertRaises(ValidationError):
+                administration.SettingsUpdate.model_validate(daily | {'music_daily_network_requests': count})
 
     def test_search_round_budget_default_and_maximum(self):
         payload = dict(accounts.DEFAULT_SETTINGS)
@@ -200,6 +206,8 @@ class AgentIntegrationTests(unittest.TestCase):
         cls.admin_connection = pymysql.connect(**{k:v for k,v in config.items() if k!="database"})
         with cls.admin_connection.cursor() as cursor:
             cursor.execute(f"CREATE DATABASE `{cls.name}` CHARACTER SET utf8mb4")
+        cls.test_cleanup_done=False
+        cls.addClassCleanup(lambda: AgentIntegrationTests.tearDownClass.__func__(cls))
         cls.stack.enter_context(patch.object(database_store,"database_config",return_value=config | {"database":cls.name}))
         cls.root = Path(cls.stack.enter_context(tempfile.TemporaryDirectory()))
         cls.stack.enter_context(patch.object(library,"DOWNLOAD_DIR",cls.root))
@@ -207,6 +215,10 @@ class AgentIntegrationTests(unittest.TestCase):
         cls.stack.enter_context(patch.object(paths,"DOWNLOAD_DIR",cls.root))
         cls.stack.enter_context(patch.object(accounts,"redis_prefix",return_value="videodream:agent-test:"+secrets.token_hex(8)+":"))
         cls.stack.enter_context(patch.object(runtime,"submit"))
+        from backend.modules.music.discovery import profile_runtime
+        cls.stack.enter_context(patch.object(profile_runtime,'start'))
+        from backend.tests.support import migrate_test_database
+        migrate_test_database(config | {"database": cls.name})
         database_store.schema_ready = False
         with library.database() as cursor:
             cursor.execute("UPDATE users SET password_hash=%s,must_change_password=FALSE WHERE id=1",(accounts.passwords.hash("Test-admin-123!"),))
@@ -222,6 +234,8 @@ class AgentIntegrationTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if cls.test_cleanup_done: return
+        cls.test_cleanup_done=True
         keys = list(accounts.redis_client().scan_iter(match=accounts.redis_prefix()+"*"))
         if keys:
             accounts.redis_client().delete(*keys)
@@ -235,6 +249,8 @@ class AgentIntegrationTests(unittest.TestCase):
         self.stack = ExitStack()
         self.marker = accounts.principal.set(accounts.Principal(self.user_id,"agent_user","user",self.sid))
         with library.database() as cursor:
+            for table in ('music_discovery_feeds','music_discovery_daily_usage','music_discovery_profile_runs','music_discovery_profile_versions'):
+                cursor.execute('DELETE FROM '+table)
             for table in ("music_recommendation_runs","music_track_features","music_playlists","music_favorites","music_history","music_downloads","music_tracks","resources"):
                 cursor.execute(f"DELETE FROM {table}")
             config = accounts.DEFAULT_SETTINGS | {"music_agent_enabled":True}
@@ -453,7 +469,7 @@ class AgentIntegrationTests(unittest.TestCase):
     def test_model_request_reserves_budget_and_uses_existing_connection(self):
         row = self.running()
         response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[],content='{}'))],
-                                   usage=SimpleNamespace(total_tokens=15))
+                                   usage=SimpleNamespace(total_tokens=15,prompt_tokens=5,completion_tokens=10,completion_tokens_details=SimpleNamespace(reasoning_tokens=7)))
         config = {"api_key":"test-key", "base_url":"https://model.test/v1", "model":"test-model"}
         with patch.object(model.ai,"load_config",return_value=config), patch.object(model,"AsyncOpenAI") as constructor:
             constructor.return_value.__aenter__.return_value.chat.completions.create = AsyncMock(return_value=response)
@@ -465,6 +481,7 @@ class AgentIntegrationTests(unittest.TestCase):
             changed = store.get(cursor,row["run_id"])
         self.assertEqual(changed["context"]["budget"]["decisions"],1)
         self.assertEqual(changed["context"]["budget"]["tokens"],15)
+        self.assertEqual(changed['context']['model_requests'][0]['usage'],{'input_tokens':5,'output_tokens':10,'reasoning_tokens':7})
         self.assertEqual(budget.usage(changed["context"]), {"actual":15,"reserved":0,"unconfirmed":0})
 
     def test_atomic_reservation_actual_refund_and_idempotent_late_settlement(self):
@@ -1292,33 +1309,6 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(error.exception.status_code,413)
         with library.database() as cursor:
             self.assertNotIn("oversize",store.get(cursor,row["run_id"])["context"])
-
-    def test_migration_rollback_preserves_playlists_and_can_be_reapplied(self):
-        row = self.running()
-        playlist = secrets.token_hex(12)
-        with library.database() as cursor:
-            cursor.execute("INSERT INTO music_playlists (id,name,description,created_at,user_id) VALUES (%s,'保留歌单','',%s,%s)",
-                           (playlist,time.time(),self.user_id))
-            store.migrate(cursor)
-        script = PROJECT_ROOT/"scripts"/"music-agent-migration.py"
-        try:
-            with patch("sys.argv",[str(script),"rollback","--apply"]), patch.object(library,"ROOT_DIR",self.root):
-                runpy.run_path(str(script),run_name="__main__")
-            with library.database() as cursor:
-                cursor.execute("SHOW TABLES LIKE 'music_recommendation_runs'")
-                self.assertIsNone(cursor.fetchone())
-                cursor.execute("SHOW COLUMNS FROM music_playlist_tracks LIKE 'position'")
-                self.assertIsNone(cursor.fetchone())
-                cursor.execute("SELECT id FROM music_playlists WHERE id=%s",(playlist,))
-                self.assertIsNotNone(cursor.fetchone())
-                cursor.execute("SELECT deleted FROM resources WHERE kind='music_recommendation' AND resource_key=%s",(row["run_id"],))
-                self.assertTrue(cursor.fetchone()["deleted"])
-            backups = list((self.root/".run"/"library-backups").glob("*.json"))
-            self.assertTrue(backups)
-            self.assertIn("music_recommendation_runs",json.loads(backups[0].read_text(encoding="utf-8")))
-        finally:
-            with library.database() as cursor, patch.object(library,"ROOT_DIR",self.root):
-                store.migrate(cursor)
 
     def test_network_fallbacks_cannot_swallow_budget_and_old_worker_cannot_write(self):
         from backend.infrastructure import network

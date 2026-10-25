@@ -2,6 +2,8 @@
 
 当前版本：`v1.0.0`
 
+安卓客户端名称为 **xianyue**，包名 `cn.huanliyu.xianyue`，支持 Android 10+。提供原生后台下载、锁屏音乐播放、系统媒体控制及按账号隔离的离线音乐库；对应 Vue 页面随 APK 打包，接口连接现有云端服务。构建和安装见 [Android 说明](android/README.md)，完整数据及行为见 [安卓规格](spec/features/android-app.md)。
+
 下载及生成文件按账号保存于 `downloads/users/<用户ID>/`，包含 files、thumbnails、images、lyrics、summaries、batches、tmp；云端对应 `/opt/videodream/downloads/users/<用户ID>/`。文件仍保存在服务器，另存为手机/电脑后服务器原件保留。播放、图片与下载通过专用 HttpOnly 媒体 Cookie 鉴权，不依赖 Service Worker 就绪；业务 API 继续使用 Bearer。已有公共目录须停服备份并执行 `scripts/migrate-user-storage.py`，不能直接只更新镜像。详见[完整规格](spec/VideoDream-用户与管理员功能设计.md#11-云端媒体鉴权与播放修复2026-10-21)和[迁移部署说明](deploy/README.md#13-用户文件目录迁移与媒体鉴权更新)。
 
 VideoDream 是一个本地运行的视频与音乐工作台，前端使用 Vue 3 + Vite，后端使用 FastAPI。它封装 `yt-dlp`、浏览器页面解析和任务下载能力，支持先解析视频信息，再选择格式和保存位置。
@@ -57,7 +59,7 @@ VideoDream 是一个本地运行的视频与音乐工作台，前端使用 Vue 3
 - 支持基于平台字幕/自动字幕生成 AI 视频总结，并展示带时间戳的字幕文本。
 - 支持把 AI 总结结果保存为 Markdown 和 JSON。
 - 视频最近链接、解析历史、总结、字幕和思维导图按账号持久化；历史支持筛选、版本切换和删除，刷新后恢复导图视图与播放进度。
-- MySQL 使用 5 张独立视频业务表保存历史、总结、字幕、导图版本及视图，启动时自动备份并迁移旧数据；Redis 保存最长 10 分钟的临时解析和预览地址。详细表结构和 key 见 [视频模块持久化功能设计](spec/VideoDream-视频模块持久化功能设计.md)。
+- MySQL 使用 5 张独立视频业务表保存历史、总结、字幕、导图版本及视图，通过 Flyway 管理表结构，历史数据通过显式迁移命令备份和转换；Redis 保存最长 10 分钟的临时解析和预览地址。详细表结构和 key 见 [视频模块持久化功能设计](spec/VideoDream-视频模块持久化功能设计.md)。
 - 下载结果会校验，避免图片、空响应或无效小文件被当作视频保存。
 - 已下载视频可框选最多 8 个固定水印区域，后台去水印后预览并另存为，原文件保留。
 
@@ -81,7 +83,7 @@ AI 按输入类型选择模型：文字总结和思维导图使用 `LLM_*`，截
 
 ### 账号初始化
 
-首次启动会备份音乐数据库及 `downloads/` 文件，补齐用户归属，将存量数据分配给 `admin` 超级管理员。备份及迁移记录保存在本地 `.run/library-backups/`。公开注册默认关闭，普通用户由管理员创建，或在管理员开启注册后自行注册。
+首次部署先执行 Flyway 建表并初始化未设置密码的 `admin`，再交互设置密码。存量库必须先备份并核对结构，再登记 V1；历史归属和文件转换改为显式运维命令。备份及业务迁移记录继续保留。公开注册默认关闭，普通用户由管理员创建，或在管理员开启注册后自行注册。
 
 在项目根目录运行本地初始化脚本，并按提示设置管理员密码：
 
@@ -110,7 +112,7 @@ REDIS_TTL=3600
 REDIS_DATABASE=0
 ```
 
-首次连接需要预先创建 MySQL 数据库，并授予用户该库的建表、修改表结构、查询和写入权限；后端自动创建表并执行归属迁移。配置优先级为进程环境变量、`.env.universal-video.local`、旧 `.env`；也支持旧的 `config/database.json` 作为 MySQL 备用。Redis 必须可用，负责会话、刷新摘要、用户会话索引及认证限流。
+需要预先创建 MySQL 数据库。先安装 Java 21+ 并执行 `scripts/setup-flyway.py`，空库运行 `scripts/database.py migrate`，再初始化管理员；存量库先执行 `preflight`、`baseline`、`migrate`。后端只读检查 Flyway V1，不再执行 DDL；迁移账号需要目标库 DDL/DML 权限，应用账号只需业务 DML 和历史表查询权限。详见 [Flyway 设计与操作](spec/Flyway数据库版本管理设计.md)。配置优先级为进程环境变量、`.env.universal-video.local`、旧 `.env`；也支持旧的 `config/database.json` 作为 MySQL 备用。Redis 必须可用，负责会话、刷新摘要、用户会话索引及认证限流。
 
 本机已有 MySQL 容器时，也可用 `scripts/setup-music-mysql.py --container <容器名>` 建立独立数据库和账号，凭证保存到本地忽略的 `config/database.json`；本地环境配置文件中存在 MySQL 配置时以环境配置文件为准。
 
@@ -220,7 +222,9 @@ pwsh -File scripts/test.ps1
 backend/core/            路径与配置
 backend/infrastructure/  数据库、网络、浏览器、音频与 AI 适配
 backend/modules/         按业务组织的后端代码
-backend/migrations/      已有数据迁移的协调入口
+backend/migrations/      Flyway 操作、结构核对和只读版本检查
+backend/migrations/sql/  Flyway 版本迁移 SQL
+deploy/sql/prod/v1/      部署 SQL 及每个 SQL 对应的回滚脚本
 backend/tests/           按业务归类的 Python 测试
 frontend/src/app/        应用入口与布局
 frontend/src/features/   按业务组织的组件与状态

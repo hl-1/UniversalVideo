@@ -5,6 +5,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { account } from '../accounts/auth'
 import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileArchive, Heart, ListChecks, LoaderCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Search, Square, X } from 'lucide-vue-next'
 import TrackCover from './components/TrackCover.vue'
+import MusicListControls from './components/MusicListControls.vue'
+import { useMusicList } from './useMusicList'
 import { extractHttpUrl } from '../../shared/utils/downloadInput'
 import { getTracks, isLiked, libraryRevision, refreshLibrary, renewTrack, toggleFavorite, trackArtwork, trackKey, type MusicTrack } from './musicLibrary'
 import { chooseFile, downloadMedia, progressText, saveRemoteFile, saveMessage, type DownloadProgress } from '../../shared/downloads'
@@ -93,9 +95,11 @@ const singleActive = computed(() => downloading.value || task.value?.status === 
 const batchActive = computed(() => batchBusy.value || ['pending', 'running', 'cancelling'].includes(batch.value?.status || ''))
 const batchComplete = computed(() => batch.value?.status === 'finished' && batch.value.finished + (batch.value.handed_off || 0) === batch.value.total && !batch.value.failed && !batch.value.cancelled)
 const activeTask = computed(() => singleActive.value || batchActive.value)
-const downloadableTracks = computed(() => tracks.value.filter(track => !isDownloaded(track)))
-const checkedTracks = computed(() => downloadableTracks.value.filter(track => checked.value.has(trackKey(track))))
+const { filters: listFilters, artists: listArtists, filtered: visibleTracks, hasTime: listHasTime } = useMusicList(() => tracks.value, () => `search:${searchQuery.value}:${searchSource.value}`)
+const downloadableTracks = computed(() => visibleTracks.value.filter(track => !isDownloaded(track)))
+const checkedTracks = computed(() => tracks.value.filter(track => !isDownloaded(track) && checked.value.has(trackKey(track))))
 const allChecked = computed(() => downloadableTracks.value.length > 0 && downloadableTracks.value.slice(0, 100).every(track => checked.value.has(trackKey(track))))
+const visibleCheckedCount = computed(() => downloadableTracks.value.filter(track => checked.value.has(trackKey(track))).length)
 const batchHeading = computed(() => batch.value?.device && batch.value.delivery_status === 'handed_off' ? '已交给浏览器下载' : batch.value?.device && batch.value.status === 'failed' && batch.value.finished + (batch.value.handed_off || 0) > 0 ? '批量下载结束 · 部分失败' : ({ pending: '等待下载', running: '批量下载中', cancelling: '正在停止后续歌曲', finished: '批量下载完成', failed: '批量下载失败', cancelled: '批量下载已停止' }[batch.value?.status || 'pending']))
 const providers: Record<string, string> = { qq: 'QQ 音乐', netease: '网易云音乐', kugou: '酷狗音乐', all: '全部音乐平台', video: '视频音轨' }
 const downloadedTrack = computed<Track | null>(() => selected.value && task.value?.status === 'finished' && task.value.download_url
@@ -129,7 +133,7 @@ function announceDownloads(items: Array<{ status: string; filename?: string | nu
   if (changed) void refreshLibrary()
 }
 async function playSearchTrack(track: Track) {
-  await toggleTrack(playableTrack(track), tracks.value.map(playableTrack))
+  await toggleTrack(playableTrack(track), visibleTracks.value.map(playableTrack))
 }
 async function toggleTrack(track: Track, list?: Track[]) {
   if (track.local_url && currentTrack.value?.local_url !== track.local_url) await playTrack(track, list)
@@ -481,7 +485,7 @@ async function showBatch(id: string) {
 defineExpose({ search, downloadTrack, isDownloaded, showBatch, activeTask, singleActive, busy, searchQuery, searchSource })
 watch(() => props.provider, value => { if (value) source.value = value }, { immediate: true })
 watch(deviceBatch, value => { if (value) batch.value = value }, { immediate: true })
-watch(downloadableTracks, available => { const keys = new Set(available.map(trackKey)); checked.value = new Set([...checked.value].filter(key => keys.has(key))) })
+watch(() => tracks.value.filter(track => !isDownloaded(track)), available => { const keys = new Set(available.map(trackKey)); checked.value = new Set([...checked.value].filter(key => keys.has(key))) })
 watch(libraryRevision, () => { void loadLocalTracks() })
 watch(() => trackArtwork(selected.value), () => { failedCover.value = false })
 watch(() => props.active, active => { if (!active && batchComplete.value) dismissBatch() })
@@ -548,8 +552,10 @@ onBeforeUnmount(() => { cancelTransfer(); disposed = true; localRevision++; batc
     </div>
     <div v-if="tracks.length && !queueOnly" class="track-results">
       <div class="results-heading"><h2>搜索结果</h2><span>{{ tracks.length }} 首</span></div>
-      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="checkedTracks.length > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ downloadableTracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ downloadableTracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首 · 跳过 {{ tracks.length - downloadableTracks.length }} 首已下载</span><select v-model="batchMode" aria-label="批量保存方式"><option value="files">浏览器下载（逐首）</option><option v-if="supportsDirectorySave" value="directory">保存到本机文件夹</option></select><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
-      <div v-for="(track, index) in tracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">
+      <MusicListControls v-model="listFilters" :artists="listArtists" :total="tracks.length" :count="visibleTracks.length" :has-time="listHasTime" />
+      <p v-if="!visibleTracks.length" role="status">没有匹配的歌曲，请调整筛选条件</p>
+      <div class="batch-toolbar"><label class="track-check"><input type="checkbox" :checked="allChecked" :indeterminate="visibleCheckedCount > 0 && !allChecked" aria-label="全选搜索结果" @change="toggleAll" /><span>{{ downloadableTracks.length > 100 ? '选择前 100 首' : '全选' }}</span></label><select class="batch-quick-select" value="" aria-label="快捷选择歌曲" @change="quickSelect"><option value="" disabled>快捷选择</option><option value="10">前 10 首</option><option value="20">前 20 首</option><option value="all">{{ downloadableTracks.length > 100 ? '前 100 首' : '全部歌曲' }}</option><option value="0">取消选择</option></select><span class="batch-selected">已选 {{ checkedTracks.length }} 首 · 跳过 {{ visibleTracks.length - downloadableTracks.length }} 首已下载</span><select v-model="batchMode" aria-label="批量保存方式"><option value="files">浏览器下载（逐首）</option><option v-if="supportsDirectorySave" value="directory">保存到本机文件夹</option></select><button type="button" class="composer-submit" :disabled="!checkedTracks.length || activeTask || batchSaving" @click="startBatch"><LoaderCircle v-if="batchBusy" :size="18" class="spin" /><Download v-else :size="18" />批量下载</button></div>
+      <div v-for="(track, index) in visibleTracks" :key="trackKey(track)" class="track-row" :class="{ selected: selected?.webpage_url === track.webpage_url, checked: checked.has(trackKey(track)), playing: isPlaybackTrack(track) }" @click="pick(track)">
         <label class="track-check" @click.stop><input type="checkbox" :checked="checked.has(trackKey(track))" :disabled="isDownloaded(track) || (checkedTracks.length >= 100 && !checked.has(trackKey(track)))" :aria-label="`勾选 ${track.title} ${track.artist || ''}`" @change="toggleChecked(track, $event)" /></label>
         <button type="button" class="track-select" :disabled="singleActive" :aria-label="`选择 ${track.title} ${track.artist || ''}`" @click.stop="pick(track)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><TrackCover v-if="embedded" class="search-track-cover" :src="trackArtwork(track)" :title="track.title" /><span class="track-name"><strong>{{ track.title }}</strong><span>{{ track.artist || '未知歌手' }}<span v-if="embedded" class="search-track-provider"> · {{ downloadLabel(track) || providers[track.provider || ''] }}</span></span></span></button>
         <button type="button" class="track-play" :class="{ active: isPlaybackTrack(track) }" :title="playbackLabel(track)" :aria-label="playbackLabel(track)" :aria-pressed="isPlaybackTrack(track) && playbackState === 'playing'" :aria-busy="isPlaybackTrack(track) && playbackState === 'loading'" @click.stop="playSearchTrack(track)"><LoaderCircle v-if="isPlaybackTrack(track) && playbackState === 'loading'" :size="17" class="spin" /><Pause v-else-if="isPlaybackTrack(track) && playbackState === 'playing'" :size="17" /><Play v-else :size="17" /></button>

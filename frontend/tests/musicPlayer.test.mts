@@ -11,7 +11,9 @@ function setup(t: any) {
   const requests: string[] = []
   const removed: any[] = []
   const stubs: Record<string, any> = {
+    '../discoveryEvents': { beginListening() {}, sampleListening() {}, pauseListening() {}, seekListening() {}, endListening() {} },
     vue: { ref: (value: any) => ({ value }), nextTick: async () => {}, watch() {} },
+    '../../../shared/native/bridge': { isAndroidApp: () => false, nativeCall: async () => { assert.fail('browser playback must not invoke Android') } },
     '../../accounts/auth': { account: { value: { id: 1 } } },
     '../deviceLibrary': { devicePlaybackUrl: async (track: any) => track.device_url || '', releaseDevicePlaybackUrls() {}, removeDeviceTrack: async (track: any) => { removed.push(track) } },
     '../deviceAudio': { deviceAudioFailure },

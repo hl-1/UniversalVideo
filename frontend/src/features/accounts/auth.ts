@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { isAndroidApp, nativeCall } from '../../shared/native/bridge'
 import { deviceContext } from '../../shared/device'
 
 export type Account = { id: number; username: string; role: 'user' | 'super_admin'; status: 'active' | 'disabled'; must_change_password: boolean; created_at: number }
@@ -7,17 +8,19 @@ export const authReady = ref(false)
 export const authError = ref('')
 export const registrationEnabled = ref(false)
 export const initialized = ref(true)
-export type CaptchaChallenge = { captcha_id: string; image: string; expires_in: number }
+export type CaptchaChallenge = { captcha_id: string; image: string; expires_in: number; legacy?: boolean }
 export type CaptchaAnswer = { captcha_id: string; captcha_code: string }
 const nativeFetch = window.fetch.bind(window)
 let accessToken = ''
 let expiresAt = 0
 let refreshPromise: Promise<boolean> | undefined
 let epoch = 0
+let discoveryPreparationKey = ''
 const events = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel('videodream-account-events')
 
 function clearSession(broadcast = false) {
   epoch++
+  discoveryPreparationKey = ''
   accessToken = ''
   expiresAt = 0
   account.value = null
@@ -27,6 +30,7 @@ function clearSession(broadcast = false) {
 if (events) events.onmessage = event => { if (event.data === 'logout') clearSession() }
 
 async function authRequest(path: string, body?: unknown) {
+  if (isAndroidApp()) { await deviceContext(); return nativeCall('auth.request', { path, body }) }
   const device = await deviceContext()
   const response = await nativeFetch(`/api/auth/${path}`, { method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-VideoDream-CSRF': '1', 'X-VideoDream-Device': device.device_id, 'X-VideoDream-Client': device.client_kind }, body: body ? JSON.stringify(body) : undefined })
@@ -40,6 +44,18 @@ function accept(data: { access_token: string; expires_in: number; user: Account 
   expiresAt = Date.now() + data.expires_in * 1000
   account.value = data.user
   authError.value = ''
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
+  const key = `${epoch}:${data.user.id}:${day}`
+  if (!data.user.must_change_password && discoveryPreparationKey !== key) {
+    discoveryPreparationKey = key
+    // Defer until refreshPromise has resolved; preparing recommendations never delays authentication.
+    setTimeout(() => {
+      if (key !== discoveryPreparationKey) return
+      void authenticatedFetch('/api/music/discovery/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(() => { if (key === discoveryPreparationKey) window.dispatchEvent(new Event('videodream-discovery-ready')) })
+        .catch(() => undefined)
+    }, 0)
+  }
 }
 
 export async function refreshSession(): Promise<boolean> {
@@ -97,6 +113,9 @@ export async function authenticatedFetch(input: RequestInfo | URL, options?: Req
 
 export async function loadCaptcha(purpose: 'login' | 'register'): Promise<CaptchaChallenge> {
   const response = await nativeFetch(`/api/auth/captcha?purpose=${purpose}`, { cache: 'no-store', credentials: 'same-origin' })
+  // Earlier deployed backends protect unknown /api routes with 401. Server-side
+  // login validation remains authoritative; web clients keep requiring captcha.
+  if (isAndroidApp() && [401, 404].includes(response.status)) return { captcha_id: '', image: '', expires_in: 0, legacy: true }
   const data = await response.json()
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '验证码加载失败，请重试。')
   return data
@@ -110,6 +129,10 @@ export async function login(username: string, password: string, captcha: Captcha
 
 export async function register(username: string, password: string, captcha: CaptchaAnswer) {
   const data = await authRequest('register', { username, password, ...captcha })
+  if (isAndroidApp() && !data.access_token) {
+    await login(username, password, captcha)
+    return
+  }
   clearSession(true)
   accept(data)
 }
@@ -125,11 +148,12 @@ export async function changePassword(old_password: string, new_password: string)
   const data = await response.json()
   if (!response.ok) throw new Error(data.detail || '密码修改失败。')
   clearSession(true)
+  if (isAndroidApp()) void nativeCall('auth.clear').catch(() => {})
 }
 
 export async function initializeAuth() {
   window.fetch = authenticatedFetch
-  if ('serviceWorker' in navigator && navigator.serviceWorker) {
+  if (!isAndroidApp() && 'serviceWorker' in navigator && navigator.serviceWorker) {
     // Keep answering old workers until the pass-through worker takes control.
     navigator.serviceWorker.addEventListener('message', event => {
       if (event.data?.type === 'videodream-token') {
@@ -149,6 +173,11 @@ export async function initializeAuth() {
   } catch (failure) {
     authError.value = failure instanceof Error ? failure.message : '认证初始化失败。'
   } finally { authReady.value = true }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('xianyue:session.expired', () => clearSession())
+  window.addEventListener('xianyue-resume', () => { if (isAndroidApp() && authReady.value) void refreshSession() })
 }
 
 export function mediaFetch(url: string, options?: RequestInit) {
