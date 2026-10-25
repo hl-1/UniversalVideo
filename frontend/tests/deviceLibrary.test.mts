@@ -9,7 +9,7 @@ function storageFixture() {
     queueMicrotask(() => {
       request.result = { transaction(_store: string, mode: string) {
         const transaction: any = { objectStore() { return {
-          getAll() { return { result: [...rows.values()].map(entry => ({ ...entry })) } },
+          getAll() { const request: any = { result: [...rows.values()].map(entry => ({ ...entry })) }; queueMicrotask(() => request.onsuccess?.()); return request },
           get(key: string) { const entry = rows.get(key); return { result: entry && { ...entry } } },
           put(entry: any) { if (!fixture.failWrites) rows.set(entry.key, { ...entry }); return { result: entry.key } },
           delete(key: string) { rows.delete(key); return { result: undefined } },
@@ -43,9 +43,22 @@ function setup(t: any, storage = storageFixture()) {
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const library: any = {}
   new Function('require', 'exports', 'indexedDB', compiled)((id: string) => { assert.ok(id in stubs, id); return stubs[id] }, library, storage.api)
-  return { library, account, inspection, storage, changeAccount(id: number) { account.value = { id }; changed() }, changeDevice() { device = 'b'; changed() } }
+  return { library, account, inspection, storage, changeAccount(id: number | string, legacy_id?: string) { account.value = { id, legacy_id }; changed() }, changeDevice() { device = 'b'; changed() } }
 }
 const track = { title: 'local song', provider: 'qq', identifier: 'one', webpage_url: 'https://y.qq.com/one' }
+
+test('snowflake account migration preserves local audio and exact ID digits', async t => {
+  const { library, storage, changeAccount } = setup(t)
+  await library.registerDeviceFile(track, new File(['original audio'], 'song.mp3'))
+  const uid = '903456789012345679'
+  changeAccount(uid, '1')
+  await library.refreshDeviceLibrary()
+  assert.equal(library.deviceTracks.value.length, 1)
+  assert.equal(await (await fetch(await library.devicePlaybackUrl(track))).text(), 'original audio')
+  assert.ok(storage.rows.has(`${uid}:a:qq:one`))
+  assert.ok(storage.rows.has('1:a:qq:one'), 'retain the original entry for rollback')
+  assert.equal(storage.rows.get(`${uid}:a:qq:one`).uid, uid)
+})
 test('Chrome local import remains playable after reload when picker permission returns to prompt', async t => {
   const previousWindow = globalThis.window
   const { library, storage } = setup(t)

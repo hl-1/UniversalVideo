@@ -37,7 +37,7 @@ def main():
     if not accounts.environment("VIDEODREAM_JWT_SECRET"):
         set_key(str(accounts.LOCAL_CONFIG_PATH), "VIDEODREAM_JWT_SECRET", secrets.token_urlsafe(48))
     with library.database() as cursor:
-        cursor.execute("SELECT id,username FROM users WHERE id=1")
+        cursor.execute("SELECT id,username FROM users WHERE username=%s AND role='super_admin'", (args.username,))
         user = cursor.fetchone()
     if not user:
         parser.error("Administrator is missing. Run scripts/database.py migrate first.")
@@ -47,14 +47,14 @@ def main():
     password = read_password(args.username)
     accounts.redis_client().ping()
     with library.database() as cursor:
-        cursor.execute("SELECT password_hash FROM users WHERE id=1 FOR UPDATE")
+        cursor.execute("SELECT password_hash FROM users WHERE id=%s FOR UPDATE", (user["id"],))
         first_initialization = cursor.fetchone()["password_hash"] == "!uninitialized"
         if first_initialization:
             cursor.execute("UPDATE system_settings SET config=JSON_SET(config,'$.registration_enabled',CAST('true' AS JSON)) WHERE id=1")
-        cursor.execute("UPDATE users SET password_hash=%s,must_change_password=FALSE,auth_version=auth_version+1 WHERE id=1",
-                       (accounts.passwords.hash(password),))
-    accounts.revoke_all(1)
-    accounts.audit("admin_initialize", "admin", actor=1, ip="local")
+        cursor.execute("UPDATE users SET password_hash=%s,must_change_password=FALSE,auth_version=auth_version+1 WHERE id=%s",
+                       (accounts.passwords.hash(password), user["id"]))
+    accounts.revoke_all(user["id"])
+    accounts.audit("admin_initialize", user["username"], actor=user["id"], ip="local")
     print("Administrator password set. Open http://127.0.0.1:5174/")
 
 

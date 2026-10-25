@@ -5,14 +5,14 @@ import { account } from '../accounts/auth'
 
 import { ListeningCoverage } from './listeningCoverage'
 let pending: Array<Record<string, unknown>> = []
-let owner = 0
+let owner = ''
 let sending = false
 export type ListeningContext = 'general' | 'focus' | 'commute' | 'exercise' | 'sleep'
 let listeningContext: ListeningContext = 'general'
-window.addEventListener('videodream-session-cleared', () => { listeningContext = 'general'; session = null; pending = []; owner = 0 })
+window.addEventListener('videodream-session-cleared', () => { listeningContext = 'general'; session = null; pending = []; owner = '' })
 export function selectListeningContext(value: ListeningContext) { listeningContext = value }
 export function discoveryEvent(event: Record<string, unknown>) {
-  const uid = account.value?.id || 0
+  const uid = account.value?.id || ''
   if (!uid) return
   if (owner !== uid) { pending = []; owner = uid }
   pending.push({ event_id: crypto.randomUUID(), occurred_at: Date.now() / 1000, origin: 'web', ...event })
@@ -33,11 +33,11 @@ export function expose(track: MusicTrack) {
   if (!track.discovery) return
   discoveryEvent({ event_type: 'exposure', track_key: track.key, batch_id: track.discovery.batch_id, feed_id: track.discovery.feed_id, position: track.discovery.position })
 }
-let session: { id: string; track: MusicTrack; coverage: ListeningCoverage; seq: number; owner: number; active: boolean; duration: number; sent: number; context: ListeningContext } | null = null
+let session: { id: string; track: MusicTrack; coverage: ListeningCoverage; seq: number; owner: string; active: boolean; duration: number; sent: number; context: ListeningContext } | null = null
 export function beginListening(track: MusicTrack, active: boolean, retry = false) {
   if (isAndroidApp() || retry) return
   endListening(active ? 'user_select' : 'automatic')
-  session = { id: crypto.randomUUID(), track, coverage: new ListeningCoverage(), seq: 0, owner: account.value?.id || 0, active, duration: (track.duration || 0) * 1000, sent: performance.now(), context: listeningContext }
+  session = { id: crypto.randomUUID(), track, coverage: new ListeningCoverage(), seq: 0, owner: account.value?.id || '', active, duration: (track.duration || 0) * 1000, sent: performance.now(), context: listeningContext }
   report('playback_start')
 }
 function report(type: string, reason = '') {

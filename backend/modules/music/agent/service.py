@@ -169,8 +169,13 @@ def qualified(row):
     parsed = row["request"].get("parsed")
     if not parsed:
         return []
-    return [t | {"match": features.match(t, parsed)} for t in row["context"].get("candidates", [])
+    tracks = [t | {"match": features.match(t, parsed)} for t in row["context"].get("candidates", [])
             if isinstance(t.get("title"), str) and isinstance(t.get("artist"), str) and features.match(t, parsed)["qualified"]]
+    if row["request"].get("effective_rule"):
+        from backend.modules.social.rules import select
+        tracks, _ = select(tracks, row["request"]["effective_rule"])
+        tracks = [t | {"match": t["match"] | {"score": round(t["rule_score"] * 100)}} for t in tracks]
+    return tracks
 
 
 def deduplicated(tracks):

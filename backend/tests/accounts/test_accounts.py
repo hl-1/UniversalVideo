@@ -57,7 +57,9 @@ class AccountIntegrationTests(unittest.TestCase):
         migrate_test_database(config | {'database': cls.db_name})
         database_store.schema_ready = False
         with library.database() as cursor:
-            cursor.execute('UPDATE users SET password_hash=%s,must_change_password=FALSE WHERE id=1', (accounts.passwords.hash('Test-admin-123!'),))
+            cursor.execute("SELECT id FROM users WHERE username='admin'")
+            cls.admin_id = cursor.fetchone()['id']
+            cursor.execute('UPDATE users SET password_hash=%s,must_change_password=FALSE WHERE id=%s', (accounts.passwords.hash('Test-admin-123!'), cls.admin_id))
         cls.a_id = accounts.create_user(accounts.Credentials(username='user_a', password='Test-user-123!'))
         cls.b_id = accounts.create_user(accounts.Credentials(username='user_b', password='Test-user-123!'))
 
@@ -71,6 +73,12 @@ class AccountIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        # Realtime lifecycle is covered by the social suite; account clients do
+        # not need independent background publishers for every login fixture.
+        for module in (application.social_realtime, application.social_worker):
+            self.stack.enter_context(patch.object(module, 'start'))
+            self.stack.enter_context(patch.object(module, 'stop'))
         from backend.modules.music.discovery import profile_runtime
         self.stack.enter_context(patch.object(profile_runtime,'start'))
         from backend.infrastructure.browser_sessions import BrowserSessions
@@ -81,6 +89,9 @@ class AccountIntegrationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(accounts, 'cancel_callbacks', callbacks))
         self.prefix = 'videodream:test:' + secrets.token_hex(8) + ':'
         self.stack.enter_context(patch.object(accounts, 'redis_prefix', return_value=self.prefix))
+        redis_client = accounts.redis_client()
+        self.stack.enter_context(patch.object(accounts, 'redis_client', return_value=redis_client))
+        self.addCleanup(redis_client.close)
         self.stack.enter_context(patch.object(accounts.captcha, 'make_code', return_value='A2B3'))
         self.stack.enter_context(patch.object(network, 'public_url', side_effect=lambda value: value))
         self.stack.enter_context(patch.object(video_tasks.executor, 'submit'))
@@ -92,9 +103,9 @@ class AccountIntegrationTests(unittest.TestCase):
                 cursor.execute(f'DELETE FROM {table}')
             for table in ('music_server_assets', 'music_playlists', 'music_favorites', 'music_history', 'music_downloads', 'music_lyrics', 'music_tracks', 'music_theme', 'resources', 'audit_logs'):
                 cursor.execute(f'DELETE FROM {table}')
-            cursor.execute("DELETE FROM users WHERE id NOT IN (1,%s,%s)", (self.a_id, self.b_id))
-            cursor.execute("UPDATE users SET role=IF(id=1,'super_admin','user'),status='active',must_change_password=FALSE,auth_version=0,password_hash=%s WHERE id<>1", (accounts.passwords.hash('Test-user-123!'),))
-            cursor.execute('UPDATE users SET password_hash=%s WHERE id=1', (accounts.passwords.hash('Test-admin-123!'),))
+            cursor.execute("DELETE FROM users WHERE id NOT IN (%s,%s,%s)", (self.admin_id, self.a_id, self.b_id))
+            cursor.execute("UPDATE users SET role='user',status='active',must_change_password=FALSE,auth_version=0,password_hash=%s WHERE id<>%s", (accounts.passwords.hash('Test-user-123!'), self.admin_id))
+            cursor.execute('UPDATE users SET password_hash=%s WHERE id=%s', (accounts.passwords.hash('Test-admin-123!'), self.admin_id))
             cursor.execute('UPDATE system_settings SET config=%s WHERE id=1', (json.dumps(accounts.DEFAULT_SETTINGS),))
         video_tasks.tasks.clear()
         video_tasks.summary_tasks.clear()
@@ -512,7 +523,7 @@ class AccountIntegrationTests(unittest.TestCase):
 
     def test_demotion_is_immediate_and_last_administrator_is_protected(self):
         for method, body in (('patch', {'role': 'user'}), ('patch', {'status': 'disabled'}), ('delete', None)):
-            response = getattr(self.admin, method)('/api/admin/users/1', **({'json': body} if body else {}))
+            response = getattr(self.admin, method)(f'/api/admin/users/{self.admin_id}', **({'json': body} if body else {}))
             self.assertEqual(response.status_code, 409)
         self.admin.patch(f'/api/admin/users/{self.a_id}', json={'role': 'super_admin'}).raise_for_status()
         self.assertEqual(self.a.get('/api/admin/users').status_code, 200)

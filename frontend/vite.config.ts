@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': {
         target: process.env.VIDEODREAM_API_TARGET || 'http://127.0.0.1:8001',
         changeOrigin: true,
+        ws: true,
       },
     },
   },

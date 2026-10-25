@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Disc3, ImagePlus, ListMusic, LoaderCircle, Palette, RefreshCw, Save, Search, UserRound } from 'lucide-vue-next'
+import { Copy, Disc3, ImagePlus, ListMusic, LoaderCircle, Palette, RefreshCw, Save, Search, UserRound } from 'lucide-vue-next'
 import ThemeSettings from './ThemeSettings.vue'
 import ImageSettings from './ImageSettings.vue'
 import TrackCover from '../components/TrackCover.vue'
 import { counts, getTracks, libraryError, playlists, profile, refreshLibrary, trackArtwork, trackArtworkMap, trackKey, trackPayload, type MusicTrack, type Playlist } from '../musicLibrary'
 import { api, jsonRequest } from '../../../shared/api/client'
 import { currentTrack } from '../player/musicPlayer'
+import { account } from '../../accounts/auth'
 
 const props = defineProps<{ initialTrack?: MusicTrack | null; initialPlaylist?: Playlist | null }>()
 type View = 'theme' | 'profile' | 'tracks' | 'playlists'
@@ -19,6 +20,8 @@ const loading = ref(false)
 const loaded = ref(false)
 const error = ref('')
 const status = ref('')
+const accountCopyStatus = ref('')
+const copyingAccount = ref(false)
 const tracks = ref<MusicTrack[]>([])
 const query = ref('')
 const selectedKey = ref(props.initialTrack ? trackKey(props.initialTrack) : currentTrack.value ? trackKey(currentTrack.value) : '')
@@ -71,6 +74,18 @@ async function saveProfile() {
     status.value = '个人资料已保存'
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '资料保存失败。' }
   finally { busy.value = false }
+}
+async function copyAccount() {
+  const username = account.value?.username
+  if (!username || copyingAccount.value) return
+  copyingAccount.value = true
+  accountCopyStatus.value = ''
+  try {
+    await navigator.clipboard.writeText(username)
+    accountCopyStatus.value = '账号已复制'
+  } catch {
+    accountCopyStatus.value = '复制失败，请选中或长按账号手动复制。'
+  } finally { copyingAccount.value = false }
 }
 function editAvatar() {
   error.value = ''; status.value = ''
@@ -134,6 +149,13 @@ onMounted(() => { if (view.value === 'tracks') void loadTracks() })
     <section id="appearance-panel-profile" v-if="view === 'profile'" role="tabpanel" aria-labelledby="appearance-tab-profile">
       <form class="mc-profile-form" @submit.prevent="saveProfile">
         <div class="profile-avatar-row"><span class="mc-avatar large"><img v-if="profile.avatar" :src="profile.avatar" alt="个人头像" /><UserRound v-else :size="36" /></span><button type="button" class="mc-icon" :disabled="busy" title="更换头像" aria-label="更换头像" @click="editAvatar"><ImagePlus :size="21" /></button></div>
+        <section v-if="account" class="profile-account" aria-label="我的账号">
+          <label for="profile-login-account">登录账号</label>
+          <div class="profile-account-row"><input id="profile-login-account" :value="account.username" readonly :spellcheck="false" /><button type="button" class="mc-command" :disabled="copyingAccount" @click="copyAccount"><Copy :size="16" />复制账号</button></div>
+          <p>朋友可搜索此账号添加你。昵称仅用于展示。</p>
+          <p class="profile-account-id">用户 ID：<span>{{ account.id }}</span></p>
+          <p v-if="accountCopyStatus" role="status">{{ accountCopyStatus }}</p>
+        </section>
         <label>昵称<input v-model="draft.nickname" maxlength="40" :disabled="busy" required /></label><label>个人简介<textarea v-model="draft.bio" maxlength="200" rows="3" :disabled="busy" /></label>
         <div class="mc-profile-stats"><span><strong>{{ counts.favorites }}</strong>喜欢</span><span><strong>{{ counts.history }}</strong>已听歌曲</span><span><strong>{{ playlists.length }}</strong>歌单</span></div>
         <button class="mc-command primary" :disabled="busy || !draft.nickname.trim() || !profileDirty" type="submit"><LoaderCircle v-if="busy" :size="17" class="spin" /><Save v-else :size="17" />保存资料</button>
@@ -156,3 +178,13 @@ onMounted(() => { if (view.value === 'tracks') void loadTracks() })
     <ImageSettings v-if="editor" :title="editor.title" :endpoint="editor.endpoint" :image="editor.image" @saved="imageSaved" @close="editor = null" />
   </div>
 </template>
+
+<style scoped>
+.profile-account { width: 100%; min-width: 0; }
+.profile-account > label { display: block; margin-bottom: 10px; color: var(--music-muted, #6b7664); font-size: 12px; }
+.profile-account-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.profile-account-row input { flex: 1 1 180px; min-width: 0; }
+.profile-account-row button { flex-shrink: 0; }
+.profile-account p { margin: 10px 0 0; color: var(--music-muted, #6b7664); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile-account-id span { color: var(--music-text, #3e4a36); user-select: text; }
+</style>

@@ -45,6 +45,7 @@ class CreateRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
     need: str = Field(min_length=1, max_length=1000)
     preferences: dict = Field(default_factory=dict)
+    rule_version_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
     @field_validator("need")
     @classmethod

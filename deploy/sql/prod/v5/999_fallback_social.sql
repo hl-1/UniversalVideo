@@ -1,0 +1,32 @@
+-- EXPORT social data before running. Apply via a new Flyway compensation version,
+-- or restore the matching full backup. Never leave V5 history after manually removing V5 tables.
+ALTER TABLE social_rules DROP FOREIGN KEY social_rule_published_fk, DROP FOREIGN KEY social_rule_origin_fk;
+ALTER TABLE social_user_settings DROP FOREIGN KEY social_avatar_fk;
+ALTER TABLE social_room_queue DROP FOREIGN KEY social_queue_song_fk;
+DROP TABLE social_playlist_items;
+DROP TABLE social_playlist_members;
+DROP TABLE social_playlists;
+DROP TABLE social_reports;
+DROP TABLE social_rule_run_bindings;
+DROP TABLE social_rule_library;
+DROP TABLE social_rule_versions;
+DROP TABLE social_rules;
+DROP TABLE social_duet_invites;
+DROP TABLE social_performance_parts;
+DROP TABLE social_performances;
+DROP TABLE social_karaoke_songs;
+DROP TABLE social_room_queue;
+DROP TABLE social_room_invites;
+DROP TABLE social_room_members;
+DROP TABLE social_rooms;
+DROP TABLE social_outbox;
+DROP TABLE social_notifications;
+DROP TABLE social_share_assets;
+DROP TABLE social_shares;
+DROP TABLE social_message_assets;
+DROP TABLE social_assets;
+DROP TABLE social_messages;
+DROP TABLE social_conversation_members;
+DROP TABLE social_conversations;
+DROP TABLE social_relations;
+DROP TABLE social_user_settings;

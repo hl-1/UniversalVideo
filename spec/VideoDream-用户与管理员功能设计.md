@@ -2,9 +2,9 @@
 
 > 2026-10-23 数据库管理更新：表结构统一由 Flyway 管理，完整定义见 `backend/migrations/sql/V1__baseline.sql`。启动时只检查版本；本文早期自动建表、自动应用结构迁移的说明由 [Flyway 规格](Flyway数据库版本管理设计.md) 替代。历史业务和文件迁移保留为显式命令，已有业务表及 Redis 契约不变。
 
-版本：v1.2
+版本：v1.3
 
-日期：2026-10-21
+日期：2026-10-26
 
 状态：功能实现与维护规格；云端用户目录须在发布时离线迁移
 
@@ -281,3 +281,239 @@ MySQL resources 新增 device_id CHAR(36) NULL 和 resource_device(user_id,kind,
 - 已执行的 Flyway V1 及其部署快照不改写。新部署在 `scripts/initialize-accounts.py` 首次设置管理员密码时，在同一事务将 `system_settings.config.registration_enabled` 设置为 JSON 布尔值 `true`；通过锁定管理员行及 `!uninitialized` 标记识别首次初始化。再次设置管理员密码不改注册开关。
 - 无 MySQL 表、字段、索引或外键变更；仅首次初始化更新现有 JSON 字段，完整结构沿用第 17 节。无 Redis Key、类型、值结构或 TTL 变更，验证码、注册限流、普通用户角色与鉴权规则沿用现状。
 - 回滚可通过管理员设置关闭公开注册；回退代码不删除已注册用户，也不覆盖已有显式开关。
+
+
+## 18. 用户雪花主键与账号展示（2026-10-26）
+
+### 18.1 身份与生成规则
+
+直接使用雪花算法生成 users.id 主键，旧账号同步换号，现有用户名、密码摘要、角色、好友/消息、音乐/文件归属保持其对应关系。个人资料展示登录账号、用户 ID 和复制账号按钮；好友页顶部展示可复制的登录账号，昵称仅用于展示，好友搜索仍按登录账号或至少两个字符的前缀。
+
+雪花 ID 为正的有符号 63 位整数，布局是 41 位毫秒时间差、10 位节点、12 位同毫秒序列，纪元为 2020-01-01 00:00:00 UTC。数据库使用 BIGINT；HTTP、WebSocket 和前端以十进制字符串表示，禁止 Number/parseInt 转换。计数、播放位置等普通数值不改变类型。服务端 Python 与 MySQL 使用整数计算，不能使用浮点数拼装 ID。
+
+VIDEODREAM_USER_ID_WORKER 默认 0，运行节点可配置 0–1022，节点 1023 保留给旧账号迁移。分配 ID 在创建用户的同一事务中锁定 user_id_generator_state 的节点行，锁后读取数据库 CURRENT_TIMESTAMP(3)，再更新毫秒与序列。同一数据库上同节点多实例共享这行锁；进程重启保留状态。时钟回退、4096 个序列用尽或 41 位时间越界时拒绝分配，不复用 ID，不回退到自增或随机数。跨数据库独立发号不保证唯一，不能共享一个账号命名空间。
+
+### 18.2 MySQL 完整结构与索引
+
+Flyway V6 新建 user_id_generator_state、user_id_migration_map。users.id 取消 AUTO_INCREMENT；music_profile.id、music_theme.id 由 INT 扩为 BIGINT；8 个个人音乐表的 user_id 去掉默认 1。账号创建显式写入雪花 ID，管理员初始化按账号/角色查找，不依赖 id=1。完整最终表结构如下（既有索引及外键保留）：
+
+```sql
+CREATE TABLE `users` (
+  `id` bigint NOT NULL,
+  `username` varchar(40) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `role` varchar(16) NOT NULL DEFAULT 'user',
+  `status` varchar(16) NOT NULL DEFAULT 'active',
+  `must_change_password` tinyint(1) NOT NULL DEFAULT '0',
+  `auth_version` int NOT NULL DEFAULT '0',
+  `created_at` double NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_profile` (
+  `id` bigint NOT NULL,
+  `nickname` varchar(40) NOT NULL,
+  `bio` varchar(200) NOT NULL DEFAULT '',
+  `avatar` mediumtext,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `music_profile_owner` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_theme` (
+  `id` bigint NOT NULL,
+  `config` text NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `music_theme_owner` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_tracks` (
+  `id` char(64) NOT NULL,
+  `provider` varchar(12) NOT NULL,
+  `identifier` varchar(255) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `artist` varchar(255) NOT NULL,
+  `webpage_url` text NOT NULL,
+  `thumbnail` text,
+  `duration` double DEFAULT NULL,
+  `access` varchar(100) NOT NULL,
+  `custom_thumbnail` text,
+  `cover_updated_at` double NOT NULL DEFAULT '0',
+  `cover_checked_at` double NOT NULL DEFAULT '0',
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `music_tracks_owner` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_playlists` (
+  `id` char(24) NOT NULL,
+  `name` varchar(80) NOT NULL,
+  `description` varchar(300) NOT NULL,
+  `created_at` double NOT NULL,
+  `thumbnail` text,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `music_playlists_owner` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_favorites` (
+  `track_id` char(64) NOT NULL,
+  `created_at` double NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`track_id`),
+  KEY `music_favorites_owner` (`user_id`),
+  CONSTRAINT `music_favorites_ibfk_1` FOREIGN KEY (`track_id`) REFERENCES `music_tracks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_history` (
+  `track_id` char(64) NOT NULL,
+  `played_at` double NOT NULL,
+  `play_count` int NOT NULL DEFAULT '1',
+  `preview` tinyint(1) NOT NULL DEFAULT '0',
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`track_id`),
+  KEY `music_history_owner` (`user_id`),
+  CONSTRAINT `music_history_ibfk_1` FOREIGN KEY (`track_id`) REFERENCES `music_tracks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_downloads` (
+  `id` char(24) NOT NULL,
+  `track_id` char(64) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `created_at` double NOT NULL,
+  `imported` tinyint(1) NOT NULL DEFAULT '0',
+  `file_hash` char(64) DEFAULT NULL,
+  `file_size` bigint DEFAULT NULL,
+  `file_mtime` bigint DEFAULT NULL,
+  `file_available` tinyint(1) NOT NULL DEFAULT '1',
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `filename` (`filename`),
+  KEY `track_id` (`track_id`),
+  KEY `file_hash_index` (`file_hash`),
+  KEY `music_downloads_owner` (`user_id`),
+  CONSTRAINT `music_downloads_ibfk_1` FOREIGN KEY (`track_id`) REFERENCES `music_tracks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `music_lyrics` (
+  `track_id` char(64) NOT NULL,
+  `text` mediumtext NOT NULL,
+  `source` varchar(80) NOT NULL,
+  `format` varchar(8) NOT NULL,
+  `signature` text NOT NULL,
+  `checked_at` double NOT NULL,
+  `manual` tinyint(1) NOT NULL DEFAULT '0',
+  `updated_at` double NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`track_id`),
+  KEY `music_lyrics_owner` (`user_id`),
+  CONSTRAINT `music_lyrics_ibfk_1` FOREIGN KEY (`track_id`) REFERENCES `music_tracks` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE user_id_generator_state (
+  worker_id SMALLINT UNSIGNED NOT NULL PRIMARY KEY,
+  last_timestamp_ms BIGINT UNSIGNED NOT NULL,
+  sequence SMALLINT UNSIGNED NOT NULL,
+  CONSTRAINT user_id_worker_range CHECK (worker_id <= 1023),
+  CONSTRAINT user_id_sequence_range CHECK (sequence <= 4095)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE user_id_migration_map (
+  old_id BIGINT NOT NULL PRIMARY KEY,
+  new_id BIGINT NOT NULL UNIQUE,
+  created_at DOUBLE NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+```
+
+生成器表以 worker_id 为主键，无外键，限制节点和序列范围；状态与用户 INSERT 同事务提交。迁移对照表以 old_id 为主键，new_id 有唯一索引，无用户外键，保留换号对照供恢复与浏览器设备索引迁移，不作为账号访问别名。旧 ID 不能用于访问新账号。
+
+### 18.3 全部关系和数据迁移
+
+离线阶段按 information_schema 收集全部 user_id 列和声明指向 users.id 的外键，同时处理审计 actor_id、资料/主题镜像主键。当前范围如下；以后新增的 user_id 或用户外键会被同一迁移器识别：
+
+| 表 | 用户身份列 |
+|---|---|
+| `audit_logs` | `actor_id` |
+| `music_discovery_batches` | `user_id` |
+| `music_discovery_candidates` | `user_id` |
+| `music_discovery_daily_usage` | `user_id` |
+| `music_discovery_events` | `user_id` |
+| `music_discovery_feedback` | `user_id` |
+| `music_discovery_feeds` | `user_id` |
+| `music_discovery_identities` | `user_id` |
+| `music_discovery_profile_runs` | `user_id` |
+| `music_discovery_profile_versions` | `user_id` |
+| `music_discovery_profiles` | `user_id` |
+| `music_downloads` | `user_id` |
+| `music_favorites` | `user_id` |
+| `music_history` | `user_id` |
+| `music_lyrics` | `user_id` |
+| `music_playlists` | `user_id` |
+| `music_profile` | `id`, `user_id` |
+| `music_recommendation_runs` | `user_id` |
+| `music_server_assets` | `user_id` |
+| `music_theme` | `id`, `user_id` |
+| `music_track_features` | `user_id` |
+| `music_tracks` | `user_id` |
+| `resources` | `user_id` |
+| `social_assets` | `owner_id` |
+| `social_conversation_members` | `user_id` |
+| `social_conversations` | `owner_id` |
+| `social_duet_invites` | `claimed_by`, `invitee_id`, `inviter_id` |
+| `social_karaoke_songs` | `creator_id` |
+| `social_messages` | `sender_id` |
+| `social_notifications` | `user_id` |
+| `social_performance_parts` | `user_id` |
+| `social_performances` | `owner_id` |
+| `social_playlist_items` | `contributor_id` |
+| `social_playlist_members` | `user_id` |
+| `social_playlists` | `owner_id` |
+| `social_relations` | `target_user_id`, `user_id` |
+| `social_reports` | `handler_id`, `reporter_id` |
+| `social_room_invites` | `invitee_id`, `inviter_id` |
+| `social_room_members` | `user_id` |
+| `social_room_queue` | `partner_id`, `requester_id` |
+| `social_rooms` | `owner_id` |
+| `social_rule_library` | `user_id` |
+| `social_rules` | `author_id` |
+| `social_shares` | `owner_id` |
+| `social_user_settings` | `user_id` |
+| `users` | `id` |
+| `video_mind_maps` | `user_id` |
+| `video_parse_records` | `user_id` |
+| `video_recent_links` | `user_id` |
+| `video_summaries` | `user_id` |
+| `video_view_states` | `user_id` |
+
+事务内更新用户主键及上列关联、审计账号目标、JSON 中的身份字段和 recipients/singers 等用户数组、私聊 direct_key、按用户派生的 video_view/video_search 键；播放位置、歌曲 ID、消息序号等业务数字保持原义。旧账号的 ID 对照先持久化，数据更新及最终完成标记在一个事务中提交，校验旧 ID 残留与每条用户外键后才开放服务。迁移期间外键检查只在独立迁移连接上临时关闭，完成或异常时恢复；应用连接不能跳过外键检查。
+
+用户目录 downloads/users/{old_id}、downloads/_tmp/{old_id}、.run/browser-profiles/{old_id} 按清单重命名为新 ID。清单先持久化，检查根目录、符号链接、目标冲突和文件清单指纹，禁止覆盖或合并。异常回滚事务并逆向恢复已移动目录；进程中断后使用同一对照与清单幂等重试。Flyway 只负责 DDL，scripts/database.py migrate 还负责此数据/目录阶段；缺少 users-snowflake-v1 完成标记时 schema gate 拒绝启动。
+
+登录用户信息增加 legacy_id 字符串，仅用于本人浏览器的旧设备音乐索引与下载记录复制；旧 IndexedDB 条目、文件句柄和 localStorage 记录保留供回滚，不提升原文件权限，不复制其他账号的设备音乐。新用户 legacy_id 为 null。
+
+### 18.4 Redis 数据契约与一致性
+
+雪花生成不使用 Redis，不新增 Redis key、类型、值结构或 TTL。现有 key 中 uid 替换为雪花十进制字符串，例如 videodream:user-sessions:903456789012345679（Set，会话索引，TTL 7 天，成员为会话 ID）、videodream:session:{sid}（Hash，uid 字段为相同十进制文本，既有会话 TTL 7 天）、videodream:social:user-presence:903456789012345679（ZSet，连接 ID→心跳时间，TTL 90 秒）和 videodream:download:{kind}:903456789012345679:{identity}（现有下载缓存类型、值结构与 TTL 保留）。其余会话、下载、视频及社交 key 的完整结构与 TTL 分别沿用本规格与社交规格原章节。
+
+离线切换清理本项目 videodream:session:*、user-sessions:*、social:*、video:*、download:* 命名空间，撤销旧会话、票据和身份缓存；不清理其他应用前缀、登录限流和验证码。用户重新登录后按新 ID 重建缓存；旧 Access/Refresh/媒体凭证不能继续访问。Redis 故障使迁移停止，应用保持停服，不能带着旧身份缓存上线。MySQL 是账号与关系的权威数据，Outbox 继续负责重建及时通知。
+
+### 18.5 发布、兼容和回滚
+
+1. 停止后端与所有后台写入，保存匹配 V5 的代码/镜像、环境和文件备份。scripts/database.py migrate 会在 V6 DDL 前备份完整 MySQL（含 Flyway 历史），再执行结构和离线数据阶段。
+2. 已接管库直接 migrate → validate → check；未接管旧库先按 V1 preflight/baseline。V1–V5 不改校验和。对照表与 .run/user-id-migrations 目录清单必须备份保留。
+3. 使用匹配 V6 的前后端，验证全部账号数与角色、管理员初始化状态、资料/主题、好友/群聊、歌曲和文件归属、旧文件可读、完整 ID 展示和复制，旧会话应失效。
+4. 回滚时停服，恢复包含 Flyway 历史的匹配 V5 完整数据库备份；按清单验证 target 指纹和 source 不存在后逆向重命名目录，再恢复 V5 应用和原配置。浏览器保留的旧设备记录继续使用。禁止只删新表、只改回自增或自动 repair。
+5. 如换号后已有新数据，先导出新账号、业务与媒体，选择保留 V6 的兼容应用或编写前向补偿迁移；不能把雪花 ID 截断回 INT。所有恢复完成后重新登录并核对归属，才能开放服务。
+
+### 18.6 本地实施验证（2026-10-26）
+
+本地库已完成 V5 → V6，保留原有两个账号及角色；原 admin 主键 1 已迁移为雪花 ID，另一原账号同步迁移。迁移检查未发现受迁移字段中的旧 ID 残留，Flyway validate 与应用 schema check 均通过。迁移前已在 `.run/database-backups/` 保存完整数据库 SQL 和对应用户目录的 ZIP 备份，目录清单保存在 `.run/user-id-migrations/`。后端已按原端口 8001 重启，经统一地址 `http://127.0.0.1:5174/api/health` 验证返回 200。旧会话已失效，需重新登录。
+
+雪花专项 6 项、社交与 Flyway 回归 25 项、账号相关回归 6 项通过；前端 179 项测试与类型检查、生产构建通过。专项覆盖旧用户关联及文件迁移、并发唯一性、时钟回退、JSON 长整数精度和设备索引兼容。使用可清理的临时账号实际登录，个人资料显示的 18 位 ID 与数据库精确一致；390×844 手机视口无横向溢出，账号复制内容正确。临时账号验证后清理。
+
+以上为相关范围的验证；此前全量后端未通过的历史结果仍见社交规格第 18 节，不能据此视为全量通过。真实 LiveKit 双设备音频仍待配置后验收。
+
+2026-10-26 提交前全量检查：前端重新运行 179 项测试、类型检查和生产构建均通过；后端全量 718 项运行完成，53 项失败、113 项错误，未通过。已确认错误包含旧测试仍写死管理员 ID 1、旧 Redis 的多字段 HSET 兼容、Windows 历史目录迁移和 WinError 10048 临时端口耗尽；另外存在资源、权限和任务时序断言失败，尚未逐项修复。专项通过不能替代该全量结果。V5/V6 部署 SQL 与 Flyway 副本一致，Python 编译与提交空白检查通过。

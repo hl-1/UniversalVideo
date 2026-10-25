@@ -13,14 +13,14 @@ export const unverifiedMusicCount = ref(0)
 type FileConfirmation = { source: 'filesystem'; artifact: 'individual_file'; status: 'completed'; bytes: number; saved_at: number; download_id?: string }
 type SavedTrack = MusicTrack & { file_confirmation: FileConfirmation }
 let confirmations: SavedTrack[] = []
-const storageKey = (uid: number) => `videodream.music.saved.${uid}.${currentDeviceId()}`
+const storageKey = (uid: string) => `videodream.music.saved.${uid}.${currentDeviceId()}`
 function validTrack(track: any): track is MusicTrack { return track && typeof track.title === 'string' && typeof track.webpage_url === 'string' }
 function validConfirmation(track: any): track is SavedTrack {
   const receipt = track?.file_confirmation
   return validTrack(track) && receipt?.source === 'filesystem' && receipt.artifact === 'individual_file' && receipt.status === 'completed'
     && Number.isSafeInteger(receipt.bytes) && receipt.bytes > 0 && Number.isFinite(receipt.saved_at) && receipt.saved_at > 0
 }
-function persist(uid: number) {
+function persist(uid: string) {
   try { localStorage.setItem(storageKey(uid), JSON.stringify({ version: 2, tracks: confirmations,
     unverified_keys: [...unverified.value], unverified_tracks: unverifiedMusicHistory.value })) } catch { /* A full browser store cannot change save confirmation. */ }
 }
@@ -30,8 +30,13 @@ watch(() => account.value?.id, uid => {
   if (!uid) return
   try {
     let raw = localStorage.getItem(storageKey(uid))
+    const legacyId = account.value?.legacy_id
+    if (!raw && legacyId) {
+      raw = localStorage.getItem(storageKey(legacyId))
+      if (raw) localStorage.setItem(storageKey(uid), raw)
+    }
     if (!raw) {
-      const legacy = localStorage.getItem(`videodream.music.saved.${uid}`)
+      const legacy = localStorage.getItem(`videodream.music.saved.${legacyId || uid}`)
       if (legacy) {
         const old = JSON.parse(legacy)
         // Unknown device provenance cannot become a current-device receipt.
@@ -65,7 +70,7 @@ watch(() => account.value?.id, uid => {
 export function hasLibraryFile(track: MusicTrack) { return Boolean(track.local_url && track.file_available === true) }
 export function isMusicDownloaded(track: MusicTrack) { return hasDeviceFile(track) }
 export function musicDownloadLabel(track: MusicTrack) { return hasDeviceFile(track) ? '本设备可播放' : saved.value.has(trackKey(track)) ? '本设备保存记录' : unverified.value.has(trackKey(track)) ? '旧保存记录待核实' : '' }
-export function rememberMusicDownloads(tracks: MusicTrack[], uid: number | undefined, receipt: { bytes: number; download_id?: string }) {
+export function rememberMusicDownloads(tracks: MusicTrack[], uid: string | undefined, receipt: { bytes: number; download_id?: string }) {
   if (!uid || uid !== account.value?.id || tracks.length !== 1 || !Number.isSafeInteger(receipt.bytes) || receipt.bytes <= 0) return
   const track = tracks[0]!, key = trackKey(track)
   const entry: SavedTrack = { ...trackPayload(track), saved_to_device: true, file_confirmation: {

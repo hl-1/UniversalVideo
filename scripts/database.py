@@ -45,7 +45,7 @@ def main():
             else:
                 print("V1 structure verified (tables, columns, defaults, indexes, foreign keys, collations)")
     else:
-        runner.run_flyway(config, args.action, engine=args.engine)
+        runner.run_flyway(config, args.action, engine=args.engine, user_id_files=args.action == "migrate")
 
 
 if __name__ == "__main__":

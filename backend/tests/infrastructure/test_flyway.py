@@ -4,6 +4,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -49,7 +50,18 @@ class FlywayIntegrationTests(unittest.TestCase):
         discovery = {name: value for name, value in schema.items() if name.startswith('music_discovery_')}
         self.assertEqual(set(discovery), {'music_discovery_'+name for name in ('profiles','identities','batches','items','events','feedback',
             'candidates','feeds','feed_items','daily_usage','profile_runs','profile_versions')})
-        self.assertFalse(runner.schema_differences({name:value for name,value in schema.items() if name not in discovery and name != 'music_search_benchmark_logs'}))
+        social = {name: value for name, value in schema.items() if name.startswith('social_')}
+        self.assertEqual(len(social), 27)
+        self.assertEqual(social['social_messages']['indexes']['social_message_client']['columns'], [['conversation_id', None], ['client_msg_id', None]])
+        self.assertTrue(any(f['table'] == 'social_rule_versions' for f in social['social_rules']['foreign_keys']))
+        expected = json.loads(runner.CONTRACT.read_text(encoding='utf-8'))
+        expected['users']['columns']['id']['extra'] = ''
+        for name in ('music_profile','music_theme'):
+            expected[name]['columns']['id']['type'] = 'bigint'
+        for name in ('music_profile','music_theme','music_tracks','music_playlists','music_favorites','music_history','music_downloads','music_lyrics'):
+            expected[name]['columns']['user_id']['default'] = None
+        self.assertEqual(set(name for name in schema if name.startswith('user_id_')), {'user_id_generator_state','user_id_migration_map'})
+        self.assertFalse(runner.schema_differences({name:value for name,value in schema.items() if name in expected}, expected))
         self.assertEqual(discovery['music_discovery_events']['indexes']['discovery_event_sequence']['columns'],
                          [['user_id',None],['playback_id',None],['seq',None]])
         self.assertTrue(any(f['table']=='music_discovery_items' and f['delete']=='SET NULL'
@@ -81,7 +93,7 @@ class FlywayIntegrationTests(unittest.TestCase):
                 initialize_schema(cursor)
                 cursor.execute("SELECT version, success FROM flyway_schema_history WHERE version IS NOT NULL")
                 self.assertEqual(cursor.fetchall(), [{"version":str(i),'success':1} for i in range(1,int(SCHEMA_VERSION)+1)])
-                cursor.execute("SELECT password_hash FROM users WHERE id=1")
+                cursor.execute("SELECT password_hash FROM users WHERE username='admin'")
                 self.assertEqual(cursor.fetchone()["password_hash"], "!uninitialized")
                 statements = []
                 execute = cursor.execute
@@ -104,12 +116,14 @@ class FlywayIntegrationTests(unittest.TestCase):
         with self.isolated_database() as config, tempfile.TemporaryDirectory() as work:
             self.flyway(config)
             with pymysql.connect(**config) as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE username='admin'")
+                owner = cursor.fetchone()['id']
                 cursor.execute('''INSERT INTO music_discovery_profile_runs
                     (run_id,user_id,trigger_type,source_revision,base_control_revision,
                      base_agent_revision,input_hash,input_snapshot,status,context,steps,policy_version,
                      skill_version,created_at,updated_at)
-                    VALUES (%s,1,'manual',0,0,0,%s,'{}','pending','{}','[]','test','test',1,1)''',
-                    ('b'*32,'c'*64))
+                    VALUES (%s,%s,'manual',0,0,0,%s,'{}','pending','{}','[]','test','test',1,1)''',
+                    ('b'*32,owner,'c'*64))
                 connection.commit()
                 with patch.object(runner,'BACKUP_DIR',Path(work)):
                     backup=runner.backup_database(cursor)
@@ -121,7 +135,7 @@ class FlywayIntegrationTests(unittest.TestCase):
                     connection.commit()
                     initialize_schema(cursor)
                     cursor.execute('SELECT active_user_id FROM music_discovery_profile_runs WHERE run_id=%s',('b'*32,))
-                    self.assertEqual(cursor.fetchone()['active_user_id'],1)
+                    self.assertEqual(cursor.fetchone()['active_user_id'],owner)
 
     def test_application_account_needs_no_ddl_privileges(self):
         with self.isolated_database() as config:
@@ -134,7 +148,7 @@ class FlywayIntegrationTests(unittest.TestCase):
                     cursor.execute("GRANT SELECT,INSERT,UPDATE,DELETE ON `" + config["database"] + "`.* TO %s@'%%'", (username,))
                     with pymysql.connect(**(config | {"user": username, "password": password})) as connection, connection.cursor() as app:
                         initialize_schema(app)
-                        app.execute("UPDATE music_profile SET nickname='DML works' WHERE id=1")
+                        app.execute("UPDATE music_profile SET nickname='DML works' WHERE id=(SELECT id FROM users WHERE username='admin')")
                         with self.assertRaises(pymysql.MySQLError):
                             app.execute("CREATE TABLE ddl_must_be_rejected (id INT)")
                 finally:
@@ -157,7 +171,8 @@ class FlywayIntegrationTests(unittest.TestCase):
                 backup = runner.baseline(config)
             self.assertTrue(backup.is_file())
             self.assertIn("保留资料", backup.read_text(encoding="utf-8"))
-            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            if os.name != 'nt':
+                self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
             with self.isolated_database() as restored:
                 with pymysql.connect(**restored, client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS) as connection, connection.cursor() as cursor:
                     cursor.execute(backup.read_text(encoding="utf-8"))
@@ -170,7 +185,7 @@ class FlywayIntegrationTests(unittest.TestCase):
             self.flyway(config)
             with pymysql.connect(**config) as connection, connection.cursor() as cursor:
                 initialize_schema(cursor)
-                cursor.execute("SELECT nickname FROM music_profile WHERE id=1")
+                cursor.execute("SELECT nickname FROM music_profile WHERE id=(SELECT id FROM users WHERE username='admin')")
                 self.assertEqual(cursor.fetchone()["nickname"], "保留资料")
                 cursor.execute("SELECT type FROM flyway_schema_history WHERE version='1'")
                 self.assertEqual(cursor.fetchone()["type"], "BASELINE")
@@ -203,7 +218,9 @@ class FlywayIntegrationTests(unittest.TestCase):
             (Path(work) / "V2__daily_discovery.sql").write_bytes((runner.MIGRATIONS / "V2__daily_discovery.sql").read_bytes())
             (Path(work) / "V3__music_search_benchmark_logs.sql").write_bytes((runner.MIGRATIONS / "V3__music_search_benchmark_logs.sql").read_bytes())
             (Path(work) / "V4__discovery_pool_and_profile.sql").write_bytes((runner.MIGRATIONS / "V4__discovery_pool_and_profile.sql").read_bytes())
-            (Path(work) / "V5__deliberate_failure.sql").write_text(
+            for migration in runner.MIGRATIONS.glob('V*.sql'):
+                (Path(work) / migration.name).write_bytes(migration.read_bytes())
+            (Path(work) / f"V{int(SCHEMA_VERSION) + 1}__deliberate_failure.sql").write_text(
                 "CREATE TABLE flyway_failure_probe (id INT PRIMARY KEY);\nINVALID SQL;\n", encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 self.flyway(config, locations=Path(work))
@@ -239,7 +256,7 @@ class FlywayIntegrationTests(unittest.TestCase):
         with self.isolated_database() as config:
             self.flyway(config)
             with pymysql.connect(**config) as connection, connection.cursor() as cursor:
-                cursor.execute("UPDATE users SET password_hash='initialized-hash' WHERE id=1")
+                cursor.execute("UPDATE users SET password_hash='initialized-hash' WHERE username='admin'")
                 cursor.execute("UPDATE system_settings SET config=%s WHERE id=1", (json.dumps({"registration_enabled": True}),))
                 self.execute_file(cursor, "997_fallback_seed_settings.sql")
                 self.execute_file(cursor, "998_fallback_seed_data.sql")

@@ -24,8 +24,18 @@ function setup(t: any) {
   const downloads: any = {}
   new Function('require', 'exports', compiled)((id: string) => { assert.ok(id in stubs, id); return stubs[id] }, downloads)
   t.after(() => { globalThis.localStorage = previous })
-  return { downloads, data, readable, reload: () => change(account.value?.id), switchDevice(id: string) { device = id; change(account.value?.id) }, switchAccount(id: number) { account.value = { id }; change(id) } }
+  return { downloads, data, readable, reload: () => change(account.value?.id), switchDevice(id: string) { device = id; change(account.value?.id) }, switchAccount(id: number | string, legacy_id?: string) { account.value = { id, legacy_id }; change(id) } }
 }
+
+test('snowflake migration keeps prior download receipts without rounding the new ID', t => {
+  const { downloads, data, switchAccount } = setup(t)
+  downloads.rememberMusicDownloads([song], 1, { bytes: 100 })
+  const uid = '903456789012345679'
+  switchAccount(uid, '1')
+  assert.equal(downloads.savedMusicHistory.value.length, 1)
+  assert.equal(data.get(`videodream.music.saved.${uid}.device-A`), data.get('videodream.music.saved.1.device-A'))
+  assert.equal(downloads.isMusicDownloaded(song), false)
+})
 test('server files and filesystem receipts never replace actual device readability', t => {
   const { downloads, readable, reload } = setup(t)
   downloads.rememberMusicDownloads([song], 1, { bytes: 100, download_id: 'saved' })

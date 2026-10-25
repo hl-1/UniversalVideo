@@ -28,7 +28,10 @@ def migrate(cursor):
              'ready' if exists else 'missing',mimetypes.guess_type(row['filename'])[0] or 'application/octet-stream',
              row['file_size'],row['file_hash'],row['created_at'],time.time()))
         if kind == 'site_upload':
-            prefix = '' if row['user_id'] == 1 else str(row['user_id']) + ':'
+            cursor.execute("SELECT old_id FROM user_id_migration_map WHERE new_id=%s", (row['user_id'],))
+            previous = cursor.fetchone()
+            alias_uid = previous['old_id'] if previous else row['user_id']
+            prefix = '' if alias_uid == 1 else str(alias_uid) + ':'
             alias = hashlib.sha256(f'{prefix}site:{identity}'.encode()).hexdigest()
             cursor.execute("INSERT IGNORE INTO music_track_aliases(alias_id,track_id) VALUES (%s,%s)", (alias,row['track_id']))
             cursor.execute("UPDATE music_tracks SET provider='site',identifier=%s,webpage_url=%s WHERE id=%s AND provider='local'", (identity,f'/api/music/site/{identity}/content',row['track_id']))

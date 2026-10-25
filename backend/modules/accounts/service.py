@@ -134,7 +134,13 @@ def database():
 
 
 def public_user(row: dict) -> dict:
-    return {key: row[key] for key in ("id", "username", "role", "status", "must_change_password", "created_at")}
+    result = {key: row[key] for key in ("id", "username", "role", "status", "must_change_password", "created_at")}
+    result["id"] = str(row["id"])
+    with database() as cursor:
+        cursor.execute("SELECT old_id FROM user_id_migration_map WHERE new_id=%s", (row["id"],))
+        previous = cursor.fetchone()
+    result["legacy_id"] = str(previous["old_id"]) if previous else None
+    return result
 
 
 def get_user(uid: int) -> dict:
@@ -231,7 +237,14 @@ def migrate(cursor):
             for path in library.DOWNLOAD_DIR.rglob("*"):
                 if path.is_file() and not path.is_symlink():
                     output.write(path, arcname=str(path.relative_to(library.DOWNLOAD_DIR)))
-        cursor.execute("INSERT IGNORE INTO users (id,username,password_hash,role,must_change_password,created_at) VALUES (1,'admin','!uninitialized','super_admin',TRUE,%s)", (time.time(),))
+        cursor.execute("SELECT id FROM users WHERE role='super_admin' ORDER BY created_at,id LIMIT 1")
+        initial_admin = cursor.fetchone()
+        if initial_admin:
+            initial_uid = initial_admin["id"]
+        else:
+            from backend.modules.accounts.user_ids import next_id
+            initial_uid = next_id(cursor)
+            cursor.execute("INSERT INTO users (id,username,password_hash,role,must_change_password,created_at) VALUES (%s,'admin','!uninitialized','super_admin',TRUE,%s)", (initial_uid, time.time()))
         initial = dict(DEFAULT_SETTINGS)
         ai = ROOT / "config" / "ai.json"
         if ai.is_file():
@@ -252,10 +265,10 @@ def migrate(cursor):
                 kind = "file"
             if kind:
                 payload = json.dumps({"filename": path.name, "size": path.stat().st_size, "migrated": True})
-                cursor.execute("INSERT IGNORE INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,1,%s,%s,%s)", (kind, path.name, payload, time.time(), time.time()))
+                cursor.execute("INSERT IGNORE INTO resources (kind,resource_key,user_id,payload,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s)", (kind, path.name, initial_uid, payload, time.time(), time.time()))
                 mapped += 1
         cursor.execute("INSERT INTO account_migrations VALUES ('accounts-v1',%s,%s)", (time.time(), str(backup)))
-        cursor.execute("INSERT INTO audit_logs (actor_id,action,target,result,ip,created_at) VALUES (1,'migration','admin','success','local',%s)", (time.time(),))
+        cursor.execute("INSERT INTO audit_logs (actor_id,action,target,result,ip,created_at) VALUES (%s,'migration','admin','success','local',%s)", (initial_uid, time.time()))
         (backup.parent / (backup.stem + ".migration.json")).write_text(
             json.dumps({"owner": "admin", "database_backup": str(backup), "file_backup": str(archive),
                         "indexed_files": mapped, "unmapped": [str(p.relative_to(library.DOWNLOAD_DIR))
@@ -264,6 +277,12 @@ def migrate(cursor):
                        ensure_ascii=False, indent=2), encoding="utf-8")
     finally:
         cursor.execute("SELECT RELEASE_LOCK('videodream-accounts-migration')")
+
+
+DEFAULT_SETTINGS.update(social_enabled=True, social_rooms_enabled=True, social_rules_enabled=True,
+    social_karaoke_enabled=True, social_realtime_duet_enabled=False, social_listen_capacity=10,
+    social_karaoke_capacity=20, social_image_mb=10, social_file_mb=50, social_voice_seconds=120,
+    social_recall_seconds=120)
 
 
 def settings(*, use_environment: bool = True) -> dict:
@@ -426,6 +445,7 @@ def media_read(path: str, method: str) -> bool:
         r"/api/music/batches/[^/]+/archive",
         r"/api/downloads/[^/]+/content", r"/api/downloads/tasks/[^/]+/file",
         r"/api/downloads/batches/[^/]+/archive",
+        r"/api/social/assets/[a-f0-9]{32}/content",
     ))
 
 
@@ -445,6 +465,9 @@ def revoke_all(uid: int):
             pipeline.delete(*(session_key(sid) for sid in ids))
         pipeline.delete(key)
         pipeline.execute()
+    from backend.modules.social import realtime, rtc
+    realtime.revoke(uid)
+    rtc.revoke_user(uid)
 
 
 class Credentials(BaseModel):
@@ -473,9 +496,10 @@ def create_user(payload: Credentials, role="user", temporary=False) -> int:
     import pymysql
     try:
         with database() as cursor:
-            cursor.execute("INSERT INTO users (username,password_hash,role,must_change_password,created_at) VALUES (%s,%s,%s,%s,%s)",
-                           (payload.username, passwords.hash(payload.password), role, temporary, time.time()))
-            uid = cursor.lastrowid
+            from backend.modules.accounts.user_ids import next_id
+            uid = next_id(cursor)
+            cursor.execute("INSERT INTO users (id,username,password_hash,role,must_change_password,created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                           (uid, payload.username, passwords.hash(payload.password), role, temporary, time.time()))
             cursor.execute("INSERT INTO music_profile (id,nickname,user_id) VALUES (%s,%s,%s)", (uid, payload.username, uid))
         return uid
     except HTTPException as exc:
@@ -487,7 +511,7 @@ def create_user(payload: Credentials, role="user", temporary=False) -> int:
 @router.get("/status")
 def status():
     with database() as cursor:
-        cursor.execute("SELECT password_hash FROM users WHERE id=1")
+        cursor.execute("SELECT password_hash FROM users WHERE role='super_admin' ORDER BY created_at,id LIMIT 1")
         user = cursor.fetchone()
     return {"initialized": bool(user and user["password_hash"].startswith("$argon2id$")),
             "registration_enabled": settings()["registration_enabled"]}
@@ -609,6 +633,9 @@ def logout(request: Request, response: Response):
         if session and secrets.compare_digest(session.get("digest", ""), digest(secret)):
             client.delete(session_key(sid))
             client.srem(user_sessions_key(int(session['uid'])), sid)
+            from backend.modules.social import realtime, rtc
+            realtime.revoke(int(session['uid']), sid)
+            rtc.revoke_user(int(session['uid']))
     response.delete_cookie(COOKIE, **cookie_options())
     response.delete_cookie(MEDIA_COOKIE, **media_cookie_options())
     return {"ok": True}
@@ -668,7 +695,7 @@ def check_path(path: str):
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status", "/api/auth/captcha", "/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/logout"} or request.method == "OPTIONS":
+        if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status", "/api/auth/captcha", "/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/logout", "/api/social/rtc-webhook"} or request.method == "OPTIONS":
             try:
                 return await call_next(request)
             except redis.RedisError:

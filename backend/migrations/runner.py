@@ -138,9 +138,14 @@ def migration_config(config: dict) -> dict:
 
 
 def run_flyway(config: dict, action: str, *, engine="local", locations: Path | None = None,
-               capture=False) -> subprocess.CompletedProcess:
+               capture=False, user_id_files=False) -> subprocess.CompletedProcess:
     if action not in {"info", "validate", "migrate", "baseline"}:
         raise ValueError("Unsupported Flyway operation")
+    if action == "migrate" and locations is None and user_id_files:
+        with pymysql.connect(**migration_config(config)) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user_id_migration_map'")
+            if not cursor.fetchone()["n"]:
+                print("Pre-snowflake database backup: " + str(backup_database(cursor)), flush=True)
     environment = migration_environment(config)
     if engine == "docker":
         if locations is not None:
@@ -170,6 +175,8 @@ def run_flyway(config: dict, action: str, *, engine="local", locations: Path | N
             raise RuntimeError(f"Flyway {action} failed (exit {result.returncode})")
         raise RuntimeError(f"Flyway {action} failed; application must remain stopped")
     if action == 'migrate' and locations is None:
+        from backend.migrations.user_snowflake import migrate as migrate_user_ids
+        migrate_user_ids(config, move_files=user_id_files)
         backfill_discovery(config)
     return result
 

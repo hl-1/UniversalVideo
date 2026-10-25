@@ -521,3 +521,12 @@ docker compose -f deploy/compose.yml up -d --no-build --force-recreate app
 每个正向 SQL 配套回滚 SQL：001↔999、002↔998、003↔997；回滚按逆序执行，只处理对应脚本的变更。V1 的 999_fallback_drop_all.sql 是初始建表的反向 SQL，后续版本必须编写自身回滚脚本。回滚目录不被 Flyway 扫描。
 
 Flyway 已执行的版本使用新的补偿迁移或恢复包含历史表的匹配备份，不直接删除历史记录，不自动 repair；旧 Agent 直接删表脚本对已接管库拒绝执行。正式环境不得在有业务数据时直接执行 V1 全量反向删表；初始化数据回滚只撤销未被修改的种子记录，发生过用户活动的完整恢复以备份为准。
+
+
+## 15. 音乐社交 V5 与 LiveKit
+
+社交结构在 V5 新增 27 张表；当前应用要求 V6，并直接将用户主键改为雪花 ID。已由 Flyway 管理的库在停服窗口使用 `python scripts/database.py migrate` → `validate` → `check`，不重复 baseline。迁移入口先备份，再执行 V6 DDL、旧账号及全部关系/JSON/目录迁移并撤销旧会话；不能仅运行原始 Flyway SQL 后直接开服。V5 参考 `deploy/sql/prod/v5/README.md`，雪花主键的部署与回滚参考 `deploy/sql/prod/v6/README.md`。迁移保留原个人歌曲、歌单及账号数据。
+
+实时语音额外部署 LiveKit，在原环境文件填写 LIVEKIT_URL/API_KEY/API_SECRET，配置签名 webhook `https://YOUR_HOST/api/social/rtc-webhook`，代理允许 `/api/social/ws` Upgrade。代理访问日志避免记录社交 ticket/token query string。按 LiveKit 配置 HTTPS/WSS、RTC 媒体端口与 TURN；应用服务端口仍为 8001，本地交付前端仍为 5174。密钥不能出现在前端构建环境或仓库。
+
+没有 LiveKit 时可用聊天、分享、一起听、规则、共同歌单及录制合唱；房间语音会提示尚未配置。实时双人对唱默认关闭，管理员须在真实设备和弱网测试通过后开启；当前人声为独立音轨，未提供服务端统一混流。社交媒体存储在 `downloads/_social`，备份时与 MySQL 一起保存，不能挂为公共静态目录。

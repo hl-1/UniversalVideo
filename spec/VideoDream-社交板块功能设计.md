@@ -1,8 +1,8 @@
 # VideoDream 社交板块功能设计
 
-版本：v1.0
-日期：2026-10-16
-状态：方案已确认，待实施
+版本：v1.3
+日期：2026-10-26
+状态：核心功能已实施；实时音频等待独立 LiveKit 环境验收
 适用范围：先供本人和朋友小范围使用；先实现录制合唱，再验证实时对唱。
 
 ## 1. 设计目标
@@ -17,7 +17,7 @@
 6. 支持双人对唱，第一阶段优先完成录制合唱，后续验证实时对唱。
 7. 为共同歌单、动态、预约和音乐品味匹配等社交功能预留扩展能力。
 
-本方案是功能和技术设计，不包含本轮代码实施。
+本文件保留已确认的设计，并在第 17、18 节记录本版实际实施范围、部署条件和验证边界。
 
 ## 2. 当前项目基础与接入点
 
@@ -63,6 +63,15 @@
 - 默认只接受好友私信；陌生人需要先发送好友申请。
 - 好友申请和入群邀请进入系统通知。
 - 被拉黑用户不能发起新的私聊、好友申请或房间邀请。
+
+#### 4.1.1 本人账号展示与添加好友
+
+- “外观设置 → 个人资料”在头像下方展示只读的登录账号与用户 ID，并提供“复制账号”按钮；昵称仍可独立编辑，昵称仅用于展示。
+- “音乐社交 → 好友”顶部展示“我的账号”和复制按钮，提示将登录账号发给朋友搜索添加；搜索输入框明确使用对方登录账号或至少两个字符的账号前缀。
+- 复制成功显示“账号已复制”；浏览器不支持或拒绝剪贴板写入时，提示选中或长按只读账号手动复制，不显示虚假的成功提示。
+- 桌面与手机均可查看、选中并复制账号；窄屏下输入框和按钮可换行。
+- 用户 ID 使用雪花算法，直接作为 `users.id` 主键；旧账号和全部关系同步迁移。前端、HTTP 和 WebSocket 使用十进制字符串传递用户 ID，禁止转换为 JavaScript Number。加好友仍通过登录账号搜索。
+- 展示部分直接复用认证状态中的 `username`、`id`。雪花主键 V6 涉及的完整 MySQL 结构、关系迁移、Redis 失效与回滚规则见《VideoDream 用户与管理员功能设计》第 18 节；V5 已应用的迁移不改写。
 
 ### 4.2 私聊和群聊
 
@@ -342,20 +351,19 @@ LiveKit 的观众可以获得 `can_subscribe=true、can_publish=false` 的权限
 
 ## 12. MySQL 数据设计
 
-### 12.1 统一约定
+### 12.1 本版实际迁移
 
-- 新表使用 InnoDB、utf8mb4，并沿用现有表的排序规则。
-- `ID` 使用应用生成的 `CHAR(32)`；用户 ID 使用与 `users.id` 一致的 `BIGINT`；时间使用 UTC Unix 秒 `DOUBLE`。
-- 长期业务数据以 MySQL 为权威来源，Redis 只保存短期实时状态和通知辅助信息。
-- 发送者、作者、房主等字段在账号删除后允许置空，历史显示“已注销用户”。
+Flyway `V5__social_spaces.sql` 新增 27 张 `social_*` 表，未修改现有音乐数据表。`social_rule_run_bindings.run_id` 在业务层关联现有推荐任务，账号删除时先清理绑定；不会重写原歌曲或个人歌单归属。下面是实际 V5 的完整表结构、索引与外键（包含共同歌单三表、独立听歌可见性以及跨表补充外键），与生产正向 SQL 保持一致。
 
-### 12.2 用户、关系、会话和消息
+时间采用 Unix 秒 DOUBLE；消息序号、修订号采用无符号 BIGINT。JSON 保存受 Pydantic 校验的快照，不执行用户脚本。账号字段采用 CASCADE 或 SET NULL；房间和会话一对一；消息附件引用复合消息主键；作品有两个独立演唱位置。规则发布版本与来源版本的循环关系在建表后补外键。
 
 ```sql
+-- Social spaces; additive migration. Back up before applying.
 CREATE TABLE social_user_settings (
   user_id BIGINT PRIMARY KEY,
   discoverable BOOLEAN NOT NULL DEFAULT TRUE,
   online_visibility VARCHAR(16) NOT NULL DEFAULT 'friends',
+  listening_visibility VARCHAR(16) NOT NULL DEFAULT 'friends',
   dm_policy VARCHAR(16) NOT NULL DEFAULT 'friends',
   invite_policy VARCHAR(16) NOT NULL DEFAULT 'friends',
   avatar_asset_id CHAR(32) NULL,
@@ -432,11 +440,8 @@ CREATE TABLE social_messages (
   FOREIGN KEY (conversation_id) REFERENCES social_conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
 
-### 12.3 媒体、分享和通知
 
-```sql
 CREATE TABLE social_assets (
   id CHAR(32) PRIMARY KEY,
   owner_id BIGINT NULL,
@@ -526,13 +531,8 @@ CREATE TABLE social_outbox (
   KEY social_outbox_ready (status, available_at),
   KEY social_outbox_lease (status, lease_until)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
 
-`social_shares.snapshot` 保存发布时的歌曲、歌单、规则或作品展示信息，不保存原用户私有路径和长期凭证。未被引用的临时媒体默认 24 小时清理。
 
-### 12.4 房间、排麦和一起听
-
-```sql
 CREATE TABLE social_rooms (
   id CHAR(32) PRIMARY KEY,
   conversation_id CHAR(32) NOT NULL UNIQUE,
@@ -605,13 +605,8 @@ CREATE TABLE social_room_queue (
   FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
 
-房间成员与聊天成员在同一事务中同步；人数、邀请次数和排麦顺序在事务内检查，避免并发超额。
 
-### 12.5 K 歌和双人作品
-
-```sql
 CREATE TABLE social_karaoke_songs (
   id CHAR(32) PRIMARY KEY,
   creator_id BIGINT NULL,
@@ -702,13 +697,8 @@ CREATE TABLE social_duet_invites (
   FOREIGN KEY (invitee_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (claimed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
 
-歌词 JSON 保存每段开始、结束、文字、A/B/共同角色及可选逐字时间。伴奏版本一旦用于录制不覆盖；更换伴奏创建新版本。`offset_ms` 支持正负时间调整，成品变化后旧的发布同意失效。
 
-### 12.6 规则、版本和举报
-
-```sql
 CREATE TABLE social_rules (
   id CHAR(32) PRIMARY KEY,
   author_id BIGINT NULL,
@@ -784,20 +774,56 @@ CREATE TABLE social_reports (
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (handler_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE social_rules
+  ADD CONSTRAINT social_rule_published_fk FOREIGN KEY (published_version_id) REFERENCES social_rule_versions(id) ON DELETE SET NULL,
+  ADD CONSTRAINT social_rule_origin_fk FOREIGN KEY (origin_version_id) REFERENCES social_rule_versions(id) ON DELETE SET NULL;
+ALTER TABLE social_user_settings
+  ADD CONSTRAINT social_avatar_fk FOREIGN KEY (avatar_asset_id) REFERENCES social_assets(id) ON DELETE SET NULL;
+ALTER TABLE social_room_queue
+  ADD CONSTRAINT social_queue_song_fk FOREIGN KEY (karaoke_song_id) REFERENCES social_karaoke_songs(id) ON DELETE SET NULL;
+
+CREATE TABLE social_playlists (
+  id CHAR(32) PRIMARY KEY,
+  owner_id BIGINT NULL,
+  title VARCHAR(80) NOT NULL,
+  revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DOUBLE NOT NULL,
+  updated_at DOUBLE NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE social_playlist_members (
+  playlist_id CHAR(32) NOT NULL,
+  user_id BIGINT NOT NULL,
+  role VARCHAR(16) NOT NULL DEFAULT 'editor',
+  created_at DOUBLE NOT NULL,
+  PRIMARY KEY (playlist_id,user_id),
+  KEY social_playlist_user (user_id),
+  FOREIGN KEY (playlist_id) REFERENCES social_playlists(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE social_playlist_items (
+  id CHAR(32) PRIMARY KEY,
+  playlist_id CHAR(32) NOT NULL,
+  contributor_id BIGINT NULL,
+  track_key CHAR(64) NOT NULL,
+  track_snapshot JSON NOT NULL,
+  order_no BIGINT UNSIGNED NOT NULL,
+  created_at DOUBLE NOT NULL,
+  UNIQUE KEY social_playlist_track (playlist_id,track_key),
+  UNIQUE KEY social_playlist_order (playlist_id,order_no),
+  FOREIGN KEY (playlist_id) REFERENCES social_playlists(id) ON DELETE CASCADE,
+  FOREIGN KEY (contributor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-`social_rule_run_bindings` 关联现有 `music_recommendation_runs.run_id`，每次运行保存生效规则快照，保证历史结果可追溯。规则和版本之间的发布版本、来源版本外键在表创建完成后补建，避免循环建表问题。
+### 12.2 配置与删除
 
-### 12.7 关系、迁移和删除
+`system_settings.config` 合并已有配置，新增默认值：`social_enabled=true`、`social_rooms_enabled=true`、`social_rules_enabled=true`、`social_karaoke_enabled=true`、`social_realtime_duet_enabled=false`、`social_listen_capacity=10`、`social_karaoke_capacity=20`、`social_image_mb=10`、`social_file_mb=50`、`social_voice_seconds=120`、`social_recall_seconds=120`。由原管理员设置接口保存；不覆盖现有配置。管理员页提供上述开关与额度及举报处理。
 
-- 用户设置、关系、成员和通知的用户字段关联 `users.id`，账号删除时清理。
-- 会话成员和消息关联会话；附件只能引用该消息明确允许的资源。
-- 房间关联唯一聊天会话；房间成员、邀请和队列关联房间。
-- 演唱关联伴奏版本、房间和队列；分轨和补唱邀请关联演唱。
-- 发送者、作者、房主和操作者允许置空，避免历史数据因用户删除无法保留。
-- 账号删除流程需要结束房间、撤销分享、处理录音和作品，并清理其社交表数据。
-- 新增 `system_settings.config` 键保存社交开关、人数、上传上限、撤回时间和媒体保留期。
-- 每阶段使用 `account_migrations` 记录版本、备份路径和完成时间。
+账号删除事务先执行社交清理：结束其房间、撤销分享、撤下其参与作品、标记私有媒体清理，再清理音乐和账号。规则及历史消息可保留无账号的快照；个人媒体不因删除账号转为公共资源。未引用上传 24 小时后清理；持久引用媒体目前随账号清理或显式撤销失去访问权，长期保留策略属于后续运维配置。
+
+数据库结构版本由 `flyway_schema_history` 管理；`account_migrations` 仅保留旧数据迁移记录，不能代替 Flyway，也不登记社交 DDL。生产配套 `deploy/sql/prod/v5/001_ddl_social.sql` 与 `999_fallback_social.sql`，不可与 Flyway 重复执行。
 
 ## 13. Redis 设计
 
@@ -807,11 +833,14 @@ CREATE TABLE social_reports (
 |---|---|---:|---|
 | `videodream:social:ws-ticket:{hash}` | String：`{uid,sid,origin,auth_version,expires_at}` | 30 秒 | HTTP 创建；握手原子读取并删除 |
 | `videodream:social:user-presence:{uid}` | ZSet：`connection_id -> heartbeat_at` | 90 秒 | 每 15 秒续期；超过 45 秒清理 |
-| `videodream:social:room-presence:{room_id}` | ZSet：`uid:connection_id -> heartbeat_at` | 90 秒 | 房间心跳更新；退出移除 |
-| `videodream:social:room-state:{room_id}` | String JSON：`{revision,track,position_ms,started_at,state,queue_revision}` | 300 秒 | MySQL 提交后更新；拒绝旧版本覆盖，未命中回源 MySQL |
+| `videodream:social:room-presence:{room_id}` | ZSet：`uid:connection_id -> heartbeat_at` | 90 秒 | 每 15 秒刷新；45 秒陈旧，最多 90 秒自然过期；成员权限仍查 MySQL |
+| `videodream:social:room-state:{room_id}` | String JSON：`{revision,track,position_ms,started_at,state,queue_id,singers,karaoke_song_id}` | 300 秒 | 事务 Outbox 提交后以 Lua CAS 更新；只缓存状态，HTTP 恢复和授权始终读取 MySQL |
 | `videodream:social:typing:{conversation}:{uid}` | String：`1` | 5 秒 | 输入时刷新，自然过期，不持久化 |
 | `videodream:social:rate:{action}:{uid}:{window}` | String：计数器 | 61 秒 | 原子自增并限流 |
+| `videodream:social:rtc-session:{reference}` | String JSON：`{uid,sid,auth_version,room_id}` | 300 秒 | 发 RTC 凭证时建立；已签名入房回调和周期复核会话/成员/开关后续期，缺失或过期即移出；客户端仅持随机引用 |
 | `videodream:social:events` | Pub/Sub：`{event_id,topic,object_key,revision,recipients}` | 不适用 | Outbox 发布，多实例订阅 |
+
+示例：`ws-ticket:8d…` 保存票据 SHA256；`user-presence:23` 的 member 为随机连接 ID、score 为 `1792940000.0`；`room-presence:ab…` 的 member 为 `23:cd…`；`room-state:ab…` 的值含 `revision:3,state:"paused",position_ms:0`；`typing:ef…:23=1`；`rate:message:23:29882333=2`；`rtc-session:cd…` 的值含 `uid:23,room_id:"ab…"`。上述缩略 ID 在实际运行时分别为 64 位 hash 或 32 位随机十六进制 ID。Pub/Sub 消息可附表情、用户 ID 等经过校验的业务字段，不包含会话密钥；typing 通知仅经短期 Outbox 送达，不保存为聊天消息。票据通过 Lua 原子 GET+DEL，兼容不支持 GETDEL 的 Redis。
 
 一致性规则：
 
@@ -826,7 +855,7 @@ CREATE TABLE social_reports (
 
 ### 14.1 迁移
 
-- 每阶段单独迁移和功能开关，逐批启用。
+- 本版统一通过 V5 增量建表，业务功能分别设置开关；既有 Flyway 库先备份，再 migrate、validate、check。未接管的旧库先完成 V1 preflight/baseline，不能跳过结构差异。
 - 迁移前备份数据库、音乐数据归属和社交媒体。
 - 使用迁移锁和版本标记，支持重复启动检查。
 - 新表统一使用 InnoDB、utf8mb4，并检查现有表排序规则。
@@ -844,9 +873,9 @@ CREATE TABLE social_reports (
 
 1. 先关闭对应功能开关和写操作。
 2. 保留新增表和媒体，防止回滚代码后丢数据。
-3. 导出新增数据后回退应用版本。
+3. 导出新增数据和媒体后选择匹配的应用/结构版本。应用启动有 schema gate，不能将仅支持 V4 的代码直接指向 V5 库；需兼容补偿版本，或停服恢复包含 Flyway 历史的完整匹配备份。
 4. 恢复迁移前的社交配置，不覆盖其他系统配置。
-5. 如需删除新增表，必须先确认没有需要保留的聊天、作品和规则数据，再执行单独清理迁移。
+5. 如需删除新增表，先导出需保留的数据和媒体，再在停服窗口执行独立补偿迁移。配套 999 是离线结构撤销参考，先拆循环外键再按依赖逆序删表；不能只删表而保留 V5 成功历史，也不能删除历史记录或自动 repair 伪造一致性。
 
 ## 15. 实施阶段与验收
 
@@ -875,3 +904,41 @@ CREATE TABLE social_reports (
 随后增加规则广场和录制合唱。K 歌房在伴奏、歌词和录音流程稳定后接入，实时双人对唱最后通过真实朋友和真实网络验证。
 
 这样可以先让本人和朋友使用核心社交链路，再根据实际体验决定房间人数、同步阈值、素材保留期和实时对唱是否达到可用标准。
+
+
+## 17. 本版代码入口与实施边界
+
+入口为“音乐中心 → 音乐社交”，手机为“我的 → 音乐社交”，包含消息、好友、一起听、K 歌房、规则广场、我的合唱、共同歌单和隐私设置。桌面与手机共用响应式页面。既有音乐歌曲及个人歌单菜单提供分享；房主、规则发布页和双方确认的公开合唱提供分享卡片。链接分享要求登录后携 token 访问，默认 7 天；房间卡片内的邀请码独立有效 24 小时。
+
+| 范围 | 实施内容 |
+|---|---|
+| 好友与聊天 | 账号前缀搜索、申请/同意/拒绝、备注/删除/拉黑、好友状态、私聊/群聊、邀请接受、群公告/成员/管理权、搜索/回复/转发/撤回、附件/语音、未读/置顶/免打扰、本人的记录清理 |
+| 可靠性与分享 | MySQL 单调序号、客户端幂等 ID、Outbox、一次性连接票据、重连补取、登录会话重验；五种卡片和四种分享范围；私有本地文件须显式复制授权；接收者歌单归属独立 |
+| 一起听 | 独立 Audio 播放器保留个人队列；版本校验、预加载准备、未来 2 秒统一起播、每 2 秒偏差校正、独立音量、队列、控制权、移交、聊天与心跳 |
+| 共同歌单 | 成员管理、独立歌曲快照、添加/移除/排序、修订号冲突检测，不暴露个人路径 |
+| 规则 | 声明式表单/高级筛选、试跑与淘汰原因、不可变版本、发布/下架、收藏与独立订阅、改编、复用绑定；音频条件只使用完整且置信度 ≥0.7 的证据，未知数据不加分 |
+| 录制合唱 | 固定伴奏、角色歌词、设备选择、独立录音、试听/重录、A/B 交换、补唱邀请、毫秒对齐/增益、租约与重试、FFmpeg 一份伴奏+两条人声、双方同成品 hash 和同范围确认后发布；改轨使旧确认及分享失效 |
+| K 歌与 RTC | 排麦/取消/轮换、准备与麦克风检测独立、房主管理员/禁言/移除/移交、歌词/导唱/远端人声独立音量、主动让麦、表情；语音通过 LiveKit，观众初始禁止发布，服务端授权上麦；默认不录制 |
+| 管理 | 社交开关、人数/上传/撤回限制、举报证据、驳回或隐藏内容、审计；实时双人对唱默认关闭 |
+
+后端在 `backend/modules/social/`，主路由 `/api/social`；管理员举报路由 `/api/admin/social/reports`。前端在 `frontend/src/features/social/`。原有账号退出/停用/删除、推荐任务规则绑定、原播放器入口已接入。`frontend/src/shared/native/` 四个模块补齐浏览器行为，不能据此视为 Android 原生桥接已实现。
+
+本版实时对唱是实验入口：LiveKit 分别传输独立人声，由观众浏览器与同步伴奏播放；尚未接入服务器统一混流/直播导出。RTC 的会话授权参考写入 Redis，入房 webhook 校验 JWT 与请求体 SHA256，后台约每 5 秒复核一次；远端网络请求耗时会延长复核间隔，退出/禁言等操作同时直接调用撤权 API。混音与房间权限维护使用独立任务，长混音不阻塞维护。登录票据/链接 token 在 Uvicorn 社交访问日志中脱敏，反向代理也必须避免记录此类 query string。
+
+还需真实环境验收：双设备声音、麦克风/耳机校准、弱网、TURN、双人相互监听延迟及 ≤500ms 一起听偏差。未配置 LiveKit 时不签发伪凭证，页面明确显示未配置；录制合唱和一起听仍可使用。自然语言辅助编辑、自动设备延迟检测、服务器混流、房间结束记录页面、长期媒体保留策略，以及第 10 节标记为后续的预约/动态/匹配/评价不属于本版已完成能力。
+
+## 18. 部署与本地验证
+
+1. 先备份数据库及 `downloads/_social`；本地已在 `.run/database-backups/` 留存迁移前备份并完成 V5 migrate/validate。
+2. 环境模板 `.env.example` 与 `deploy/.env.example` 增加 `LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET`，默认留空。密钥仅保存在服务端真实环境文件。
+3. 部署 LiveKit 后配置 webhook 为后端公网 `/api/social/rtc-webhook`，使用相同 API key/secret 签名。应用及浏览器使用 HTTPS/WSS，按 LiveKit 部署开启媒体 UDP/TCP、TURN 及证书；不自动改变应用 5174/8001 端口。
+4. 先开启普通 K 歌，完成真实设备验收后再由管理员开启 `social_realtime_duet_enabled`。ffmpeg/ffprobe 必须可用；录音使用 HTTPS 或 localhost 的安全上下文。
+5. 前端 `npm test`、`npm run build`；后端设置 `PYTHONUTF8=1` 后运行 `python -m unittest discover -s backend/tests -t . -p 'test_*.py'`。专项 `backend.tests.social.test_social` 使用隔离 MySQL、Redis 前缀和真实 FFmpeg，覆盖权限/幂等/混音/撤销/房间邀请/RTC 验签与生命周期。
+
+2026-10-25 验证记录：社交专项 13 项通过（隔离 MySQL/Redis、真实 FFmpeg，含回调验签和跨事件循环生命周期）；前端 177 项通过，类型检查与生产构建通过；V5 本地 migrate/validate 通过。桌面 1440×960 和手机 390×844 使用临时账号验证入口、房间创建/链接分享、规则试跑/草稿保存，手机 document.scrollWidth 与 viewport 均为 390。
+
+全量后端 712 项运行完成，6 项失败、47 项错误；失败包含现有文件交付对旧 Redis 多字段 HSET 的兼容问题、Windows 历史文件迁移路径问题，以及测试后段 Windows WinError 10048 临时端口耗尽引发的 MySQL/Redis 连接错误。该全量结果未通过，不能作为整体回归已通过。前端构建仍有包体积及现有动态导入提示。专项和单元权限验证不能代替真实 LiveKit 音频验收。
+
+2026-10-26 账号与雪花主键补充验证：本地已完成 V6 结构及现有账号、关联、用户目录迁移，validate/check 通过，8001 重启后统一地址健康检查返回 200。雪花专项 6 项、社交与 Flyway 25 项、账号相关 6 项回归通过；前端 179 项与生产构建通过。个人资料和好友页增加本人登录账号及复制入口，添加好友仍按登录账号搜索。新旧账号的 users.id 均采用雪花主键，前端按十进制字符串处理以保留精度；实际临时账号登录已核对个人资料的完整 18 位 ID、复制账号及 390×844 手机布局。完整表结构、Redis 失效、设备索引兼容及回滚见用户与管理员规格第 18 节；切换后用户需要重新登录。此轮相关回归不替代上述全量历史结果及真实音频验收。
+
+2026-10-26 提交前重新检查：前端 179 项测试、类型检查和生产构建通过；后端全量 718 项运行完成，53 项失败、113 项错误，未通过。错误包含旧测试写死管理员 ID 1、旧 Redis 多字段 HSET 兼容、Windows 历史目录迁移及 WinError 10048 临时端口耗尽；另有资源、权限与任务时序断言失败，尚未逐项修复。V5/V6 SQL 部署副本一致，Python 编译和提交空白检查通过；相关专项通过不代表全量回归通过。

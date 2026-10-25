@@ -28,7 +28,11 @@ def capabilities():
 def create_run(payload:CreateRun,idempotency_key:str=Header(min_length=8,max_length=200)):
     auth.require_enabled()
     auth.check_session(accounts.current().id,accounts.current().session_id)
-    row,created = store.create(payload.model_dump(),idempotency_key,skill.load()["version"])
+    request = payload.model_dump(exclude_none=True)
+    if payload.rule_version_id:
+        from backend.modules.social.rules import prepare_request
+        request = prepare_request(request)
+    row,created = store.create(request,idempotency_key,skill.load()["version"])
     if created:
         runtime.submit(row["run_id"])
     return store.public(row)
@@ -74,6 +78,9 @@ def continue_run(run_id:str,payload:ContinueRun):
         if payload.need or payload.preferences:
             request["need"] = (request["need"]+"；"+payload.need)[:1000] if payload.need else request["need"]
             request["preferences"] = request.get("preferences",{}) | payload.preferences
+            if request.get("effective_rule"):
+                from backend.modules.social.rules import apply_preferences
+                request["effective_rule"] = apply_preferences(request["effective_rule"], request["preferences"])
             request.pop("parsed",None)
         elif row["status"]=="waiting_input":
             raise HTTPException(422,"请补充听歌需求")
@@ -101,6 +108,9 @@ def retry_run(run_id:str,payload:ContinueRun,idempotency_key:str=Header(min_leng
         reject_daily(old)
     request = {"need":payload.need or old["request"]["need"],"preferences":old["request"].get("preferences",{}) | payload.preferences}
     CreateRun.model_validate(request)
+    if old["request"].get("rule_version_id"):
+        from backend.modules.social.rules import prepare_request
+        request = prepare_request(request | {"rule_version_id": old["request"]["rule_version_id"]})
     row,created = store.create(request,idempotency_key,skill.load()["version"],run_id)
     if created:
         runtime.submit(row["run_id"])

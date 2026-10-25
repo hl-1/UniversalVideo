@@ -34,6 +34,17 @@ class PasswordReset(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
+    social_enabled: bool = True
+    social_rooms_enabled: bool = True
+    social_rules_enabled: bool = True
+    social_karaoke_enabled: bool = True
+    social_realtime_duet_enabled: bool = False
+    social_listen_capacity: int = Field(default=10, ge=2, le=10)
+    social_karaoke_capacity: int = Field(default=20, ge=2, le=20)
+    social_image_mb: int = Field(default=10, ge=1, le=10)
+    social_file_mb: int = Field(default=50, ge=1, le=50)
+    social_voice_seconds: int = Field(default=120, ge=10, le=120)
+    social_recall_seconds: int = Field(default=120, ge=0, le=600)
     music_daily_enabled: bool = True
     music_daily_tokens: int = Field(default=60000,ge=2000,le=60000)
     music_daily_model_calls: int = Field(default=16,ge=1,le=16)
@@ -168,6 +179,8 @@ def delete_user(uid: int):
         cursor.execute("SELECT kind,resource_key FROM resources WHERE user_id=%s", (uid,))
         files = cursor.fetchall()
         from backend.modules.video import store as video_store
+        from backend.modules.social.store import clean_user
+        clean_user(cursor, uid)
         for table in ("video_recent_links", *(item[0] for item in video_store.TABLES.values())):
             cursor.execute(f"DELETE FROM {table} WHERE user_id=%s", (uid,))
         for table in ("music_recommendation_runs", "music_track_features", "music_playlists", "music_favorites", "music_history", "music_downloads", "music_lyrics", "music_tracks", "music_theme", "music_profile", "resources"):

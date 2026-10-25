@@ -135,7 +135,7 @@ def create(request, key, skill_version, parent=None, seed=None):
         if existing:
             if existing["deleted"]:
                 raise HTTPException(410, "此幂等请求已删除，请使用新的请求键")
-            if existing["parent_run_id"] != parent or bool(existing["context"].get("fill_missing")) != (seed is not None) or existing["request"]["need"] != request["need"] or existing["request"].get("preferences", {}) != request.get("preferences", {}):
+            if existing["parent_run_id"] != parent or bool(existing["context"].get("fill_missing")) != (seed is not None) or existing["request"]["need"] != request["need"] or existing["request"].get("preferences", {}) != request.get("preferences", {}) or existing["request"].get("rule_version_id") != request.get("rule_version_id"):
                 raise HTTPException(409, "幂等键已用于其他需求")
             return existing, False
         cursor.execute("SELECT COUNT(*) AS n FROM music_recommendation_runs WHERE user_id=%s AND deleted=FALSE AND status IN ('pending','running')", (uid,))
@@ -171,6 +171,10 @@ def insert(cursor, row):
     cursor.execute("INSERT INTO music_recommendation_runs (" + ",".join(f"`{k}`" for k in columns) + ") VALUES (" + ",".join(["%s"]*len(columns)) + ")",
                    tuple(encode(row[k]) if k in {"request","context","steps","result"} else row[k] for k in columns))
     sync_resource(cursor, row)
+    if row["request"].get("effective_rule"):
+        rule = row["request"]["effective_rule"]
+        cursor.execute("INSERT INTO social_rule_run_bindings (run_id,version_id,effective_rule,content_hash,created_at) VALUES (%s,%s,%s,%s,%s)",
+            (row["run_id"], row["request"]["rule_version_id"], encode(rule), hashlib.sha256(encode(rule).encode()).hexdigest(), row["created_at"]))
 
 
 def public(row):

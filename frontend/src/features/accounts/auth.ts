@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { isAndroidApp, nativeCall } from '../../shared/native/bridge'
 import { deviceContext } from '../../shared/device'
 
-export type Account = { id: number; username: string; role: 'user' | 'super_admin'; status: 'active' | 'disabled'; must_change_password: boolean; created_at: number }
+export type Account = { id: string; legacy_id?: string | null; username: string; role: 'user' | 'super_admin'; status: 'active' | 'disabled'; must_change_password: boolean; created_at: number }
 export const account = ref<Account | null>(null)
 export const authReady = ref(false)
 export const authError = ref('')

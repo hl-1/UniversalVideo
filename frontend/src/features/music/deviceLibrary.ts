@@ -7,7 +7,7 @@ import { inspectDeviceAudio } from './deviceAudio'
 import type { Lyrics } from './lyrics'
 
 type FileHandle = { getFile(): Promise<File>; isSameEntry?(other: FileHandle): Promise<boolean>; queryPermission?(options: { mode: 'read' }): Promise<PermissionState>; requestPermission?(options: { mode: 'read' }): Promise<PermissionState> }
-type DeviceEntry = { key: string; uid: number; device_id: string; track: MusicTrack; handle?: FileHandle; file?: File; cover?: Blob; lyrics?: Lyrics; manual_lyrics?: boolean; asset_notice?: string; bytes: number; modified?: number; added_at: number }
+type DeviceEntry = { key: string; uid: string; device_id: string; track: MusicTrack; handle?: FileHandle; file?: File; cover?: Blob; lyrics?: Lyrics; manual_lyrics?: boolean; asset_notice?: string; bytes: number; modified?: number; added_at: number }
 type UnavailableEntry = { entry: DeviceEntry; reason: string; canAuthorize: boolean }
 export const deviceTracks = ref<MusicTrack[]>([])
 export const unavailableDeviceTracks = ref<Array<{ track: MusicTrack; reason: string; canAuthorize: boolean }>>([])
@@ -24,7 +24,7 @@ let generation = 0
 let refreshSequence = 0
 let database: Promise<IDBDatabase> | undefined
 const audioExtension = /\.(mp3|m4a|flac|wav|ogg|aac|opus)$/i
-const entryKey = (uid: number, device: string, track: MusicTrack) => `${uid}:${device}:${trackKey(track)}`
+const entryKey = (uid: string, device: string, track: MusicTrack) => `${uid}:${device}:${trackKey(track)}`
 async function importedCopy(file: File) {
   return new File([await new Response(file.stream()).blob()], file.name, { type: file.type, lastModified: file.lastModified })
 }
@@ -62,6 +62,27 @@ function publish() {
   unavailableDeviceTracks.value = [...unavailable.values()].filter(({ entry }) => entry.uid === uid && entry.device_id === device)
     .map(({ entry, reason, canAuthorize }) => ({ track: entry.track, reason, canAuthorize }))
   deviceLibraryRevision.value++
+}
+async function migrateAccountStorage(uid: string, legacyId?: string | null) {
+  if (!legacyId || legacyId === uid) return
+  const db = await openDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction('tracks', 'readwrite')
+    const tracks = transaction.objectStore('tracks')
+    const request = tracks.getAll()
+    request.onsuccess = () => {
+      const saved = request.result as DeviceEntry[]
+      const keys = new Set(saved.map(entry => entry.key))
+      for (const entry of saved) {
+        if (String(entry.uid) !== legacyId) continue
+        const key = entryKey(uid, entry.device_id, entry.track)
+        if (!keys.has(key)) tracks.put({ ...entry, uid, key })
+      }
+    }
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error || new Error('设备曲库账号迁移中断，请重试。'))
+  })
 }
 function reset() {
   generation++
@@ -107,6 +128,8 @@ export async function refreshDeviceLibrary() {
   if (!uid) return
   try {
     const context = await deviceContext()
+    if (!current()) return
+    await migrateAccountStorage(uid, account.value?.legacy_id)
     if (!current()) return
     if (isAndroidApp()) {
       const result = await nativeCall<{ tracks: MusicTrack[] }>('library.tracks')
@@ -342,7 +365,7 @@ export async function importDeviceFiles(selected: FileList | File[]) {
   if (isAndroidApp()) { await nativeCall('library.import', {}, { timeout: 0 }); await refreshDeviceLibrary(); return }
   await importSelection(Array.from(selected), uid)
 }
-async function importSelection(selected: Array<File | FileHandle>, uid: number | undefined) {
+async function importSelection(selected: Array<File | FileHandle>, uid: string | undefined) {
   const failures: string[] = []
   for (const source of selected) {
     try { await importOne('getFile' in source ? await source.getFile() : source, source, uid) }

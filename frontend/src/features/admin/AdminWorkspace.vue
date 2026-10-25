@@ -5,10 +5,10 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Download, KeyRound, LoaderCircle,
 import { account, type Account } from '../accounts/auth'
 import { api, jsonRequest } from '../../shared/api/client'
 const emit = defineEmits<{ back: [] }>()
-type View = 'users' | 'data' | 'settings' | 'logs' | 'statistics'
+type View = 'users' | 'data' | 'settings' | 'logs' | 'statistics' | 'social'
 const view = ref<View>('users')
-const titles = { users: '用户管理', data: '业务数据', settings: '系统配置', logs: '操作日志', statistics: '运行统计' }
-const icons = { users: Users, data: Files, settings: Settings2, logs: ScrollText, statistics: Activity }
+const titles = { users: '用户管理', data: '业务数据', settings: '系统配置', logs: '操作日志', statistics: '运行统计', social: '社交举报' }
+const icons = { users: Users, data: Files, settings: Settings2, logs: ScrollText, statistics: Activity, social: ShieldCheck }
 const rows = ref<any[]>([])
 const users = ref<Account[]>([])
 const total = ref(0)
@@ -21,7 +21,7 @@ const busy = ref(false)
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
-const checked = ref<number[]>([])
+const checked = ref<string[]>([])
 const dialog = ref<'create' | 'password' | 'detail' | null>(null)
 const target = ref<any>(null)
 const username = ref('')
@@ -52,10 +52,11 @@ async function load() {
     if (view.value === 'users') result = await api(`/api/admin/users?q=${encodeURIComponent(query.value)}&status=${status.value}&page=${page.value}`)
     else if (view.value === 'data') result = await api(`/api/admin/data?kind=${kind.value}&q=${encodeURIComponent(query.value)}&page=${page.value}${owner.value ? `&user_id=${owner.value}` : ''}`)
     else if (view.value === 'logs') result = await api(`/api/admin/logs?action=${encodeURIComponent(query.value)}&page=${page.value}${owner.value ? `&user_id=${owner.value}` : ''}`)
+    else if (view.value === 'social') result = await api('/api/admin/social/reports')
     else if (view.value === 'settings') result = await api('/api/admin/settings')
     else result = await api('/api/admin/statistics')
     if (current !== revision) return
-    if (['users', 'data', 'logs'].includes(view.value)) { rows.value = result.items; total.value = result.total }
+    if (['users', 'data', 'logs', 'social'].includes(view.value)) { rows.value = result.items; total.value = result.total }
     else if (view.value === 'settings') { settings.value = result; replaceKeys.value = {}; serviceKeys.value = {} }
     else stats.value = result
   } catch (failure) { if (current === revision) fail(failure) }
@@ -102,6 +103,11 @@ function saveSettings() {
   for (const group of aiGroups) data[`${group.prefix}_api_key`] = replaceKeys.value[group.id] ? serviceKeys.value[group.id] || '' : null
   void action(() => api('/api/admin/settings', jsonRequest('PUT', data)), '系统配置已保存。')
 }
+async function resolveReport(row: any, actionName: string) {
+  const reason = window.prompt('填写处理说明')
+  if (!reason?.trim()) return
+  await action(() => api(`/api/admin/social/reports/${row.id}`, jsonRequest('POST', { action: actionName, reason })), '举报已处理。')
+}
 function filter() { page.value = 1; void load() }
 watch(view, () => { void load() })
 onMounted(() => { void load(); void loadUsers().catch(fail) })
@@ -122,7 +128,7 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
         </form>
         <div v-if="view === 'users' && checked.length" class="admin-bulk"><span>已选 {{ checked.length }} 项</span><button :disabled="busy" @click="bulk('disabled')">停用</button><button :disabled="busy" @click="bulk('active')">恢复</button></div>
         <div v-if="loading" class="account-loading"><LoaderCircle class="spin" :size="24" /></div>
-        <template v-else-if="view === 'users'">
+        <section v-else-if="view === 'social'"><article v-for="row in rows" :key="row.id" class="social-card"><h3>{{ row.target_kind }} · {{ row.target_key }}</h3><p>{{ row.reason }}</p><details><summary>用户提交的证据</summary><pre class="social-json">{{ JSON.stringify(row.evidence, null, 2) }}</pre></details><p>{{ row.resolution || '等待处理' }}</p><div class="social-actions" v-if="row.status === 'pending'"><button :disabled="busy" @click="resolveReport(row, 'dismiss')">驳回并说明</button><button :disabled="busy" @click="resolveReport(row, 'hide')">下架内容并说明</button></div></article><p v-if="!rows.length">暂无举报。</p></section><template v-else-if="view === 'users'">
           <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th><input type="checkbox" aria-label="选择本页用户" :checked="rows.length > 0 && checked.length === rows.length" @change="checked = ($event.target as HTMLInputElement).checked ? rows.map(row => row.id) : []" /></th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td><input v-model="checked" type="checkbox" :value="row.id" :aria-label="`选择 ${row.username}`" /></td><td><strong>{{ row.username }}</strong><small v-if="row.must_change_password" class="admin-secondary">需修改密码</small></td><td><select :value="row.role" :disabled="busy" :aria-label="`${row.username} 角色`" @change="update(row, 'role', $event)"><option value="user">普通用户</option><option value="super_admin">超级管理员</option></select></td><td><select :value="row.status" :disabled="busy" :aria-label="`${row.username} 状态`" @change="update(row, 'status', $event)"><option value="active">正常</option><option value="disabled">停用</option></select></td><td>{{ new Date(row.created_at * 1000).toLocaleDateString() }}</td><td><div class="admin-actions"><button class="account-icon" :disabled="busy" :title="`重置 ${row.username} 密码`" :aria-label="`重置 ${row.username} 密码`" @click="reset(row)"><KeyRound :size="17" /></button><button class="account-icon danger" :disabled="busy" :title="`删除 ${row.username}`" :aria-label="`删除 ${row.username}`" @click="remove(row)"><Trash2 :size="17" /></button></div></td></tr><tr v-if="!rows.length"><td colspan="6">没有匹配的用户</td></tr></tbody></table></div>
         </template>
         <template v-else-if="view === 'data'">
@@ -161,6 +167,8 @@ onMounted(() => { void load(); void loadUsers().catch(fail) })
           <label>累计执行秒数<input v-model.number="settings.music_agent_seconds" type="number" min="30" max="600" required /></label>
           <label>完整任务 Token 上限<input v-model.number="settings.music_agent_tokens" type="number" min="2000" max="150000" required /></label>
           <label>全局并发数<input v-model.number="settings.music_agent_concurrency" type="number" min="1" max="8" required /></label>
+          <h2>音乐社交</h2><label v-for="(label, key) in { social_enabled: '启用音乐社交', social_rooms_enabled: '启用一起听房间', social_rules_enabled: '启用规则广场', social_karaoke_enabled: '启用 K 歌与录制合唱', social_realtime_duet_enabled: '启用实时双人对唱（需语音服务）' }" :key="key" class="admin-toggle"><span>{{ label }}</span><input v-model="settings[key]" type="checkbox" /></label>
+          <label>一起听人数上限<input v-model.number="settings.social_listen_capacity" type="number" min="2" max="10" required /></label><label>K 歌人数上限<input v-model.number="settings.social_karaoke_capacity" type="number" min="2" max="20" required /></label><label>图片上限（MB）<input v-model.number="settings.social_image_mb" type="number" min="1" max="10" required /></label><label>文件上限（MB）<input v-model.number="settings.social_file_mb" type="number" min="1" max="50" required /></label><label>语音消息上限（秒）<input v-model.number="settings.social_voice_seconds" type="number" min="10" max="120" required /></label><label>消息撤回时间（秒）<input v-model.number="settings.social_recall_seconds" type="number" min="0" max="600" required /></label>
           <h2>账号与业务</h2><label v-for="(label, key) in { registration_enabled: '公开注册', music_enabled: '音乐功能', video_enabled: '视频下载', summary_enabled: 'AI 总结与思维导图', watermark_enabled: '视频去水印' }" :key="key" class="admin-toggle"><span>{{ label }}</span><input v-model="settings[key]" type="checkbox" :aria-label="label" /></label>
           <template v-for="group in aiGroups" :key="group.id">
             <h2>{{ group.label }}</h2>

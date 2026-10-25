@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from backend.infrastructure.json_response import SafeJSONResponse
 from backend.modules.watermark.api import router as watermark_router
 from backend.modules.music import sources as music
 from backend.modules.music.lyrics import router as music_lyrics_router
@@ -34,7 +35,7 @@ from backend.modules.video import preview_assets
 from backend.modules.video import tasks as video_tasks
 from backend.modules.video import bilibili_session
 from backend.modules.delivery.api import router as delivery_router
-app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan)
+app = FastAPI(title="VideoDream API", version="1.0.0", lifespan=music_agent_mcp.lifespan, default_response_class=SafeJSONResponse)
 
 
 @app.exception_handler(RequestValidationError)
@@ -69,6 +70,11 @@ app.include_router(video_preview.router)
 app.include_router(video_files.router)
 app.include_router(music_batch.router)
 app.include_router(delivery_router)
+from backend.modules.social.api import router as social_router
+from backend.modules.social import realtime as social_realtime, worker as social_worker
+app.include_router(social_router)
+from backend.modules.social.moderation import router as social_moderation_router
+app.include_router(social_moderation_router)
 app.add_middleware(accounts.AuthenticationMiddleware)
 
 
@@ -131,6 +137,18 @@ def restore_task_state():
         video_history.restore_interrupted()
     except video_cache.redis.RedisError:
         logger.warning("Redis unavailable; interrupted task reconciliation deferred")
+
+
+@app.on_event("startup")
+async def start_social_workers():
+    social_realtime.start()
+    social_worker.start()
+
+
+@app.on_event("shutdown")
+async def stop_social_workers():
+    await social_realtime.stop()
+    await social_worker.stop()
 
 
 @app.get("/auth-worker.js", include_in_schema=False)
