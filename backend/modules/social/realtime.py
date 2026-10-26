@@ -17,6 +17,7 @@ from backend.infrastructure.json_response import json_safe
 
 
 logger = logging.getLogger(__name__)
+HEARTBEAT_INTERVAL_SECONDS = 15
 connections = {}
 tasks = {}
 connection_loops = {}
@@ -74,21 +75,26 @@ async def socket(ws: WebSocket):
         await asyncio.to_thread(check_session, data)
         await ws.accept()
         connections[connection_id] = (ws, data)
-        connection_loops[connection_id] = asyncio.get_running_loop()
+        event_loop = asyncio.get_running_loop()
+        connection_loops[connection_id] = event_loop
+        next_heartbeat = event_loop.time()
         while True:
-            await asyncio.to_thread(check_session, data)
-            client = accounts.redis_client()
-            key = s.PREFIX + f"user-presence:{data['uid']}"
-            def heartbeat():
-                with client.pipeline() as pipe:
-                    pipe.zremrangebyscore(key, "-inf", time.time() - 45)
-                    pipe.zadd(key, {connection_id: time.time()})
-                    pipe.expire(key, 90)
-                    pipe.execute()
-            await asyncio.to_thread(heartbeat)
-            await ws.send_json({"topic": "heartbeat", "server_time": time.time()})
+            if event_loop.time() >= next_heartbeat:
+                await asyncio.to_thread(check_session, data)
+                client = accounts.redis_client()
+                key = s.PREFIX + f"user-presence:{data['uid']}"
+                def heartbeat():
+                    with client.pipeline() as pipe:
+                        pipe.zremrangebyscore(key, "-inf", time.time() - 45)
+                        pipe.zadd(key, {connection_id: time.time()})
+                        pipe.expire(key, 90)
+                        pipe.execute()
+                await asyncio.to_thread(heartbeat)
+                await ws.send_json({"topic": "heartbeat", "server_time": time.time()})
+                # Replies never advance or reset the server's monotonic deadline.
+                next_heartbeat = event_loop.time() + HEARTBEAT_INTERVAL_SECONDS
             try:
-                message = await asyncio.wait_for(ws.receive_text(), timeout=15)
+                message = await asyncio.wait_for(ws.receive_text(), timeout=max(0, next_heartbeat - event_loop.time()))
                 if len(message) > 2048:
                     await ws.close(code=1009)
                     break
