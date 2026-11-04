@@ -1465,7 +1465,9 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.post(url,json={'result_version':2}).status_code,409)
         self.assertEqual(self.client.post(url.replace(key,'unknown'),json={'result_version':1}).status_code,404)
         with library.database() as cursor:
-            cursor.execute('UPDATE music_recommendation_runs SET user_id=1 WHERE run_id=%s',(row['run_id'],))
+            cursor.execute('SELECT id FROM users WHERE id<>%s LIMIT 1', (self.user_id,))
+            other = cursor.fetchone()['id']
+            cursor.execute('UPDATE music_recommendation_runs SET user_id=%s WHERE run_id=%s',(other, row['run_id']))
         self.assertEqual(self.client.post(url,json={'result_version':1}).status_code,404)
 
     def test_credit_only_analysis_does_not_call_model_or_infer_vocals(self):

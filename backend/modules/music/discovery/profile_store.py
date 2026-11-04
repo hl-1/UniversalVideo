@@ -40,7 +40,10 @@ def update_run(cursor,row,**changes):
     cursor.execute('UPDATE music_discovery_profile_runs SET '+','.join(k+'=%s' for k in fields)+
         ',updated_at=%s,revision=revision+1 WHERE run_id=%s AND revision=%s',(*values,time.time(),row['run_id'],row['revision']))
     if cursor.rowcount!=1: raise HTTPException(409,'画像任务已变化')
-    return row|changes|{'revision':row['revision']+1}
+    merged = row|changes|{'revision':row['revision']+1}
+    from backend.agents.music import sync
+    sync(cursor, merged, profile=True)
+    return merged
 
 
 def freeze(cursor,uid):
@@ -97,6 +100,8 @@ def schedule(cursor,uid,trigger='evidence',force=False):
         source_revision=p['evidence_revision'],base_control_revision=p['control_revision'],base_agent_revision=p['agent_revision'],
         input_hash=digest,policy_version=policy.PROFILE_VERSION,skill_version=skill_data['version'],input_snapshot=snapshot,
         proposal=None,context={'model_requests':[],'not_before':max(now,earliest)},steps=[],created_at=now,updated_at=now)
+    from backend.agents.music import attach
+    attach(cursor, row, profile=True)
     cursor.execute('INSERT INTO music_discovery_profile_runs ('+','.join(row)+') VALUES ('+','.join(['%s']*len(row))+')',
         tuple(encode(v) if k in ('input_snapshot','context','steps') else v for k,v in row.items()))
     cursor.execute('UPDATE music_discovery_profiles SET next_review_at=%s WHERE user_id=%s',(max(now,earliest),uid))

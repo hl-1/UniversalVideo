@@ -5,7 +5,7 @@ import { isAndroidApp, nativeCall } from '../../shared/native/bridge'
 import { useAndroidBack } from '../../shared/native/navigation'
 import { isMusicDownloaded, rememberMusicDownloads, savedMusicHistory, unverifiedMusicHistory, unverifiedMusicCount } from './musicDownloads'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ArrowRight, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, LayoutGrid, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, X, Pencil, Play, Eraser, FolderOpen, Palette } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, BookOpen, ChevronRight, Clock3, Compass, Download, Heart, Headphones, Home, LayoutGrid, ListMusic, LoaderCircle, Plus, Radio, Search, Settings2, Trash2, Upload, UserRound, Video, Workflow, X, Pencil, Play, Eraser, FolderOpen, Palette } from 'lucide-vue-next'
 import MusicWorkspace from './MusicWorkspace.vue'
 import MusicImportWorkspace from './MusicImportWorkspace.vue'
 import ScenePlaylist from './ScenePlaylist.vue'
@@ -33,7 +33,7 @@ import './music-center.css'
 import './appearance/music-theme.css'
 import './music-mobile.css'
 
-const emit = defineEmits<{ openTools: [view: 'video' | 'watermark']; openAdmin: [] }>()
+const emit = defineEmits<{ openTools: [view: 'video' | 'watermark']; openAdmin: []; openAgents: []; openKnowledge: [] }>()
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const dailyEnabled = ref(false)
 async function loadDailyCapability() {
@@ -358,6 +358,7 @@ defineExpose({ download, search })
       <nav class="mc-discover" aria-label="发现音乐"><button :class="{ active: view === 'home' }" @click="go('home')"><Home :size="19" />首页</button><button :class="{ active: view === 'search' }" @click="go('search')"><Compass :size="19" />搜索歌曲</button><button :class="{ active: view === 'bulk' }" @click="go('bulk')"><ListMusic :size="19" />批量找歌</button><button @click="radio"><Radio :size="19" />私人电台</button></nav>
       <nav class="mc-discover" aria-label="音乐社交"><button :class="{ active: view === 'social' }" @click="go('social'); startSocial()"><Headphones :size="19" />音乐社交<small v-if="socialUnread">{{ socialUnread }}</small></button></nav>
       <nav class="mc-discover" aria-label="场景歌单"><button :class="{ active: view === 'scene' }" @click="go('scene')"><Headphones :size="19" />场景歌单</button></nav>
+      <nav class="mc-discover" aria-label="Agent 与知识库"><button @click="emit('openKnowledge')"><BookOpen :size="19" />知识库</button><button @click="emit('openAgents')"><Workflow :size="19" />Agent 任务中心</button></nav>
       <div class="mc-nav-label">我的音乐</div>
       <nav class="mc-library-nav" aria-label="我的音乐"><button :class="{ active: view === 'favorites' }" @click="go('favorites')"><Heart :size="19" /><span>我喜欢</span><small>{{ counts.favorites }}</small></button><button :class="{ active: view === 'history' }" @click="go('history')"><Clock3 :size="19" /><span>最近播放</span><small>{{ counts.history }}</small></button><button :class="{ active: view === 'downloads' }" @click="go('downloads')"><FolderOpen :size="19" /><span>本地音乐</span><small>{{ localCount }}</small></button><button @click="go('downloadManager')"><Download :size="19" /><span>下载管理</span></button><button @click="go('site')"><Radio :size="19" /><span>本站音源</span></button><button :class="{ active: view === 'trials' }" @click="go('trials')"><Headphones :size="19" /><span>试听列表</span><small>{{ counts.trials }}</small></button></nav>
       <div class="mc-playlist-label"><span>自建歌单</span><button class="mc-icon" title="创建歌单" aria-label="创建歌单" @click="targetTrack = null; openModal('playlist')"><Plus :size="18" /></button></div>
@@ -422,7 +423,7 @@ defineExpose({ download, search })
           <div class="mc-section-heading"><h2>我的歌单</h2><button class="mc-text-button" @click="targetTrack = null; openModal('playlist')"><Plus :size="16" />创建歌单</button></div>
           <div v-if="playlists.length" class="mc-playlist-grid"><button v-for="playlist in playlists" :key="playlist.id" class="mc-playlist-item" @click="go('playlist', playlist.id)"><span class="playlist-art"><TrackCover :src="playlist.thumbnail" :title="playlist.name" /></span><span><strong>{{ playlist.name }}</strong><small>{{ playlist.count }} 首歌曲</small></span><ChevronRight :size="17" /></button></div><p v-else class="mc-sidebar-empty">暂无歌单，创建一个收藏好音乐</p>
           <nav class="mc-hub mc-mine-library" aria-label="音乐社交入口"><button @click="go('social'); startSocial()"><Headphones :size="22" /><span>音乐社交</span><small v-if="socialUnread">{{ socialUnread }}</small><ChevronRight :size="17" /></button></nav>
-          <nav class="mc-hub mc-mine-settings" aria-label="账号与设置"><button @click="openAppearance()"><Palette :size="22" /><span>外观设置</span><ChevronRight :size="17" /></button><button @click="go('profile')"><ShieldCheck :size="22" /><span>账号安全</span><ChevronRight :size="17" /></button><button v-if="account?.role === 'super_admin'" @click="emit('openAdmin')"><Settings2 :size="22" /><span>管理后台</span><ChevronRight :size="17" /></button><button @click="logoutAccount"><LogOut :size="22" /><span>退出登录</span><ChevronRight :size="17" /></button></nav>
+          <nav class="mc-hub mc-mine-settings" aria-label="账号与设置"><button @click="emit('openAgents')"><Workflow :size="22" /><span>Agent 任务中心</span><ChevronRight :size="17" /></button><button @click="emit('openKnowledge')"><BookOpen :size="22" /><span>知识库</span><ChevronRight :size="17" /></button><button @click="openAppearance()"><Palette :size="22" /><span>外观设置</span><ChevronRight :size="17" /></button><button @click="go('profile')"><ShieldCheck :size="22" /><span>账号安全</span><ChevronRight :size="17" /></button><button v-if="account?.role === 'super_admin'" @click="emit('openAdmin')"><Settings2 :size="22" /><span>管理后台</span><ChevronRight :size="17" /></button><button @click="logoutAccount"><LogOut :size="22" /><span>退出登录</span><ChevronRight :size="17" /></button></nav>
         </section>
         <nav v-if="view === 'profile' || view === 'appearance'" class="mc-profile-tabs" aria-label="个人设置"><button :aria-current="view === 'appearance' ? 'page' : undefined" @click="openAppearance()"><Palette :size="17" />外观设置</button><button :aria-current="view === 'profile' ? 'page' : undefined" @click="go('profile')"><ShieldCheck :size="17" />账号安全</button></nav>
         <AccountSettings v-if="view === 'profile'" />

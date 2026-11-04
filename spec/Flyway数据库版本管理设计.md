@@ -72,7 +72,9 @@ baseline 仅允许不存在 Flyway 历史表且完整通过 V1 核对的库；�
 
 baseline 不等于结构或业务数据迁移。结构缺失时，使用接入前的兼容版本先完成旧结构升级。`database.py legacy-data` 只适用于结构已完整的旧数据：停服后显式运行，先备份，再调用原有账号归属、视频 JSON 转换和音乐文件分类逻辑；这些函数不再包含 DDL。用户目录搬迁继续使用 migrate-user-storage.py 的清单与备份流程。全新数据库无需执行 legacy-data。
 
-应用 lifespan 在启动后台任务前检查所有历史记录成功且当前版本与 `SCHEMA_VERSION` 一致（目前 V4）；缺少历史表、版本不符或存在失败记录时启动失败。首次业务连接也进行只读检查，缓存按连接目标隔离。`/api/health` 保留现有存活语义。
+应用 lifespan 在启动后台任务前检查历史记录成功及 `SCHEMA_VERSION`（目前 V8）；仅 `VIDEODREAM_AGENT_ENGINE=legacy` 允许 V6/V7 桥接，新功能接口仍要求 V8。缺少历史、版本不兼容、迁移失败或用户雪花 ID 离线迁移未完成时启动失败。首次业务连接只读检查，缓存按连接目标隔离。`/api/health` 保留现有存活语义。
+
+2026-10-26 新增 V7（5 张 Agent 表）及 V8（4 张知识库表）；既有物理列、索引和 Redis 契约无变更。完整结构、关系与 JSON 契约见 [能力升级规格](VideoDream-Agent能力升级功能实现文档.md)；发布及保留数据回退见 [V7](../deploy/sql/prod/v7/README.md)、[V8](../deploy/sql/prod/v8/README.md)。本地迁移前使用项目一致性快照备份，迁移后 Flyway validate 通过。
 
 ## 4. Docker 发布
 

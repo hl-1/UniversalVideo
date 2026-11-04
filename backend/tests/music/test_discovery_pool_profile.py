@@ -722,6 +722,39 @@ class PoolProfileIntegrationTests(unittest.TestCase):
         with library.database() as cursor:
             self.assertEqual(profile_store.get_run(cursor,self.user_id,row['run_id'])['status'],'succeeded')
 
+    def test_langgraph_profile_proposal_is_metered_and_published_once(self):
+        import httpx
+        from backend.agents import gateway
+        client_type = httpx.Client
+        with patch.dict('os.environ', {'VIDEODREAM_AGENT_ENGINE': 'langgraph'}):
+            row = self.job()
+            proposal = {'summary': '喜欢 Artist', 'items': [{'dimension': 'artist', 'value': 'Artist', 'preference': .8,
+                'evidence_refs': [e['ref'] for e in row['input_snapshot']['evidence']]}]}
+            requests = []
+            def respond(request):
+                requests.append(request)
+                return httpx.Response(200, json={'id': 'profile-fixture', 'object': 'chat.completion', 'created': 1, 'model': 'test',
+                    'choices': [{'index': 0, 'finish_reason': 'tool_calls', 'message': {'role': 'assistant', 'content': None,
+                        'tool_calls': [{'id': 'profile-call', 'type': 'function', 'function': {'name': 'propose_profile_changes', 'arguments': json.dumps(proposal)}}]}}],
+                    'usage': {'prompt_tokens': 600, 'completion_tokens': 100, 'total_tokens': 700}})
+            class FixtureClient(client_type):
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs, transport=httpx.MockTransport(respond))
+            with library.database() as cursor:
+                current = profile_store.get_run(cursor, self.user_id, row['run_id'], True)
+                profile_store.update_run(cursor, current, status='pending', worker_id=None, lease_until=None,
+                    context=current['context'] | {'not_before': 0})
+            with patch.object(profile_agent.ai, 'load_config', return_value={'model': 'test', 'base_url': 'https://example.invalid/v1', 'api_key': 'test'}), patch.object(gateway.httpx, 'Client', FixtureClient):
+                profile_runtime.run_profile(self.user_id, row['run_id'])
+                profile_runtime.run_profile(self.user_id, row['run_id'])
+            self.assertEqual(len(requests), 1)
+            with library.database() as cursor:
+                current = profile_store.get_run(cursor, self.user_id, row['run_id'])
+                self.assertEqual(current['status'], 'succeeded', current)
+                self.assertEqual(profile_budget.totals(current['context'])['actual'], 700)
+                cursor.execute('SELECT state,actual_tokens FROM agent_model_calls WHERE task_id=%s', (row['run_id'],))
+                self.assertEqual(cursor.fetchall(), [{'state': 'settled', 'actual_tokens': 700}])
+
     def test_expired_lease_retains_unknown_usage_and_old_worker_cannot_reserve(self):
         row=self.job();request=profile_budget.reserve(self.user_id,row['run_id'],1000,'request',time.time()+30)
         with library.database() as cursor:

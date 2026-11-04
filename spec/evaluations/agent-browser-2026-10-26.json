@@ -1,0 +1,5511 @@
+{
+  "site": "https://music.163.com",
+  "test_user_approval": true,
+  "writes": "disposable database only",
+  "cases": [
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "",
+            "kind": "click",
+            "text": "",
+            "summary": "点击学习轻音乐歌单",
+            "revision": 1,
+            "element_id": "c3b9d6d1da9b-31"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取当前歌单的曲目列表",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单0",
+            "tracks": [
+              {
+                "title": "Penn Ar Roc'h",
+                "artist": "Yann Tiersen",
+                "provider": "netease",
+                "identifier": "434732886",
+                "webpage_url": "https://music.163.com/song?id=434732886"
+              },
+              {
+                "title": "Written On the Sky",
+                "artist": "Max Richter",
+                "provider": "netease",
+                "identifier": "16964052",
+                "webpage_url": "https://music.163.com/song?id=16964052"
+              },
+              {
+                "title": "Imagining",
+                "artist": "Brian Crain",
+                "provider": "netease",
+                "identifier": "19475701",
+                "webpage_url": "https://music.163.com/song?id=19475701"
+              },
+              {
+                "title": "Memories",
+                "artist": "Marika Takeuchi",
+                "provider": "netease",
+                "identifier": "31452740",
+                "webpage_url": "https://music.163.com/song?id=31452740"
+              },
+              {
+                "title": "Liquid Light",
+                "artist": "Peter Jeremias",
+                "provider": "netease",
+                "identifier": "36953782",
+                "webpage_url": "https://music.163.com/song?id=36953782"
+              },
+              {
+                "title": "Råklipp",
+                "artist": "Steve Gibbs",
+                "provider": "netease",
+                "identifier": "29540374",
+                "webpage_url": "https://music.163.com/song?id=29540374"
+              },
+              {
+                "title": "Amazing Grace",
+                "artist": "Wayne Gratz",
+                "provider": "netease",
+                "identifier": "19781664",
+                "webpage_url": "https://music.163.com/song?id=19781664"
+              },
+              {
+                "title": "路小雨 | Lu Xiao Yu (from \"Secret\")",
+                "artist": "Michael Tai",
+                "provider": "netease",
+                "identifier": "1439739102",
+                "webpage_url": "https://music.163.com/song?id=1439739102"
+              },
+              {
+                "title": "Sequence.",
+                "artist": "Saptune",
+                "provider": "netease",
+                "identifier": "492144228",
+                "webpage_url": "https://music.163.com/song?id=492144228"
+              },
+              {
+                "title": "Lord You're Okay",
+                "artist": "a l e x",
+                "provider": "netease",
+                "identifier": "489302067",
+                "webpage_url": "https://music.163.com/song?id=489302067"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=9838852201",
+            "playlist_id": "bd0490ddaaf6ea4face79eea"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "a4128271bb3b-0",
+          "tag": "a",
+          "href": "/user/home?id=12662986022",
+          "type": "",
+          "label": "云村纯音乐"
+        },
+        {
+          "id": "a4128271bb3b-1",
+          "tag": "a",
+          "href": "/song?id=434732886",
+          "type": "",
+          "label": "Penn Ar Roc'h"
+        },
+        {
+          "id": "a4128271bb3b-2",
+          "tag": "a",
+          "href": "/artist?id=46197",
+          "type": "",
+          "label": "Ya\nm9\nnn Tiersen"
+        },
+        {
+          "id": "a4128271bb3b-3",
+          "tag": "a",
+          "href": "/album?id=34886752",
+          "type": "",
+          "label": "EUSA"
+        },
+        {
+          "id": "a4128271bb3b-4",
+          "tag": "a",
+          "href": "/song?id=16964052",
+          "type": "",
+          "label": "Written On the Sky"
+        },
+        {
+          "id": "a4128271bb3b-5",
+          "tag": "a",
+          "href": "/artist?id=38883",
+          "type": "",
+          "label": "Max Ri\no\nchter"
+        },
+        {
+          "id": "a4128271bb3b-6",
+          "tag": "a",
+          "href": "/album?id=1563224",
+          "type": "",
+          "label": "Max Richter: Blue Notebooks"
+        },
+        {
+          "id": "a4128271bb3b-7",
+          "tag": "a",
+          "href": "/song?id=19475701",
+          "type": "",
+          "label": "Imagining"
+        },
+        {
+          "id": "a4128271bb3b-8",
+          "tag": "a",
+          "href": "/artist?id=29377",
+          "type": "",
+          "label": "Brian Cra\nyE\nin"
+        },
+        {
+          "id": "a4128271bb3b-9",
+          "tag": "a",
+          "href": "/album?id=1793521",
+          "type": "",
+          "label": "Piano and Light"
+        },
+        {
+          "id": "a4128271bb3b-10",
+          "tag": "a",
+          "href": "/song?id=31452740",
+          "type": "",
+          "label": "Memories"
+        },
+        {
+          "id": "a4128271bb3b-11",
+          "tag": "a",
+          "href": "/artist?id=17281",
+          "type": "",
+          "label": "M\n7\narika Takeuchi"
+        },
+        {
+          "id": "a4128271bb3b-12",
+          "tag": "a",
+          "href": "/album?id=3121100",
+          "type": "",
+          "label": "Rain Stories"
+        },
+        {
+          "id": "a4128271bb3b-13",
+          "tag": "a",
+          "href": "/song?id=36953782",
+          "type": "",
+          "label": "Liquid Light"
+        },
+        {
+          "id": "a4128271bb3b-14",
+          "tag": "a",
+          "href": "/artist?id=1181948",
+          "type": "",
+          "label": "Peter Je\niZM\nremias"
+        },
+        {
+          "id": "a4128271bb3b-15",
+          "tag": "a",
+          "href": "/album?id=3397642",
+          "type": "",
+          "label": "Emotional Piano - Hope"
+        },
+        {
+          "id": "a4128271bb3b-16",
+          "tag": "a",
+          "href": "/song?id=29540374",
+          "type": "",
+          "label": "Råklipp"
+        },
+        {
+          "id": "a4128271bb3b-17",
+          "tag": "a",
+          "href": "/artist?id=983030",
+          "type": "",
+          "label": "Steve \nsZm\nGibbs"
+        },
+        {
+          "id": "a4128271bb3b-18",
+          "tag": "a",
+          "href": "/album?id=3039647",
+          "type": "",
+          "label": "Adrift"
+        },
+        {
+          "id": "a4128271bb3b-19",
+          "tag": "a",
+          "href": "/song?id=19781664",
+          "type": "",
+          "label": "Amazing Grace"
+        },
+        {
+          "id": "a4128271bb3b-20",
+          "tag": "a",
+          "href": "/artist?id=45867",
+          "type": "",
+          "label": "Wayne Gra\nc\ntz"
+        },
+        {
+          "id": "a4128271bb3b-21",
+          "tag": "a",
+          "href": "/album?id=1823854",
+          "type": "",
+          "label": "Simple Gifts (Songs Of Inspiration)"
+        },
+        {
+          "id": "a4128271bb3b-22",
+          "tag": "a",
+          "href": "/song?id=1439739102",
+          "type": "",
+          "label": "路小雨 | Lu Xiao Yu (from \"Secret\")"
+        },
+        {
+          "id": "a4128271bb3b-23",
+          "tag": "a",
+          "href": "/artist?id=34806909",
+          "type": "",
+          "label": "Mic\nsb9\nhael Tai"
+        },
+        {
+          "id": "a4128271bb3b-24",
+          "tag": "a",
+          "href": "/album?id=87890563",
+          "type": "",
+          "label": "不能說的秘密 \"Secret\" & Pop - Piano Collection"
+        },
+        {
+          "id": "a4128271bb3b-25",
+          "tag": "a",
+          "href": "/song?id=492144228",
+          "type": "",
+          "label": "Sequence."
+        },
+        {
+          "id": "a4128271bb3b-26",
+          "tag": "a",
+          "href": "/artist?id=12279964",
+          "type": "",
+          "label": "Sap\nwbF\ntune"
+        },
+        {
+          "id": "a4128271bb3b-27",
+          "tag": "a",
+          "href": "/album?id=35695522",
+          "type": "",
+          "label": "Sequence."
+        },
+        {
+          "id": "a4128271bb3b-28",
+          "tag": "a",
+          "href": "/song?id=489302067",
+          "type": "",
+          "label": "Lord You're Okay"
+        },
+        {
+          "id": "a4128271bb3b-29",
+          "tag": "a",
+          "href": "/artist?id=12154333",
+          "type": "",
+          "label": "a\nan\n l e x"
+        },
+        {
+          "id": "a4128271bb3b-30",
+          "tag": "a",
+          "href": "/album?id=35696816",
+          "type": "",
+          "label": "Lord You're Okay"
+        },
+        {
+          "id": "a4128271bb3b-31",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "a4128271bb3b-32",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "a4128271bb3b-33",
+          "tag": "a",
+          "href": "/playlist?id=804403950",
+          "type": "",
+          "label": "读书静心要听最舒服的轻音乐"
+        },
+        {
+          "id": "a4128271bb3b-34",
+          "tag": "a",
+          "href": "/playlist?id=804403950",
+          "type": "",
+          "label": "读书静心要听最舒服的轻音乐"
+        },
+        {
+          "id": "a4128271bb3b-35",
+          "tag": "a",
+          "href": "/user/home?id=100916617",
+          "type": "",
+          "label": "李李李豆芽"
+        },
+        {
+          "id": "a4128271bb3b-36",
+          "tag": "a",
+          "href": "/playlist?id=730424608",
+          "type": "",
+          "label": "[睡觉专用]安静的纯音乐〈1〉"
+        },
+        {
+          "id": "a4128271bb3b-37",
+          "tag": "a",
+          "href": "/playlist?id=730424608",
+          "type": "",
+          "label": "[睡觉专用]安静的纯音乐〈1〉"
+        },
+        {
+          "id": "a4128271bb3b-38",
+          "tag": "a",
+          "href": "/user/home?id=46347293",
+          "type": "",
+          "label": "永远的你windy"
+        },
+        {
+          "id": "a4128271bb3b-39",
+          "tag": "a",
+          "href": "/playlist?id=97036179",
+          "type": "",
+          "label": "百首精选 | 那些冷门却美哭你的纯音乐"
+        },
+        {
+          "id": "a4128271bb3b-40",
+          "tag": "a",
+          "href": "/playlist?id=97036179",
+          "type": "",
+          "label": "百首精选 | 那些冷门却美哭你的纯音乐"
+        },
+        {
+          "id": "a4128271bb3b-41",
+          "tag": "a",
+          "href": "/user/home?id=30686834",
+          "type": "",
+          "label": "絢香猫"
+        },
+        {
+          "id": "a4128271bb3b-42",
+          "tag": "a",
+          "href": "/playlist?id=394062123",
+          "type": "",
+          "label": "【日系】宿舍太吵时睡觉轻音乐"
+        },
+        {
+          "id": "a4128271bb3b-43",
+          "tag": "a",
+          "href": "/playlist?id=394062123",
+          "type": "",
+          "label": "【日系】宿舍太吵时睡觉轻音乐"
+        },
+        {
+          "id": "a4128271bb3b-44",
+          "tag": "a",
+          "href": "/user/home?id=282658169",
+          "type": "",
+          "label": "浅羽夏目"
+        },
+        {
+          "id": "a4128271bb3b-45",
+          "tag": "a",
+          "href": "/playlist?id=144818129",
+          "type": "",
+          "label": "纯音•世界名钢琴曲"
+        },
+        {
+          "id": "a4128271bb3b-46",
+          "tag": "a",
+          "href": "/playlist?id=144818129",
+          "type": "",
+          "label": "纯音•世界名钢琴曲"
+        },
+        {
+          "id": "a4128271bb3b-47",
+          "tag": "a",
+          "href": "/user/home?id=64272440",
+          "type": "",
+          "label": "七香"
+        },
+        {
+          "id": "a4128271bb3b-48",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "a4128271bb3b-49",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "a4128271bb3b-50",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "a4128271bb3b-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "a4128271bb3b-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "a4128271bb3b-53",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "a4128271bb3b-54",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "a4128271bb3b-55",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "a4128271bb3b-56",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "a4128271bb3b-57",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "a4128271bb3b-58",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "a4128271bb3b-59",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        }
+      ],
+      "goal": "纯音乐",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "bd0490ddaaf6ea4face79eea",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 15.26,
+      "usage": {
+        "actual": 8634,
+        "actions": 2,
+        "seconds": 15.236,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入歌单《学习听欧美钢琴》详情页以提取钢琴曲目",
+            "revision": 1,
+            "element_id": "9c67438b3ba5-34"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取当前歌单的曲目列表",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单1",
+            "tracks": [
+              {
+                "title": "Beauty And The Beast",
+                "artist": "Donovan Lakeberg",
+                "provider": "netease",
+                "identifier": "2023905562",
+                "webpage_url": "https://music.163.com/song?id=2023905562"
+              },
+              {
+                "title": "Take a Bow",
+                "artist": "Piano Covers Club/Mikkel Storleer Eriksen/Shaffer Smith/Tor Erik Hermansen",
+                "provider": "netease",
+                "identifier": "508042850",
+                "webpage_url": "https://music.163.com/song?id=508042850"
+              },
+              {
+                "title": "Fix You",
+                "artist": "Lars Florence",
+                "provider": "netease",
+                "identifier": "2098829904",
+                "webpage_url": "https://music.163.com/song?id=2098829904"
+              },
+              {
+                "title": "Marry Me",
+                "artist": "Steve Wingfield",
+                "provider": "netease",
+                "identifier": "565930728",
+                "webpage_url": "https://music.163.com/song?id=565930728"
+              },
+              {
+                "title": "Goodbye",
+                "artist": "Robert Anderson",
+                "provider": "netease",
+                "identifier": "565140882",
+                "webpage_url": "https://music.163.com/song?id=565140882"
+              },
+              {
+                "title": "The Ludlows",
+                "artist": "Martin Jacoby/James Horner",
+                "provider": "netease",
+                "identifier": "569575425",
+                "webpage_url": "https://music.163.com/song?id=569575425"
+              },
+              {
+                "title": "You Are Not Alone",
+                "artist": "Piano Covers Club",
+                "provider": "netease",
+                "identifier": "548619916",
+                "webpage_url": "https://music.163.com/song?id=548619916"
+              },
+              {
+                "title": "Love Story",
+                "artist": "Music Box Angels",
+                "provider": "netease",
+                "identifier": "569587107",
+                "webpage_url": "https://music.163.com/song?id=569587107"
+              },
+              {
+                "title": "Counting Stars",
+                "artist": "Piano Covers Club from I’m In Records",
+                "provider": "netease",
+                "identifier": "514416805",
+                "webpage_url": "https://music.163.com/song?id=514416805"
+              },
+              {
+                "title": "The Power of Love",
+                "artist": "Northquest Players",
+                "provider": "netease",
+                "identifier": "563368447",
+                "webpage_url": "https://music.163.com/song?id=563368447"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=9379756202",
+            "playlist_id": "41f0a2955d49a9942e77c418"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "189bd49862a7-0",
+          "tag": "a",
+          "href": "/user/home?id=1463586082",
+          "type": "",
+          "label": "云音乐官方歌单"
+        },
+        {
+          "id": "189bd49862a7-1",
+          "tag": "a",
+          "href": "/song?id=2023905562",
+          "type": "",
+          "label": "Beauty And The Beast"
+        },
+        {
+          "id": "189bd49862a7-2",
+          "tag": "a",
+          "href": "/artist?id=47941079",
+          "type": "",
+          "label": "Donovan Lakeb\nJu7r\nerg"
+        },
+        {
+          "id": "189bd49862a7-3",
+          "tag": "a",
+          "href": "/album?id=160381705",
+          "type": "",
+          "label": "Beauty And The Beast"
+        },
+        {
+          "id": "189bd49862a7-4",
+          "tag": "a",
+          "href": "/song?id=508042850",
+          "type": "",
+          "label": "Take a Bow"
+        },
+        {
+          "id": "189bd49862a7-5",
+          "tag": "a",
+          "href": "/artist?id=12278971",
+          "type": "",
+          "label": "Piano\nXd\n Covers Club"
+        },
+        {
+          "id": "189bd49862a7-6",
+          "tag": "a",
+          "href": "/artist?id=13106064",
+          "type": "",
+          "label": "Mikkel St\nPeBJ\norleer Eriksen"
+        },
+        {
+          "id": "189bd49862a7-7",
+          "tag": "a",
+          "href": "/artist?id=13106065",
+          "type": "",
+          "label": "S\nB6Hz\nhaffer Smith"
+        },
+        {
+          "id": "189bd49862a7-8",
+          "tag": "a",
+          "href": "/artist?id=575865",
+          "type": "",
+          "label": "Tor Erik \nKcL\nHermansen"
+        },
+        {
+          "id": "189bd49862a7-9",
+          "tag": "a",
+          "href": "/album?id=36329335",
+          "type": "",
+          "label": "Piano Covers: Sad Songs"
+        },
+        {
+          "id": "189bd49862a7-10",
+          "tag": "a",
+          "href": "/song?id=2098829904",
+          "type": "",
+          "label": "Fix You"
+        },
+        {
+          "id": "189bd49862a7-11",
+          "tag": "a",
+          "href": "/artist?id=59071110",
+          "type": "",
+          "label": "Lars Flor\nROQ\nence"
+        },
+        {
+          "id": "189bd49862a7-12",
+          "tag": "a",
+          "href": "/album?id=178834368",
+          "type": "",
+          "label": "Fix You"
+        },
+        {
+          "id": "189bd49862a7-13",
+          "tag": "a",
+          "href": "/song?id=565930728",
+          "type": "",
+          "label": "Marry Me"
+        },
+        {
+          "id": "189bd49862a7-14",
+          "tag": "a",
+          "href": "/artist?id=43624",
+          "type": "",
+          "label": "S\nD3\nteve Wingfield"
+        },
+        {
+          "id": "189bd49862a7-15",
+          "tag": "a",
+          "href": "/album?id=39218596",
+          "type": "",
+          "label": "Romantic Piano"
+        },
+        {
+          "id": "189bd49862a7-16",
+          "tag": "a",
+          "href": "/song?id=565140882",
+          "type": "",
+          "label": "Goodbye"
+        },
+        {
+          "id": "189bd49862a7-17",
+          "tag": "a",
+          "href": "/artist?id=42348",
+          "type": "",
+          "label": "Robert Ande\n8K\nrson"
+        },
+        {
+          "id": "189bd49862a7-18",
+          "tag": "a",
+          "href": "/album?id=39161334",
+          "type": "",
+          "label": "The Very Best of Relaxing Piano for Spa, Vol. 5"
+        },
+        {
+          "id": "189bd49862a7-19",
+          "tag": "a",
+          "href": "/song?id=569575425",
+          "type": "",
+          "label": "The Ludlows"
+        },
+        {
+          "id": "189bd49862a7-20",
+          "tag": "a",
+          "href": "/artist?id=12721094",
+          "type": "",
+          "label": "Ma\nGi\nrtin Jacoby"
+        },
+        {
+          "id": "189bd49862a7-21",
+          "tag": "a",
+          "href": "/artist?id=35353",
+          "type": "",
+          "label": "James Ho\nGPi\nrner"
+        },
+        {
+          "id": "189bd49862a7-22",
+          "tag": "a",
+          "href": "/album?id=39487678",
+          "type": "",
+          "label": "Calming Classical Piano Music"
+        },
+        {
+          "id": "189bd49862a7-23",
+          "tag": "a",
+          "href": "/song?id=548619916",
+          "type": "",
+          "label": "You Are Not Alone"
+        },
+        {
+          "id": "189bd49862a7-24",
+          "tag": "a",
+          "href": "/artist?id=12278971",
+          "type": "",
+          "label": "Piano Co\n8l96\nvers Club"
+        },
+        {
+          "id": "189bd49862a7-25",
+          "tag": "a",
+          "href": "/album?id=38081074",
+          "type": "",
+          "label": "Acoustic Covers: Pop Ballads on the Piano"
+        },
+        {
+          "id": "189bd49862a7-26",
+          "tag": "a",
+          "href": "/song?id=569587107",
+          "type": "",
+          "label": "Love Story"
+        },
+        {
+          "id": "189bd49862a7-27",
+          "tag": "a",
+          "href": "/artist?id=13079933",
+          "type": "",
+          "label": "Music Box An\nGJoc\ngels"
+        },
+        {
+          "id": "189bd49862a7-28",
+          "tag": "a",
+          "href": "/album?id=39488087",
+          "type": "",
+          "label": "Father's Day Dinner: 30 Relaxing Piano Classics for a Family Meal"
+        },
+        {
+          "id": "189bd49862a7-29",
+          "tag": "a",
+          "href": "/song?id=514416805",
+          "type": "",
+          "label": "Counting Stars"
+        },
+        {
+          "id": "189bd49862a7-30",
+          "tag": "a",
+          "href": "/artist?id=29988908",
+          "type": "",
+          "label": "Piano Covers Club from I’m In Recor\nFp\nds"
+        },
+        {
+          "id": "189bd49862a7-31",
+          "tag": "a",
+          "href": "/album?id=36652650",
+          "type": "",
+          "label": "Piano Pop Covers"
+        },
+        {
+          "id": "189bd49862a7-32",
+          "tag": "a",
+          "href": "/song?id=563368447",
+          "type": "",
+          "label": "The Power of Love"
+        },
+        {
+          "id": "189bd49862a7-33",
+          "tag": "a",
+          "href": "/artist?id=13181618",
+          "type": "",
+          "label": "Northquest Pl\ne\nayers"
+        },
+        {
+          "id": "189bd49862a7-34",
+          "tag": "a",
+          "href": "/album?id=39039929",
+          "type": "",
+          "label": "Hits of Celine Dion on Piano"
+        },
+        {
+          "id": "189bd49862a7-35",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "189bd49862a7-36",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "189bd49862a7-37",
+          "tag": "a",
+          "href": "/playlist?id=942852326",
+          "type": "",
+          "label": "轻柔好听的催眠曲集|治疗轻度失眠患者"
+        },
+        {
+          "id": "189bd49862a7-38",
+          "tag": "a",
+          "href": "/playlist?id=942852326",
+          "type": "",
+          "label": "轻柔好听的催眠曲集|治疗轻度失眠患者"
+        },
+        {
+          "id": "189bd49862a7-39",
+          "tag": "a",
+          "href": "/user/home?id=475682981",
+          "type": "",
+          "label": "Maoni0400"
+        },
+        {
+          "id": "189bd49862a7-40",
+          "tag": "a",
+          "href": "/playlist?id=905467464",
+          "type": "",
+          "label": "「钢琴」纵使黑暗荒芜 仍有星光点点"
+        },
+        {
+          "id": "189bd49862a7-41",
+          "tag": "a",
+          "href": "/playlist?id=905467464",
+          "type": "",
+          "label": "「钢琴」纵使黑暗荒芜 仍有星光点点"
+        },
+        {
+          "id": "189bd49862a7-42",
+          "tag": "a",
+          "href": "/user/home?id=106990512",
+          "type": "",
+          "label": "Frawrsasye"
+        },
+        {
+          "id": "189bd49862a7-43",
+          "tag": "a",
+          "href": "/playlist?id=7271862642",
+          "type": "",
+          "label": ". 世界经典钢琴曲 ."
+        },
+        {
+          "id": "189bd49862a7-44",
+          "tag": "a",
+          "href": "/playlist?id=7271862642",
+          "type": "",
+          "label": ". 世界经典钢琴曲 ."
+        },
+        {
+          "id": "189bd49862a7-45",
+          "tag": "a",
+          "href": "/user/home?id=559930168",
+          "type": "",
+          "label": "月色静谧"
+        },
+        {
+          "id": "189bd49862a7-46",
+          "tag": "a",
+          "href": "/playlist?id=5273305040",
+          "type": "",
+          "label": "钢琴独奏 | 当世界喧嚣时 宇宙依然宁静"
+        },
+        {
+          "id": "189bd49862a7-47",
+          "tag": "a",
+          "href": "/playlist?id=5273305040",
+          "type": "",
+          "label": "钢琴独奏 | 当世界喧嚣时 宇宙依然宁静"
+        },
+        {
+          "id": "189bd49862a7-48",
+          "tag": "a",
+          "href": "/user/home?id=374024623",
+          "type": "",
+          "label": "峰哥已鸽"
+        },
+        {
+          "id": "189bd49862a7-49",
+          "tag": "a",
+          "href": "/playlist?id=2079243644",
+          "type": "",
+          "label": "『纯音』好听的会员歌曲"
+        },
+        {
+          "id": "189bd49862a7-50",
+          "tag": "a",
+          "href": "/playlist?id=2079243644",
+          "type": "",
+          "label": "『纯音』好听的会员歌曲"
+        },
+        {
+          "id": "189bd49862a7-51",
+          "tag": "a",
+          "href": "/user/home?id=104195242",
+          "type": "",
+          "label": "牛奶煮橙子"
+        },
+        {
+          "id": "189bd49862a7-52",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "189bd49862a7-53",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "189bd49862a7-54",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "189bd49862a7-55",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "189bd49862a7-56",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "189bd49862a7-57",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "189bd49862a7-58",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "189bd49862a7-59",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        }
+      ],
+      "goal": "钢琴",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "41f0a2955d49a9942e77c418",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 15.051,
+      "usage": {
+        "actual": 9318,
+        "actions": 2,
+        "seconds": 15.034,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "https://music.163.com/playlist?id=8621500205",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入助眠钢琴声歌单详情页",
+            "revision": 1,
+            "element_id": "9549a86cb26a-10"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取当前轻音乐歌单的曲目列表",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单2",
+            "tracks": [
+              {
+                "title": "The Path Unwinds",
+                "artist": "Lukasz Allain",
+                "provider": "netease",
+                "identifier": "2622412964",
+                "webpage_url": "https://music.163.com/song?id=2622412964"
+              },
+              {
+                "title": "Lleno De Ti",
+                "artist": "Leddei",
+                "provider": "netease",
+                "identifier": "2127276338",
+                "webpage_url": "https://music.163.com/song?id=2127276338"
+              },
+              {
+                "title": "Open Door (Piano Version)",
+                "artist": "Eternal Spring",
+                "provider": "netease",
+                "identifier": "2130320066",
+                "webpage_url": "https://music.163.com/song?id=2130320066"
+              },
+              {
+                "title": "Theme from the New World Symphony",
+                "artist": "Open Blue Sky",
+                "provider": "netease",
+                "identifier": "1443009380",
+                "webpage_url": "https://music.163.com/song?id=1443009380"
+              },
+              {
+                "title": "Trail of the Ants",
+                "artist": "Vibrante",
+                "provider": "netease",
+                "identifier": "2644364897",
+                "webpage_url": "https://music.163.com/song?id=2644364897"
+              },
+              {
+                "title": "Forest",
+                "artist": "Lunar Lull",
+                "provider": "netease",
+                "identifier": "2138228486",
+                "webpage_url": "https://music.163.com/song?id=2138228486"
+              },
+              {
+                "title": "Echidna",
+                "artist": "Northern Dreams",
+                "provider": "netease",
+                "identifier": "2133734907",
+                "webpage_url": "https://music.163.com/song?id=2133734907"
+              },
+              {
+                "title": "February Evenings",
+                "artist": "Poella",
+                "provider": "netease",
+                "identifier": "2675326402",
+                "webpage_url": "https://music.163.com/song?id=2675326402"
+              },
+              {
+                "title": "Following The Light (Reimagined)",
+                "artist": "Moonlight Echoes",
+                "provider": "netease",
+                "identifier": "1891127552",
+                "webpage_url": "https://music.163.com/song?id=1891127552"
+              },
+              {
+                "title": "Only",
+                "artist": "Ian Wong",
+                "provider": "netease",
+                "identifier": "1500910599",
+                "webpage_url": "https://music.163.com/song?id=1500910599"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=8621500205",
+            "playlist_id": "929d1a97b6363bd636e8cba4"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "c285baa7bbec-0",
+          "tag": "a",
+          "href": "/user/home?id=1463586082",
+          "type": "",
+          "label": "云音乐官方歌单"
+        },
+        {
+          "id": "c285baa7bbec-1",
+          "tag": "a",
+          "href": "/song?id=2622412964",
+          "type": "",
+          "label": "The Path Unwinds"
+        },
+        {
+          "id": "c285baa7bbec-2",
+          "tag": "a",
+          "href": "/artist?id=56197688",
+          "type": "",
+          "label": "Lukasz \nQ\nAllain"
+        },
+        {
+          "id": "c285baa7bbec-3",
+          "tag": "a",
+          "href": "/album?id=246484589",
+          "type": "",
+          "label": "The Path Unwinds"
+        },
+        {
+          "id": "c285baa7bbec-4",
+          "tag": "a",
+          "href": "/song?id=2127276338",
+          "type": "",
+          "label": "Lleno De Ti"
+        },
+        {
+          "id": "c285baa7bbec-5",
+          "tag": "a",
+          "href": "/artist?id=48452908",
+          "type": "",
+          "label": "L\n9\neddei"
+        },
+        {
+          "id": "c285baa7bbec-6",
+          "tag": "a",
+          "href": "/album?id=186232539",
+          "type": "",
+          "label": "Lleno De Ti"
+        },
+        {
+          "id": "c285baa7bbec-7",
+          "tag": "a",
+          "href": "/song?id=2130320066",
+          "type": "",
+          "label": "Open Door (Piano Version)"
+        },
+        {
+          "id": "c285baa7bbec-8",
+          "tag": "a",
+          "href": "/artist?id=51313762",
+          "type": "",
+          "label": "Eterna\ns\nl Spring"
+        },
+        {
+          "id": "c285baa7bbec-9",
+          "tag": "a",
+          "href": "/album?id=187217034",
+          "type": "",
+          "label": "Open Door"
+        },
+        {
+          "id": "c285baa7bbec-10",
+          "tag": "a",
+          "href": "/song?id=1443009380",
+          "type": "",
+          "label": "Theme from the New World Symphony"
+        },
+        {
+          "id": "c285baa7bbec-11",
+          "tag": "a",
+          "href": "/artist?id=34872506",
+          "type": "",
+          "label": "Ope\nai\nn Blue Sky"
+        },
+        {
+          "id": "c285baa7bbec-12",
+          "tag": "a",
+          "href": "/album?id=88459912",
+          "type": "",
+          "label": "Theme from the New World Symphony"
+        },
+        {
+          "id": "c285baa7bbec-13",
+          "tag": "a",
+          "href": "/song?id=2644364897",
+          "type": "",
+          "label": "Trail of the Ants"
+        },
+        {
+          "id": "c285baa7bbec-14",
+          "tag": "a",
+          "href": "/album?id=253150040",
+          "type": "",
+          "label": "Trail of the Ants"
+        },
+        {
+          "id": "c285baa7bbec-15",
+          "tag": "a",
+          "href": "/song?id=2138228486",
+          "type": "",
+          "label": "Forest"
+        },
+        {
+          "id": "c285baa7bbec-16",
+          "tag": "a",
+          "href": "/artist?id=58234961",
+          "type": "",
+          "label": "Lu\nTd\nnar Lull"
+        },
+        {
+          "id": "c285baa7bbec-17",
+          "tag": "a",
+          "href": "/album?id=189769962",
+          "type": "",
+          "label": "Forest"
+        },
+        {
+          "id": "c285baa7bbec-18",
+          "tag": "a",
+          "href": "/song?id=2133734907",
+          "type": "",
+          "label": "Echidna"
+        },
+        {
+          "id": "c285baa7bbec-19",
+          "tag": "a",
+          "href": "/artist?id=54044762",
+          "type": "",
+          "label": "Northern Dr\nWg7\neams"
+        },
+        {
+          "id": "c285baa7bbec-20",
+          "tag": "a",
+          "href": "/album?id=188346673",
+          "type": "",
+          "label": "Echidna"
+        },
+        {
+          "id": "c285baa7bbec-21",
+          "tag": "a",
+          "href": "/song?id=2675326402",
+          "type": "",
+          "label": "February Evenings"
+        },
+        {
+          "id": "c285baa7bbec-22",
+          "tag": "a",
+          "href": "/artist?id=34868450",
+          "type": "",
+          "label": "Poel\n5xf\nla"
+        },
+        {
+          "id": "c285baa7bbec-23",
+          "tag": "a",
+          "href": "/album?id=262934420",
+          "type": "",
+          "label": "February Evenings"
+        },
+        {
+          "id": "c285baa7bbec-24",
+          "tag": "a",
+          "href": "/song?id=1891127552",
+          "type": "",
+          "label": "Following The Light (Reimagined)"
+        },
+        {
+          "id": "c285baa7bbec-25",
+          "tag": "a",
+          "href": "/artist?id=34253214",
+          "type": "",
+          "label": "Moonlight \nZuJv\nEchoes"
+        },
+        {
+          "id": "c285baa7bbec-26",
+          "tag": "a",
+          "href": "/album?id=135483540",
+          "type": "",
+          "label": "Following The Light (Reimagined)"
+        },
+        {
+          "id": "c285baa7bbec-27",
+          "tag": "a",
+          "href": "/song?id=1500910599",
+          "type": "",
+          "label": "Only"
+        },
+        {
+          "id": "c285baa7bbec-28",
+          "tag": "a",
+          "href": "/artist?id=31316291",
+          "type": "",
+          "label": "Ian W\nXJyd\nong"
+        },
+        {
+          "id": "c285baa7bbec-29",
+          "tag": "a",
+          "href": "/album?id=99204013",
+          "type": "",
+          "label": "Only"
+        },
+        {
+          "id": "c285baa7bbec-30",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "c285baa7bbec-31",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "c285baa7bbec-32",
+          "tag": "a",
+          "href": "/playlist?id=426596110",
+          "type": "",
+          "label": "【吉他】好听到哭的吉他指弹"
+        },
+        {
+          "id": "c285baa7bbec-33",
+          "tag": "a",
+          "href": "/playlist?id=426596110",
+          "type": "",
+          "label": "【吉他】好听到哭的吉他指弹"
+        },
+        {
+          "id": "c285baa7bbec-34",
+          "tag": "a",
+          "href": "/user/home?id=107023058",
+          "type": "",
+          "label": "不楚千寻"
+        },
+        {
+          "id": "c285baa7bbec-35",
+          "tag": "a",
+          "href": "/playlist?id=394062123",
+          "type": "",
+          "label": "【日系】宿舍太吵时睡觉轻音乐"
+        },
+        {
+          "id": "c285baa7bbec-36",
+          "tag": "a",
+          "href": "/playlist?id=394062123",
+          "type": "",
+          "label": "【日系】宿舍太吵时睡觉轻音乐"
+        },
+        {
+          "id": "c285baa7bbec-37",
+          "tag": "a",
+          "href": "/user/home?id=282658169",
+          "type": "",
+          "label": "浅羽夏目"
+        },
+        {
+          "id": "c285baa7bbec-38",
+          "tag": "a",
+          "href": "/playlist?id=2376558926",
+          "type": "",
+          "label": "【国人纯音】3秒入睡，你永远听不完的歌单"
+        },
+        {
+          "id": "c285baa7bbec-39",
+          "tag": "a",
+          "href": "/playlist?id=2376558926",
+          "type": "",
+          "label": "【国人纯音】3秒入睡，你永远听不完的歌单"
+        },
+        {
+          "id": "c285baa7bbec-40",
+          "tag": "a",
+          "href": "/user/home?id=355943787",
+          "type": "",
+          "label": "2次元墩墩酱"
+        },
+        {
+          "id": "c285baa7bbec-41",
+          "tag": "a",
+          "href": "/playlist?id=2024556741",
+          "type": "",
+          "label": "高效率学习歌单（轻音乐）"
+        },
+        {
+          "id": "c285baa7bbec-42",
+          "tag": "a",
+          "href": "/playlist?id=2024556741",
+          "type": "",
+          "label": "高效率学习歌单（轻音乐）"
+        },
+        {
+          "id": "c285baa7bbec-43",
+          "tag": "a",
+          "href": "/user/home?id=550904092",
+          "type": "",
+          "label": "MeiFooGainsberg"
+        },
+        {
+          "id": "c285baa7bbec-44",
+          "tag": "a",
+          "href": "/playlist?id=104150749",
+          "type": "",
+          "label": "睡觉专用 Ⅳ『让那悲伤的纯音乐陪你入睡』"
+        },
+        {
+          "id": "c285baa7bbec-45",
+          "tag": "a",
+          "href": "/playlist?id=104150749",
+          "type": "",
+          "label": "睡觉专用 Ⅳ『让那悲伤的纯音乐陪你入睡』"
+        },
+        {
+          "id": "c285baa7bbec-46",
+          "tag": "a",
+          "href": "/user/home?id=31771830",
+          "type": "",
+          "label": "西柚_"
+        },
+        {
+          "id": "c285baa7bbec-47",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "c285baa7bbec-48",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "c285baa7bbec-49",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "c285baa7bbec-50",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "c285baa7bbec-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "c285baa7bbec-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "c285baa7bbec-53",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "c285baa7bbec-54",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "c285baa7bbec-55",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "c285baa7bbec-56",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "c285baa7bbec-57",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "c285baa7bbec-58",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        },
+        {
+          "id": "c285baa7bbec-59",
+          "tag": "a",
+          "href": "https://p6.music.126.net/obj/wonDlsKUwrLClGjCm8Kx/34942157981/2e30/30c1/ad1f/7be053a28e91dd8bafe49bdf6455cb2a.png",
+          "type": "",
+          "label": "浙网文[2024] 0900-042号"
+        }
+      ],
+      "goal": "轻音乐",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "929d1a97b6363bd636e8cba4",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 10.816,
+      "usage": {
+        "actual": 8291,
+        "actions": 2,
+        "seconds": 10.796,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "",
+            "kind": "click",
+            "text": "",
+            "summary": "点击歌单“想象空间站”以进入详情页提取歌曲",
+            "revision": 1,
+            "element_id": "433454b01470-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取当前歌单的曲目信息",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单3",
+            "tracks": [
+              {
+                "title": "Cello Concerto in B flat, G.482:2. Adagio non Troppo - (降B大调大提琴协奏曲，作品 482 - 第2乐章 不太慢的柔板)",
+                "artist": "Julian Lloyd Webber",
+                "provider": "netease",
+                "identifier": "5192827",
+                "webpage_url": "https://music.163.com/song?id=5192827"
+              },
+              {
+                "title": "Gymnopédie No. 1 (Orch. Ducros)",
+                "artist": "Gautier Capuçon/Orchestre de Chambre de Paris/Adrien Perruchon",
+                "provider": "netease",
+                "identifier": "1464638482",
+                "webpage_url": "https://music.163.com/song?id=1464638482"
+              },
+              {
+                "title": "Cello Concerto in E Minor, Op. 85:III. Adagio - (e小调大提琴协奏曲, 作品85:第三乐章.柔板)",
+                "artist": "Jacqueline du Pré/London Symphony Orchestra/Sir John Barbirolli",
+                "provider": "netease",
+                "identifier": "22533969",
+                "webpage_url": "https://music.163.com/song?id=22533969"
+              },
+              {
+                "title": "Peer Gynt, Op. 23 / Act III:Solveig's Song (Arr. for Cello and Piano by Georg Goltermann)",
+                "artist": "Mischa Maisky/Lily Maisky",
+                "provider": "netease",
+                "identifier": "1910142926",
+                "webpage_url": "https://music.163.com/song?id=1910142926"
+              },
+              {
+                "title": "Manon Lescaut / Act 2:Intermezzo",
+                "artist": "Münchner Rundfunkorchester/Marco Armiliato",
+                "provider": "netease",
+                "identifier": "444480472",
+                "webpage_url": "https://music.163.com/song?id=444480472"
+              },
+              {
+                "title": "Cello Sonata No. 1 in D Minor, Op. 109: II. Andante",
+                "artist": "Christian Poltéra/Kathryn Stott",
+                "provider": "netease",
+                "identifier": "1902562897",
+                "webpage_url": "https://music.163.com/song?id=1902562897"
+              },
+              {
+                "title": "Silent Woods, Op. 68/5 - version for Cello and Piano:Silent Woods, Op. 68/5, B. 173",
+                "artist": "Alisa Weilerstein/Anna Polonsky/Antonín Dvořák",
+                "provider": "netease",
+                "identifier": "1917301821",
+                "webpage_url": "https://music.163.com/song?id=1917301821"
+              },
+              {
+                "title": "Myfanwy (Arr. for Solo Cello)",
+                "artist": "Sheku Kanneh-Mason",
+                "provider": "netease",
+                "identifier": "1979927858",
+                "webpage_url": "https://music.163.com/song?id=1979927858"
+              },
+              {
+                "title": "Mélodie, Op. 20, No. 1",
+                "artist": "Julian Lloyd Webber/Royal Philharmonic Orchestra/James Judd",
+                "provider": "netease",
+                "identifier": "1836026047",
+                "webpage_url": "https://music.163.com/song?id=1836026047"
+              },
+              {
+                "title": "Je ne me consolerai jamais",
+                "artist": "Alexandros Botinis",
+                "provider": "netease",
+                "identifier": "1341926283",
+                "webpage_url": "https://music.163.com/song?id=1341926283"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=8640469203",
+            "playlist_id": "427413da262031d8694f9611"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "0979026dff71-0",
+          "tag": "a",
+          "href": "/user/home?id=1778923105",
+          "type": "",
+          "label": "云音乐古典星球"
+        },
+        {
+          "id": "0979026dff71-1",
+          "tag": "a",
+          "href": "/song?id=5192827",
+          "type": "",
+          "label": "Cello Concerto in B flat, G.482:2. Adagio non Troppo - (降B大调大提琴协奏曲，作品 482 - 第2乐章 不太慢的柔板)"
+        },
+        {
+          "id": "0979026dff71-2",
+          "tag": "a",
+          "href": "/artist?id=37296",
+          "type": "",
+          "label": "Julian Lloyd\ni\n Webber"
+        },
+        {
+          "id": "0979026dff71-3",
+          "tag": "a",
+          "href": "/album?id=508277",
+          "type": "",
+          "label": "Cello Adagios"
+        },
+        {
+          "id": "0979026dff71-4",
+          "tag": "a",
+          "href": "/song?id=1464638482",
+          "type": "",
+          "label": "Gymnopédie No. 1 (Orch. Ducros)"
+        },
+        {
+          "id": "0979026dff71-5",
+          "tag": "a",
+          "href": "/artist?id=992075",
+          "type": "",
+          "label": "Gautier Capuç\neIFs\non"
+        },
+        {
+          "id": "0979026dff71-6",
+          "tag": "a",
+          "href": "/artist?id=12634552",
+          "type": "",
+          "label": "Orchestre de Cha\ne\nmbre de Paris"
+        },
+        {
+          "id": "0979026dff71-7",
+          "tag": "a",
+          "href": "/artist?id=31428343",
+          "type": "",
+          "label": "Adrien Per\nzhw\nruchon"
+        },
+        {
+          "id": "0979026dff71-8",
+          "tag": "a",
+          "href": "/album?id=92792091",
+          "type": "",
+          "label": "Emotions - Satie: Gymnopédie No. 1 (Orch. Ducros)"
+        },
+        {
+          "id": "0979026dff71-9",
+          "tag": "a",
+          "href": "/song?id=22533969",
+          "type": "",
+          "label": "Cello Concerto in E Minor, Op. 85:III. Adagio - (e小调大提琴协奏曲, 作品85:第三乐章.柔板)"
+        },
+        {
+          "id": "0979026dff71-10",
+          "tag": "a",
+          "href": "/artist?id=62627",
+          "type": "",
+          "label": "Jacqu\nr\neline du Pré"
+        },
+        {
+          "id": "0979026dff71-11",
+          "tag": "a",
+          "href": "/artist?id=78360",
+          "type": "",
+          "label": "London Symphony O\nW1Ih\nrchestra"
+        },
+        {
+          "id": "0979026dff71-12",
+          "tag": "a",
+          "href": "/artist?id=132758",
+          "type": "",
+          "label": "Sir John Barbir\nT\nolli"
+        },
+        {
+          "id": "0979026dff71-13",
+          "tag": "a",
+          "href": "/album?id=2063525",
+          "type": "",
+          "label": "Elgar: Cello Concerto, Op. 85 & Sea Pictures, Op. 37"
+        },
+        {
+          "id": "0979026dff71-14",
+          "tag": "a",
+          "href": "/song?id=1910142926",
+          "type": "",
+          "label": "Peer Gynt, Op. 23 / Act III:Solveig's Song (Arr. for Cello and Piano by Georg Goltermann)"
+        },
+        {
+          "id": "0979026dff71-15",
+          "tag": "a",
+          "href": "/artist?id=39837",
+          "type": "",
+          "label": "Mischa \nzy\nMaisky"
+        },
+        {
+          "id": "0979026dff71-16",
+          "tag": "a",
+          "href": "/artist?id=320339",
+          "type": "",
+          "label": "Lily M\nG\naisky"
+        },
+        {
+          "id": "0979026dff71-17",
+          "tag": "a",
+          "href": "/album?id=138553686",
+          "type": "",
+          "label": "Mischa Maisky - Great Recordings"
+        },
+        {
+          "id": "0979026dff71-18",
+          "tag": "a",
+          "href": "/song?id=444480472",
+          "type": "",
+          "label": "Manon Lescaut / Act 2:Intermezzo"
+        },
+        {
+          "id": "0979026dff71-19",
+          "tag": "a",
+          "href": "/artist?id=996392",
+          "type": "",
+          "label": "Münchn\nk090\ner Rundfunkorchester"
+        },
+        {
+          "id": "0979026dff71-20",
+          "tag": "a",
+          "href": "/artist?id=28662299",
+          "type": "",
+          "label": "Ma\ntKpa\nrco Armiliato"
+        },
+        {
+          "id": "0979026dff71-21",
+          "tag": "a",
+          "href": "/album?id=35025318",
+          "type": "",
+          "label": "Puccini: Manon Lescaut (Live)"
+        },
+        {
+          "id": "0979026dff71-22",
+          "tag": "a",
+          "href": "/song?id=1902562897",
+          "type": "",
+          "label": "Cello Sonata No. 1 in D Minor, Op. 109: II. Andante"
+        },
+        {
+          "id": "0979026dff71-23",
+          "tag": "a",
+          "href": "/artist?id=723191",
+          "type": "",
+          "label": "Christian Polté\nbdEq\nra"
+        },
+        {
+          "id": "0979026dff71-24",
+          "tag": "a",
+          "href": "/artist?id=63975",
+          "type": "",
+          "label": "Kath\nNa4E\nryn Stott"
+        },
+        {
+          "id": "0979026dff71-25",
+          "tag": "a",
+          "href": "/album?id=137365790",
+          "type": "",
+          "label": "Fauré: Cello Sonatas Nos. 1, 2, Piano Trio & Nocturne"
+        },
+        {
+          "id": "0979026dff71-26",
+          "tag": "a",
+          "href": "/song?id=1917301821",
+          "type": "",
+          "label": "Silent Woods, Op. 68/5 - version for Cello and Piano:Silent Woods, Op. 68/5, B. 173"
+        },
+        {
+          "id": "0979026dff71-27",
+          "tag": "a",
+          "href": "/artist?id=935279",
+          "type": "",
+          "label": "Alisa Weilerste\nH9D\nin"
+        },
+        {
+          "id": "0979026dff71-28",
+          "tag": "a",
+          "href": "/artist?id=14541693",
+          "type": "",
+          "label": "Anna \n8i4\nPolonsky"
+        },
+        {
+          "id": "0979026dff71-29",
+          "tag": "a",
+          "href": "/artist?id=27686",
+          "type": "",
+          "label": "Antonín Dvořá\nlvDc\nk"
+        },
+        {
+          "id": "0979026dff71-30",
+          "tag": "a",
+          "href": "/album?id=139859786",
+          "type": "",
+          "label": "Dvořák"
+        },
+        {
+          "id": "0979026dff71-31",
+          "tag": "a",
+          "href": "/song?id=1979927858",
+          "type": "",
+          "label": "Myfanwy (Arr. for Solo Cello)"
+        },
+        {
+          "id": "0979026dff71-32",
+          "tag": "a",
+          "href": "/artist?id=12279700",
+          "type": "",
+          "label": "S\n1r\nheku Kanneh-Mason"
+        },
+        {
+          "id": "0979026dff71-33",
+          "tag": "a",
+          "href": "/album?id=151284086",
+          "type": "",
+          "label": "Song"
+        },
+        {
+          "id": "0979026dff71-34",
+          "tag": "a",
+          "href": "/song?id=1836026047",
+          "type": "",
+          "label": "Mélodie, Op. 20, No. 1"
+        },
+        {
+          "id": "0979026dff71-35",
+          "tag": "a",
+          "href": "/artist?id=37296",
+          "type": "",
+          "label": "Juli\nISXZ\nan Lloyd Webber"
+        },
+        {
+          "id": "0979026dff71-36",
+          "tag": "a",
+          "href": "/artist?id=99412",
+          "type": "",
+          "label": "Royal P\nK\nhilharmonic Orchestra"
+        },
+        {
+          "id": "0979026dff71-37",
+          "tag": "a",
+          "href": "/artist?id=268877",
+          "type": "",
+          "label": "James\nyZmi\n Judd"
+        },
+        {
+          "id": "0979026dff71-38",
+          "tag": "a",
+          "href": "/album?id=125798838",
+          "type": "",
+          "label": "Julian Lloyd Webber - The Singing Strad (A 70th Birthday Collection)"
+        },
+        {
+          "id": "0979026dff71-39",
+          "tag": "a",
+          "href": "/song?id=1341926283",
+          "type": "",
+          "label": "Je ne me consolerai jamais"
+        },
+        {
+          "id": "0979026dff71-40",
+          "tag": "a",
+          "href": "/artist?id=31187982",
+          "type": "",
+          "label": "Alexandros Botin\nL5\nis"
+        },
+        {
+          "id": "0979026dff71-41",
+          "tag": "a",
+          "href": "/album?id=75321429",
+          "type": "",
+          "label": "Karaindrou: Tous des oiseaux"
+        },
+        {
+          "id": "0979026dff71-42",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "0979026dff71-43",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "0979026dff71-44",
+          "tag": "a",
+          "href": "/playlist?id=586603939",
+          "type": "",
+          "label": "肖邦-午夜循环"
+        },
+        {
+          "id": "0979026dff71-45",
+          "tag": "a",
+          "href": "/playlist?id=586603939",
+          "type": "",
+          "label": "肖邦-午夜循环"
+        },
+        {
+          "id": "0979026dff71-46",
+          "tag": "a",
+          "href": "/user/home?id=317743783",
+          "type": "",
+          "label": "约翰塞巴斯蒂安-巴赫"
+        },
+        {
+          "id": "0979026dff71-47",
+          "tag": "a",
+          "href": "/playlist?id=3026796627",
+          "type": "",
+          "label": "专注向 | 平和舒缓的古典钢琴曲"
+        },
+        {
+          "id": "0979026dff71-48",
+          "tag": "a",
+          "href": "/playlist?id=3026796627",
+          "type": "",
+          "label": "专注向 | 平和舒缓的古典钢琴曲"
+        },
+        {
+          "id": "0979026dff71-49",
+          "tag": "a",
+          "href": "/user/home?id=501545601",
+          "type": "",
+          "label": "___Phyllis"
+        },
+        {
+          "id": "0979026dff71-50",
+          "tag": "a",
+          "href": "/playlist?id=735354308",
+          "type": "",
+          "label": "『古典』柔软又深切的钢琴声"
+        },
+        {
+          "id": "0979026dff71-51",
+          "tag": "a",
+          "href": "/playlist?id=735354308",
+          "type": "",
+          "label": "『古典』柔软又深切的钢琴声"
+        },
+        {
+          "id": "0979026dff71-52",
+          "tag": "a",
+          "href": "/user/home?id=57101327",
+          "type": "",
+          "label": "普朗克的小猫"
+        },
+        {
+          "id": "0979026dff71-53",
+          "tag": "a",
+          "href": "/playlist?id=6100895",
+          "type": "",
+          "label": "迷上「古典」集萃「巨匠」"
+        },
+        {
+          "id": "0979026dff71-54",
+          "tag": "a",
+          "href": "/playlist?id=6100895",
+          "type": "",
+          "label": "迷上「古典」集萃「巨匠」"
+        },
+        {
+          "id": "0979026dff71-55",
+          "tag": "a",
+          "href": "/user/home?id=414213",
+          "type": "",
+          "label": "逍遥吉米"
+        },
+        {
+          "id": "0979026dff71-56",
+          "tag": "a",
+          "href": "/playlist?id=6455948",
+          "type": "",
+          "label": "Itzhak Perlman著名小提琴家-伊扎尔-帕尔曼"
+        },
+        {
+          "id": "0979026dff71-57",
+          "tag": "a",
+          "href": "/playlist?id=6455948",
+          "type": "",
+          "label": "Itzhak Perlman著名小提琴家-伊扎尔-帕尔曼"
+        },
+        {
+          "id": "0979026dff71-58",
+          "tag": "a",
+          "href": "/user/home?id=1702713",
+          "type": "",
+          "label": "随风入梦"
+        },
+        {
+          "id": "0979026dff71-59",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        }
+      ],
+      "goal": "阅读",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "427413da262031d8694f9611",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 16.059,
+      "usage": {
+        "actual": 8818,
+        "actions": 2,
+        "seconds": 16.038,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "https://music.163.com/playlist?id=13432613649",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入热门歌单以提取古风歌曲",
+            "revision": 1,
+            "element_id": "9030af5ea9cb-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取戏腔国风专属歌单的曲目列表",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单4",
+            "tracks": [
+              {
+                "title": "谁赐",
+                "artist": "江偌绮（傲七爷）",
+                "provider": "netease",
+                "identifier": "2009616894",
+                "webpage_url": "https://music.163.com/song?id=2009616894"
+              },
+              {
+                "title": "白云喝了人间酒",
+                "artist": "一颗狼星",
+                "provider": "netease",
+                "identifier": "2020615639",
+                "webpage_url": "https://music.163.com/song?id=2020615639"
+              },
+              {
+                "title": "临川浮梦",
+                "artist": "星尘/忘川风华录",
+                "provider": "netease",
+                "identifier": "2019526861",
+                "webpage_url": "https://music.163.com/song?id=2019526861"
+              },
+              {
+                "title": "失调名",
+                "artist": "黄诗扶/赵景旭（Winky诗）",
+                "provider": "netease",
+                "identifier": "2156506573",
+                "webpage_url": "https://music.163.com/song?id=2156506573"
+              },
+              {
+                "title": "风不语别离",
+                "artist": "平生不晚",
+                "provider": "netease",
+                "identifier": "2081143350",
+                "webpage_url": "https://music.163.com/song?id=2081143350"
+              },
+              {
+                "title": "何以歌",
+                "artist": "Aki阿杰",
+                "provider": "netease",
+                "identifier": "571534645",
+                "webpage_url": "https://music.163.com/song?id=571534645"
+              },
+              {
+                "title": "四万秋 - (企划《惊鸿客·戏子篇》)",
+                "artist": "国风堂/黄诗扶",
+                "provider": "netease",
+                "identifier": "1907478234",
+                "webpage_url": "https://music.163.com/song?id=1907478234"
+              },
+              {
+                "title": "亭台戏",
+                "artist": "祥嘞嘞",
+                "provider": "netease",
+                "identifier": "2001379476",
+                "webpage_url": "https://music.163.com/song?id=2001379476"
+              },
+              {
+                "title": "辅角",
+                "artist": "晴几IKU/漱玉集",
+                "provider": "netease",
+                "identifier": "2680987323",
+                "webpage_url": "https://music.163.com/song?id=2680987323"
+              },
+              {
+                "title": "寻星记 - (电影《落凡尘》插曲)",
+                "artist": "石凯/指尖笑",
+                "provider": "netease",
+                "identifier": "2605271905",
+                "webpage_url": "https://music.163.com/song?id=2605271905"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=13432613649",
+            "playlist_id": "ed0b2ff5881c82b262e87481"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "ef3c61063d8c-0",
+          "tag": "a",
+          "href": "/user/home?id=13201959616",
+          "type": "",
+          "label": "云村专属推荐"
+        },
+        {
+          "id": "ef3c61063d8c-1",
+          "tag": "a",
+          "href": "/song?id=2009616894",
+          "type": "",
+          "label": "谁赐"
+        },
+        {
+          "id": "ef3c61063d8c-2",
+          "tag": "a",
+          "href": "/artist?id=13145036",
+          "type": "",
+          "label": "江偌绮（\n角门始候\n傲七爷）"
+        },
+        {
+          "id": "ef3c61063d8c-3",
+          "tag": "a",
+          "href": "/album?id=157191841",
+          "type": "",
+          "label": "谁赐"
+        },
+        {
+          "id": "ef3c61063d8c-4",
+          "tag": "a",
+          "href": "/song?id=2020615639",
+          "type": "",
+          "label": "白云喝了人间酒"
+        },
+        {
+          "id": "ef3c61063d8c-5",
+          "tag": "a",
+          "href": "/artist?id=34787967",
+          "type": "",
+          "label": "一\n龙世\n颗狼星"
+        },
+        {
+          "id": "ef3c61063d8c-6",
+          "tag": "a",
+          "href": "/album?id=159632569",
+          "type": "",
+          "label": "白云喝了人间酒"
+        },
+        {
+          "id": "ef3c61063d8c-7",
+          "tag": "a",
+          "href": "/song?id=2019526861",
+          "type": "",
+          "label": "临川浮梦"
+        },
+        {
+          "id": "ef3c61063d8c-8",
+          "tag": "a",
+          "href": "/artist?id=27725536",
+          "type": "",
+          "label": "忘\n更采\n川风华录"
+        },
+        {
+          "id": "ef3c61063d8c-9",
+          "tag": "a",
+          "href": "/album?id=159349254",
+          "type": "",
+          "label": "临川浮梦"
+        },
+        {
+          "id": "ef3c61063d8c-10",
+          "tag": "a",
+          "href": "/song?id=2156506573",
+          "type": "",
+          "label": "失调名"
+        },
+        {
+          "id": "ef3c61063d8c-11",
+          "tag": "a",
+          "href": "/artist?id=12308369",
+          "type": "",
+          "label": "黄\n膨讦燛\n诗扶"
+        },
+        {
+          "id": "ef3c61063d8c-12",
+          "tag": "a",
+          "href": "/artist?id=5568",
+          "type": "",
+          "label": "赵景旭（\nznp\nWinky诗）"
+        },
+        {
+          "id": "ef3c61063d8c-13",
+          "tag": "a",
+          "href": "/album?id=267323101",
+          "type": "",
+          "label": "今日无事"
+        },
+        {
+          "id": "ef3c61063d8c-14",
+          "tag": "a",
+          "href": "/song?id=2081143350",
+          "type": "",
+          "label": "风不语别离"
+        },
+        {
+          "id": "ef3c61063d8c-15",
+          "tag": "a",
+          "href": "/artist?id=32856695",
+          "type": "",
+          "label": "平生\n深改些\n不晚"
+        },
+        {
+          "id": "ef3c61063d8c-16",
+          "tag": "a",
+          "href": "/album?id=174484666",
+          "type": "",
+          "label": "风不语别离"
+        },
+        {
+          "id": "ef3c61063d8c-17",
+          "tag": "a",
+          "href": "/song?id=571534645",
+          "type": "",
+          "label": "何以歌"
+        },
+        {
+          "id": "ef3c61063d8c-18",
+          "tag": "a",
+          "href": "/artist?id=188558",
+          "type": "",
+          "label": "A\nmm\nki阿杰"
+        },
+        {
+          "id": "ef3c61063d8c-19",
+          "tag": "a",
+          "href": "/album?id=39517762",
+          "type": "",
+          "label": "何以歌 — 魔道祖师广播剧主题曲"
+        },
+        {
+          "id": "ef3c61063d8c-20",
+          "tag": "a",
+          "href": "/song?id=1907478234",
+          "type": "",
+          "label": "四万秋 - (企划《惊鸿客·戏子篇》)"
+        },
+        {
+          "id": "ef3c61063d8c-21",
+          "tag": "a",
+          "href": "/artist?id=31862479",
+          "type": "",
+          "label": "国\n是名\n风堂"
+        },
+        {
+          "id": "ef3c61063d8c-22",
+          "tag": "a",
+          "href": "/artist?id=12308369",
+          "type": "",
+          "label": "黄\n是常置界\n诗扶"
+        },
+        {
+          "id": "ef3c61063d8c-23",
+          "tag": "a",
+          "href": "/album?id=138115487",
+          "type": "",
+          "label": "四万秋"
+        },
+        {
+          "id": "ef3c61063d8c-24",
+          "tag": "a",
+          "href": "/song?id=2001379476",
+          "type": "",
+          "label": "亭台戏"
+        },
+        {
+          "id": "ef3c61063d8c-25",
+          "tag": "a",
+          "href": "/artist?id=47467835",
+          "type": "",
+          "label": "祥\n侁癲喃\n嘞嘞"
+        },
+        {
+          "id": "ef3c61063d8c-26",
+          "tag": "a",
+          "href": "/album?id=155481918",
+          "type": "",
+          "label": "亭台戏"
+        },
+        {
+          "id": "ef3c61063d8c-27",
+          "tag": "a",
+          "href": "/song?id=2680987323",
+          "type": "",
+          "label": "辅角"
+        },
+        {
+          "id": "ef3c61063d8c-28",
+          "tag": "a",
+          "href": "/artist?id=28864015",
+          "type": "",
+          "label": "晴几I\nuZn\nKU"
+        },
+        {
+          "id": "ef3c61063d8c-29",
+          "tag": "a",
+          "href": "/artist?id=33996039",
+          "type": "",
+          "label": "漱\n雃鰪\n玉集"
+        },
+        {
+          "id": "ef3c61063d8c-30",
+          "tag": "a",
+          "href": "/album?id=264684229",
+          "type": "",
+          "label": "辅角"
+        },
+        {
+          "id": "ef3c61063d8c-31",
+          "tag": "a",
+          "href": "/song?id=2605271905",
+          "type": "",
+          "label": "寻星记 - (电影《落凡尘》插曲)"
+        },
+        {
+          "id": "ef3c61063d8c-32",
+          "tag": "a",
+          "href": "/artist?id=31156487",
+          "type": "",
+          "label": "石\n着天\n凯"
+        },
+        {
+          "id": "ef3c61063d8c-33",
+          "tag": "a",
+          "href": "/artist?id=12565296",
+          "type": "",
+          "label": "指\n沋馈銝\n尖笑"
+        },
+        {
+          "id": "ef3c61063d8c-34",
+          "tag": "a",
+          "href": "/album?id=241490188",
+          "type": "",
+          "label": "落凡尘"
+        },
+        {
+          "id": "ef3c61063d8c-35",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "ef3c61063d8c-36",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "ef3c61063d8c-37",
+          "tag": "a",
+          "href": "/playlist?id=2221088484",
+          "type": "",
+          "label": "2026超级好听的流行热门音乐"
+        },
+        {
+          "id": "ef3c61063d8c-38",
+          "tag": "a",
+          "href": "/playlist?id=2221088484",
+          "type": "",
+          "label": "2026超级好听的流行热门音乐"
+        },
+        {
+          "id": "ef3c61063d8c-39",
+          "tag": "a",
+          "href": "/user/home?id=606434586",
+          "type": "",
+          "label": "IisaBaby"
+        },
+        {
+          "id": "ef3c61063d8c-40",
+          "tag": "a",
+          "href": "/playlist?id=889960888",
+          "type": "",
+          "label": "「欧美流行」那些你想找又找不到的歌曲"
+        },
+        {
+          "id": "ef3c61063d8c-41",
+          "tag": "a",
+          "href": "/playlist?id=889960888",
+          "type": "",
+          "label": "「欧美流行」那些你想找又找不到的歌曲"
+        },
+        {
+          "id": "ef3c61063d8c-42",
+          "tag": "a",
+          "href": "/user/home?id=368072354",
+          "type": "",
+          "label": "G00d9T"
+        },
+        {
+          "id": "ef3c61063d8c-43",
+          "tag": "a",
+          "href": "/playlist?id=533896713",
+          "type": "",
+          "label": "【♔私藏】一听就会中毒的英文歌"
+        },
+        {
+          "id": "ef3c61063d8c-44",
+          "tag": "a",
+          "href": "/playlist?id=533896713",
+          "type": "",
+          "label": "【♔私藏】一听就会中毒的英文歌"
+        },
+        {
+          "id": "ef3c61063d8c-45",
+          "tag": "a",
+          "href": "/user/home?id=371876620",
+          "type": "",
+          "label": "爱听音乐的猫大叔"
+        },
+        {
+          "id": "ef3c61063d8c-46",
+          "tag": "a",
+          "href": "/playlist?id=5446157676",
+          "type": "",
+          "label": "好听到可以单曲循环哦"
+        },
+        {
+          "id": "ef3c61063d8c-47",
+          "tag": "a",
+          "href": "/playlist?id=5446157676",
+          "type": "",
+          "label": "好听到可以单曲循环哦"
+        },
+        {
+          "id": "ef3c61063d8c-48",
+          "tag": "a",
+          "href": "/user/home?id=1912007660",
+          "type": "",
+          "label": "哈儿憨胖"
+        },
+        {
+          "id": "ef3c61063d8c-49",
+          "tag": "a",
+          "href": "/playlist?id=134839472",
+          "type": "",
+          "label": "车载奢靡享受G/Deep House深度灵魂慢摇"
+        },
+        {
+          "id": "ef3c61063d8c-50",
+          "tag": "a",
+          "href": "/playlist?id=134839472",
+          "type": "",
+          "label": "车载奢靡享受G/Deep House深度灵魂慢摇"
+        },
+        {
+          "id": "ef3c61063d8c-51",
+          "tag": "a",
+          "href": "/user/home?id=93601798",
+          "type": "",
+          "label": "UniversalEDM-Officail"
+        },
+        {
+          "id": "ef3c61063d8c-52",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "ef3c61063d8c-53",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "ef3c61063d8c-54",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "ef3c61063d8c-55",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "ef3c61063d8c-56",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "ef3c61063d8c-57",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "ef3c61063d8c-58",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "ef3c61063d8c-59",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        }
+      ],
+      "goal": "古风",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "ed0b2ff5881c82b262e87481",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 12.788,
+      "usage": {
+        "actual": 8481,
+        "actions": 2,
+        "seconds": 12.768,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "/playlist?id=7202476857",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入吉普赛爵士歌单详情页",
+            "revision": 1,
+            "element_id": "bc27223d26f0-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取当前爵士歌单的曲目列表",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单5",
+            "tracks": [
+              {
+                "title": "It Don't Mean a Thing If It Ain't Got That Swing",
+                "artist": "Tim Kliphuis",
+                "provider": "netease",
+                "identifier": "1489082519",
+                "webpage_url": "https://music.163.com/song?id=1489082519"
+              },
+              {
+                "title": "Gipsy Swing",
+                "artist": "Amati Schmitt/Brady Winterstein",
+                "provider": "netease",
+                "identifier": "24732957",
+                "webpage_url": "https://music.163.com/song?id=24732957"
+              },
+              {
+                "title": "There Will Never Be Another You",
+                "artist": "Angelo Debarre/Ola Kvernberg",
+                "provider": "netease",
+                "identifier": "1435220662",
+                "webpage_url": "https://music.163.com/song?id=1435220662"
+              },
+              {
+                "title": "Coquette",
+                "artist": "Florin Niculescu",
+                "provider": "netease",
+                "identifier": "1380423481",
+                "webpage_url": "https://music.163.com/song?id=1380423481"
+              },
+              {
+                "title": "Lady Be Good",
+                "artist": "Swing Amor",
+                "provider": "netease",
+                "identifier": "1483853451",
+                "webpage_url": "https://music.163.com/song?id=1483853451"
+              },
+              {
+                "title": "Jeannine",
+                "artist": "Pearl Django",
+                "provider": "netease",
+                "identifier": "1878140810",
+                "webpage_url": "https://music.163.com/song?id=1878140810"
+              },
+              {
+                "title": "Paris sous la pluie",
+                "artist": "De Piotto's",
+                "provider": "netease",
+                "identifier": "1325872368",
+                "webpage_url": "https://music.163.com/song?id=1325872368"
+              },
+              {
+                "title": "Goldy",
+                "artist": "Jacques Montagne",
+                "provider": "netease",
+                "identifier": "483936431",
+                "webpage_url": "https://music.163.com/song?id=483936431"
+              },
+              {
+                "title": "Ravello",
+                "artist": "The Hot Club Quartette",
+                "provider": "netease",
+                "identifier": "1439950886",
+                "webpage_url": "https://music.163.com/song?id=1439950886"
+              },
+              {
+                "title": "Et Pourquoi Pas",
+                "artist": "Dino Mehrstein",
+                "provider": "netease",
+                "identifier": "492209445",
+                "webpage_url": "https://music.163.com/song?id=492209445"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=7202476857",
+            "playlist_id": "9b84ed0061ce9a6c4fc7cdbe"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "69299859692d-0",
+          "tag": "a",
+          "href": "/user/home?id=5165078814",
+          "type": "",
+          "label": "云音乐爵士星球"
+        },
+        {
+          "id": "69299859692d-1",
+          "tag": "a",
+          "href": "/song?id=1489082519",
+          "type": "",
+          "label": "It Don't Mean a Thing If It Ain't Got That Swing"
+        },
+        {
+          "id": "69299859692d-2",
+          "tag": "a",
+          "href": "/artist?id=499717",
+          "type": "",
+          "label": "T\n1xP4\nim Kliphuis"
+        },
+        {
+          "id": "69299859692d-3",
+          "tag": "a",
+          "href": "/album?id=97187260",
+          "type": "",
+          "label": "The Grappelli Tribute"
+        },
+        {
+          "id": "69299859692d-4",
+          "tag": "a",
+          "href": "/song?id=24732957",
+          "type": "",
+          "label": "Gipsy Swing"
+        },
+        {
+          "id": "69299859692d-5",
+          "tag": "a",
+          "href": "/album?id=2195786",
+          "type": "",
+          "label": "Generation Django"
+        },
+        {
+          "id": "69299859692d-6",
+          "tag": "a",
+          "href": "/song?id=1435220662",
+          "type": "",
+          "label": "There Will Never Be Another You"
+        },
+        {
+          "id": "69299859692d-7",
+          "tag": "a",
+          "href": "/artist?id=840704",
+          "type": "",
+          "label": "A\nfD\nngelo Debarre"
+        },
+        {
+          "id": "69299859692d-8",
+          "tag": "a",
+          "href": "/artist?id=1019237",
+          "type": "",
+          "label": "Ola Kve\nJn3\nrnberg"
+        },
+        {
+          "id": "69299859692d-9",
+          "tag": "a",
+          "href": "/album?id=86995370",
+          "type": "",
+          "label": "Portrait of Angelo"
+        },
+        {
+          "id": "69299859692d-10",
+          "tag": "a",
+          "href": "/song?id=1380423481",
+          "type": "",
+          "label": "Coquette"
+        },
+        {
+          "id": "69299859692d-11",
+          "tag": "a",
+          "href": "/artist?id=57854",
+          "type": "",
+          "label": "Florin Nic\nHOdF\nulescu"
+        },
+        {
+          "id": "69299859692d-12",
+          "tag": "a",
+          "href": "/album?id=80635828",
+          "type": "",
+          "label": "Django Tunes"
+        },
+        {
+          "id": "69299859692d-13",
+          "tag": "a",
+          "href": "/song?id=1483853451",
+          "type": "",
+          "label": "Lady Be Good"
+        },
+        {
+          "id": "69299859692d-14",
+          "tag": "a",
+          "href": "/artist?id=37087296",
+          "type": "",
+          "label": "Swin\nI\ng Amor"
+        },
+        {
+          "id": "69299859692d-15",
+          "tag": "a",
+          "href": "/album?id=96243255",
+          "type": "",
+          "label": "Gypsy Swing Jazz"
+        },
+        {
+          "id": "69299859692d-16",
+          "tag": "a",
+          "href": "/song?id=1878140810",
+          "type": "",
+          "label": "Jeannine"
+        },
+        {
+          "id": "69299859692d-17",
+          "tag": "a",
+          "href": "/artist?id=72331",
+          "type": "",
+          "label": "Pearl Dja\n3V\nngo"
+        },
+        {
+          "id": "69299859692d-18",
+          "tag": "a",
+          "href": "/album?id=133228117",
+          "type": "",
+          "label": "Eleven"
+        },
+        {
+          "id": "69299859692d-19",
+          "tag": "a",
+          "href": "/song?id=1325872368",
+          "type": "",
+          "label": "Paris sous la pluie"
+        },
+        {
+          "id": "69299859692d-20",
+          "tag": "a",
+          "href": "/artist?id=12722070",
+          "type": "",
+          "label": "De Piotto'\nJi2\ns"
+        },
+        {
+          "id": "69299859692d-21",
+          "tag": "a",
+          "href": "/album?id=74434269",
+          "type": "",
+          "label": "Gipsy Swing"
+        },
+        {
+          "id": "69299859692d-22",
+          "tag": "a",
+          "href": "/song?id=483936431",
+          "type": "",
+          "label": "Goldy"
+        },
+        {
+          "id": "69299859692d-23",
+          "tag": "a",
+          "href": "/artist?id=12624125",
+          "type": "",
+          "label": "Jacques \nAUEp\nMontagne"
+        },
+        {
+          "id": "69299859692d-24",
+          "tag": "a",
+          "href": "/album?id=35611627",
+          "type": "",
+          "label": "Jazz manouche, Gypsy swing"
+        },
+        {
+          "id": "69299859692d-25",
+          "tag": "a",
+          "href": "/song?id=1439950886",
+          "type": "",
+          "label": "Ravello"
+        },
+        {
+          "id": "69299859692d-26",
+          "tag": "a",
+          "href": "/artist?id=34831993",
+          "type": "",
+          "label": "The H\nKJc\not Club Quartette"
+        },
+        {
+          "id": "69299859692d-27",
+          "tag": "a",
+          "href": "/album?id=87912035",
+          "type": "",
+          "label": "The Hot Club Quartette Volume Two"
+        },
+        {
+          "id": "69299859692d-28",
+          "tag": "a",
+          "href": "/song?id=492209445",
+          "type": "",
+          "label": "Et Pourquoi Pas"
+        },
+        {
+          "id": "69299859692d-29",
+          "tag": "a",
+          "href": "/artist?id=12534690",
+          "type": "",
+          "label": "D\ndSVe\nino Mehrstein"
+        },
+        {
+          "id": "69299859692d-30",
+          "tag": "a",
+          "href": "/album?id=35803396",
+          "type": "",
+          "label": "Intuitions"
+        },
+        {
+          "id": "69299859692d-31",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "69299859692d-32",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "69299859692d-33",
+          "tag": "a",
+          "href": "/playlist?id=5459118759",
+          "type": "",
+          "label": "复古浪漫|那些用爵士乐演绎的浪漫情诗"
+        },
+        {
+          "id": "69299859692d-34",
+          "tag": "a",
+          "href": "/playlist?id=5459118759",
+          "type": "",
+          "label": "复古浪漫|那些用爵士乐演绎的浪漫情诗"
+        },
+        {
+          "id": "69299859692d-35",
+          "tag": "a",
+          "href": "/user/home?id=1773476545",
+          "type": "",
+          "label": "穹空悠人心"
+        },
+        {
+          "id": "69299859692d-36",
+          "tag": "a",
+          "href": "/playlist?id=7728161036",
+          "type": "",
+          "label": "爵士古典黑胶 | 周末放空循环 | 咖啡与猫"
+        },
+        {
+          "id": "69299859692d-37",
+          "tag": "a",
+          "href": "/playlist?id=7728161036",
+          "type": "",
+          "label": "爵士古典黑胶 | 周末放空循环 | 咖啡与猫"
+        },
+        {
+          "id": "69299859692d-38",
+          "tag": "a",
+          "href": "/user/home?id=301287214",
+          "type": "",
+          "label": "Candice199"
+        },
+        {
+          "id": "69299859692d-39",
+          "tag": "a",
+          "href": "/playlist?id=2651898154",
+          "type": "",
+          "label": "黑胶唱片机|微醺情调耳边低语"
+        },
+        {
+          "id": "69299859692d-40",
+          "tag": "a",
+          "href": "/playlist?id=2651898154",
+          "type": "",
+          "label": "黑胶唱片机|微醺情调耳边低语"
+        },
+        {
+          "id": "69299859692d-41",
+          "tag": "a",
+          "href": "/user/home?id=122356259",
+          "type": "",
+          "label": "已经161岁了"
+        },
+        {
+          "id": "69299859692d-42",
+          "tag": "a",
+          "href": "/playlist?id=2660375894",
+          "type": "",
+          "label": "Cool Jazz丨冷爵士/酷派爵士"
+        },
+        {
+          "id": "69299859692d-43",
+          "tag": "a",
+          "href": "/playlist?id=2660375894",
+          "type": "",
+          "label": "Cool Jazz丨冷爵士/酷派爵士"
+        },
+        {
+          "id": "69299859692d-44",
+          "tag": "a",
+          "href": "/user/home?id=37630533",
+          "type": "",
+          "label": "享乐主义论"
+        },
+        {
+          "id": "69299859692d-45",
+          "tag": "a",
+          "href": "/playlist?id=7299795668",
+          "type": "",
+          "label": "Jazz | 爵士 咖啡厅邂逅 法式浪漫情调 "
+        },
+        {
+          "id": "69299859692d-46",
+          "tag": "a",
+          "href": "/playlist?id=7299795668",
+          "type": "",
+          "label": "Jazz | 爵士 咖啡厅邂逅 法式浪漫情调 "
+        },
+        {
+          "id": "69299859692d-47",
+          "tag": "a",
+          "href": "/user/home?id=549964328",
+          "type": "",
+          "label": "Ewan--"
+        },
+        {
+          "id": "69299859692d-48",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "69299859692d-49",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "69299859692d-50",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "69299859692d-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "69299859692d-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "69299859692d-53",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "69299859692d-54",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "69299859692d-55",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "69299859692d-56",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "69299859692d-57",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "69299859692d-58",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "69299859692d-59",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        }
+      ],
+      "goal": "爵士",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "9b84ed0061ce9a6c4fc7cdbe",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 7.962,
+      "usage": {
+        "actual": 8272,
+        "actions": 2,
+        "seconds": 7.941,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入第一个民谣歌单详情页",
+            "revision": 1,
+            "element_id": "e0bb5877a518-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单6",
+            "tracks": [
+              {
+                "title": "the lakes",
+                "artist": "Taylor Swift",
+                "provider": "netease",
+                "identifier": "1471998613",
+                "webpage_url": "https://music.163.com/song?id=1471998613"
+              },
+              {
+                "title": "All My Love",
+                "artist": "Noah Kahan",
+                "provider": "netease",
+                "identifier": "1989316438",
+                "webpage_url": "https://music.163.com/song?id=1989316438"
+              },
+              {
+                "title": "Run Away to Mars",
+                "artist": "TALK",
+                "provider": "netease",
+                "identifier": "1849730901",
+                "webpage_url": "https://music.163.com/song?id=1849730901"
+              },
+              {
+                "title": "Hardest Part (Bluegrass Version)",
+                "artist": "Noah Cyrus",
+                "provider": "netease",
+                "identifier": "2002574519",
+                "webpage_url": "https://music.163.com/song?id=2002574519"
+              },
+              {
+                "title": "Fairest Of The Seasons",
+                "artist": "Sandra McCracken",
+                "provider": "netease",
+                "identifier": "1916633535",
+                "webpage_url": "https://music.163.com/song?id=1916633535"
+              },
+              {
+                "title": "Sleep",
+                "artist": "SAILR",
+                "provider": "netease",
+                "identifier": "1493283473",
+                "webpage_url": "https://music.163.com/song?id=1493283473"
+              },
+              {
+                "title": "City of New Orleans",
+                "artist": "Steve Goodman",
+                "provider": "netease",
+                "identifier": "1311733487",
+                "webpage_url": "https://music.163.com/song?id=1311733487"
+              },
+              {
+                "title": "Furr",
+                "artist": "Blitzen Trapper",
+                "provider": "netease",
+                "identifier": "1309261695",
+                "webpage_url": "https://music.163.com/song?id=1309261695"
+              },
+              {
+                "title": "About a Bruise",
+                "artist": "Iron & Wine",
+                "provider": "netease",
+                "identifier": "501266897",
+                "webpage_url": "https://music.163.com/song?id=501266897"
+              },
+              {
+                "title": "Go Your Way",
+                "artist": "Anne Briggs",
+                "provider": "netease",
+                "identifier": "1427781947",
+                "webpage_url": "https://music.163.com/song?id=1427781947"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=12706884640",
+            "playlist_id": "8bd279b7dc29dad2b368d16e"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "d15263ada3b7-0",
+          "tag": "a",
+          "href": "/user/home?id=1463586082",
+          "type": "",
+          "label": "云音乐官方歌单"
+        },
+        {
+          "id": "d15263ada3b7-1",
+          "tag": "a",
+          "href": "/song?id=1471998613",
+          "type": "",
+          "label": "the lakes"
+        },
+        {
+          "id": "d15263ada3b7-2",
+          "tag": "a",
+          "href": "/artist?id=44266",
+          "type": "",
+          "label": "Taylo\nr1\nr Swift"
+        },
+        {
+          "id": "d15263ada3b7-3",
+          "tag": "a",
+          "href": "/album?id=92895788",
+          "type": "",
+          "label": "folklore (deluxe version)"
+        },
+        {
+          "id": "d15263ada3b7-4",
+          "tag": "a",
+          "href": "/song?id=1989316438",
+          "type": "",
+          "label": "All My Love"
+        },
+        {
+          "id": "d15263ada3b7-5",
+          "tag": "a",
+          "href": "/artist?id=12278138",
+          "type": "",
+          "label": "No\nK\nah Kahan"
+        },
+        {
+          "id": "d15263ada3b7-6",
+          "tag": "a",
+          "href": "/album?id=153199036",
+          "type": "",
+          "label": "Stick Season"
+        },
+        {
+          "id": "d15263ada3b7-7",
+          "tag": "a",
+          "href": "/song?id=1849730901",
+          "type": "",
+          "label": "Run Away to Mars"
+        },
+        {
+          "id": "d15263ada3b7-8",
+          "tag": "a",
+          "href": "/artist?id=48317425",
+          "type": "",
+          "label": "TA\n7q\nLK"
+        },
+        {
+          "id": "d15263ada3b7-9",
+          "tag": "a",
+          "href": "/album?id=128317213",
+          "type": "",
+          "label": "Run Away to Mars"
+        },
+        {
+          "id": "d15263ada3b7-10",
+          "tag": "a",
+          "href": "/song?id=2002574519",
+          "type": "",
+          "label": "Hardest Part (Bluegrass Version)"
+        },
+        {
+          "id": "d15263ada3b7-11",
+          "tag": "a",
+          "href": "/artist?id=12175271",
+          "type": "",
+          "label": "Noah Cyr\nxc\nus"
+        },
+        {
+          "id": "d15263ada3b7-12",
+          "tag": "a",
+          "href": "/album?id=155665207",
+          "type": "",
+          "label": "The Hardest Part (Deluxe)"
+        },
+        {
+          "id": "d15263ada3b7-13",
+          "tag": "a",
+          "href": "/song?id=1916633535",
+          "type": "",
+          "label": "Fairest Of The Seasons"
+        },
+        {
+          "id": "d15263ada3b7-14",
+          "tag": "a",
+          "href": "/artist?id=76434",
+          "type": "",
+          "label": "S\nKXM\nandra McCracken"
+        },
+        {
+          "id": "d15263ada3b7-15",
+          "tag": "a",
+          "href": "/album?id=139701261",
+          "type": "",
+          "label": "Carry Each Other"
+        },
+        {
+          "id": "d15263ada3b7-16",
+          "tag": "a",
+          "href": "/song?id=1493283473",
+          "type": "",
+          "label": "Sleep"
+        },
+        {
+          "id": "d15263ada3b7-17",
+          "tag": "a",
+          "href": "/artist?id=35473098",
+          "type": "",
+          "label": "S\naE\nAILR"
+        },
+        {
+          "id": "d15263ada3b7-18",
+          "tag": "a",
+          "href": "/album?id=97965503",
+          "type": "",
+          "label": "Vol III"
+        },
+        {
+          "id": "d15263ada3b7-19",
+          "tag": "a",
+          "href": "/song?id=1311733487",
+          "type": "",
+          "label": "City of New Orleans"
+        },
+        {
+          "id": "d15263ada3b7-20",
+          "tag": "a",
+          "href": "/artist?id=76717",
+          "type": "",
+          "label": "St\nX\neve Goodman"
+        },
+        {
+          "id": "d15263ada3b7-21",
+          "tag": "a",
+          "href": "/album?id=73520222",
+          "type": "",
+          "label": "Artistic Hair"
+        },
+        {
+          "id": "d15263ada3b7-22",
+          "tag": "a",
+          "href": "/song?id=1309261695",
+          "type": "",
+          "label": "Furr"
+        },
+        {
+          "id": "d15263ada3b7-23",
+          "tag": "a",
+          "href": "/artist?id=48498",
+          "type": "",
+          "label": "Blitz\nZOqy\nen Trapper"
+        },
+        {
+          "id": "d15263ada3b7-24",
+          "tag": "a",
+          "href": "/album?id=73246531",
+          "type": "",
+          "label": "Furr (10th Anniversary Deluxe Edition)"
+        },
+        {
+          "id": "d15263ada3b7-25",
+          "tag": "a",
+          "href": "/song?id=501266897",
+          "type": "",
+          "label": "About a Bruise"
+        },
+        {
+          "id": "d15263ada3b7-26",
+          "tag": "a",
+          "href": "/artist?id=178125",
+          "type": "",
+          "label": "Iron &\n7\n Wine"
+        },
+        {
+          "id": "d15263ada3b7-27",
+          "tag": "a",
+          "href": "/album?id=35585153",
+          "type": "",
+          "label": "Beast Epic"
+        },
+        {
+          "id": "d15263ada3b7-28",
+          "tag": "a",
+          "href": "/song?id=1427781947",
+          "type": "",
+          "label": "Go Your Way"
+        },
+        {
+          "id": "d15263ada3b7-29",
+          "tag": "a",
+          "href": "/artist?id=46590",
+          "type": "",
+          "label": "Anne \nPl\nBriggs"
+        },
+        {
+          "id": "d15263ada3b7-30",
+          "tag": "a",
+          "href": "/album?id=86189704",
+          "type": "",
+          "label": "A Collection"
+        },
+        {
+          "id": "d15263ada3b7-31",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "d15263ada3b7-32",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "d15263ada3b7-33",
+          "tag": "a",
+          "href": "/playlist?id=2202707535",
+          "type": "",
+          "label": "【民谣】为了碎银几两 为了三餐有汤"
+        },
+        {
+          "id": "d15263ada3b7-34",
+          "tag": "a",
+          "href": "/playlist?id=2202707535",
+          "type": "",
+          "label": "【民谣】为了碎银几两 为了三餐有汤"
+        },
+        {
+          "id": "d15263ada3b7-35",
+          "tag": "a",
+          "href": "/user/home?id=325314133",
+          "type": "",
+          "label": "柬埔寨的鱼"
+        },
+        {
+          "id": "d15263ada3b7-36",
+          "tag": "a",
+          "href": "/playlist?id=2647184445",
+          "type": "",
+          "label": "民谣丨有一种不安分长在骨子里 流在血液里"
+        },
+        {
+          "id": "d15263ada3b7-37",
+          "tag": "a",
+          "href": "/playlist?id=2647184445",
+          "type": "",
+          "label": "民谣丨有一种不安分长在骨子里 流在血液里"
+        },
+        {
+          "id": "d15263ada3b7-38",
+          "tag": "a",
+          "href": "/user/home?id=201586",
+          "type": "",
+          "label": "原创君"
+        },
+        {
+          "id": "d15263ada3b7-39",
+          "tag": "a",
+          "href": "/playlist?id=750393793",
+          "type": "",
+          "label": "小酒馆里的民谣"
+        },
+        {
+          "id": "d15263ada3b7-40",
+          "tag": "a",
+          "href": "/playlist?id=750393793",
+          "type": "",
+          "label": "小酒馆里的民谣"
+        },
+        {
+          "id": "d15263ada3b7-41",
+          "tag": "a",
+          "href": "/user/home?id=359904556",
+          "type": "",
+          "label": "开心疗养院"
+        },
+        {
+          "id": "d15263ada3b7-42",
+          "tag": "a",
+          "href": "/playlist?id=518508697",
+          "type": "",
+          "label": "陈粒：民谣界唯一老公"
+        },
+        {
+          "id": "d15263ada3b7-43",
+          "tag": "a",
+          "href": "/playlist?id=518508697",
+          "type": "",
+          "label": "陈粒：民谣界唯一老公"
+        },
+        {
+          "id": "d15263ada3b7-44",
+          "tag": "a",
+          "href": "/user/home?id=253262059",
+          "type": "",
+          "label": "淘漉音乐"
+        },
+        {
+          "id": "d15263ada3b7-45",
+          "tag": "a",
+          "href": "/playlist?id=2204529782",
+          "type": "",
+          "label": "给文艺的你一次悦耳的旅行"
+        },
+        {
+          "id": "d15263ada3b7-46",
+          "tag": "a",
+          "href": "/playlist?id=2204529782",
+          "type": "",
+          "label": "给文艺的你一次悦耳的旅行"
+        },
+        {
+          "id": "d15263ada3b7-47",
+          "tag": "a",
+          "href": "/user/home?id=320509339",
+          "type": "",
+          "label": "螚安Vivienne"
+        },
+        {
+          "id": "d15263ada3b7-48",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "d15263ada3b7-49",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "d15263ada3b7-50",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "d15263ada3b7-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "d15263ada3b7-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "d15263ada3b7-53",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "d15263ada3b7-54",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "d15263ada3b7-55",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "d15263ada3b7-56",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "d15263ada3b7-57",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "d15263ada3b7-58",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "d15263ada3b7-59",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        }
+      ],
+      "goal": "民谣",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "8bd279b7dc29dad2b368d16e",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 11.132,
+      "usage": {
+        "actual": 8571,
+        "actions": 2,
+        "seconds": 11.112,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "https://music.163.com/playlist?id=17868707369",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入第一个热门摇滚歌单，以提取曲目",
+            "revision": 1,
+            "element_id": "e77710c62096-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取歌单曲目",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单7",
+            "tracks": [
+              {
+                "title": "你要跳舞吗",
+                "artist": "新裤子",
+                "provider": "netease",
+                "identifier": "408055928",
+                "webpage_url": "https://music.163.com/song?id=408055928"
+              },
+              {
+                "title": "杀死那个石家庄人",
+                "artist": "万能青年旅店",
+                "provider": "netease",
+                "identifier": "386844",
+                "webpage_url": "https://music.163.com/song?id=386844"
+              },
+              {
+                "title": "夜空中最亮的星",
+                "artist": "逃跑计划",
+                "provider": "netease",
+                "identifier": "25706282",
+                "webpage_url": "https://music.163.com/song?id=25706282"
+              },
+              {
+                "title": "永远都会在 - (Always be there)",
+                "artist": "旅行团乐队",
+                "provider": "netease",
+                "identifier": "486999662",
+                "webpage_url": "https://music.163.com/song?id=486999662"
+              },
+              {
+                "title": "我爱你亲爱的姑娘",
+                "artist": "布衣乐队",
+                "provider": "netease",
+                "identifier": "27731261",
+                "webpage_url": "https://music.163.com/song?id=27731261"
+              },
+              {
+                "title": "兰州 兰州",
+                "artist": "低苦艾",
+                "provider": "netease",
+                "identifier": "351059",
+                "webpage_url": "https://music.163.com/song?id=351059"
+              },
+              {
+                "title": "心要野",
+                "artist": "后海大鲨鱼",
+                "provider": "netease",
+                "identifier": "406072138",
+                "webpage_url": "https://music.163.com/song?id=406072138"
+              },
+              {
+                "title": "鲜花",
+                "artist": "回春丹",
+                "provider": "netease",
+                "identifier": "2086327879",
+                "webpage_url": "https://music.163.com/song?id=2086327879"
+              },
+              {
+                "title": "男孩别哭",
+                "artist": "海龟先生",
+                "provider": "netease",
+                "identifier": "25731320",
+                "webpage_url": "https://music.163.com/song?id=25731320"
+              },
+              {
+                "title": "浪子回头",
+                "artist": "茄子蛋",
+                "provider": "netease",
+                "identifier": "516728102",
+                "webpage_url": "https://music.163.com/song?id=516728102"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=17868707369",
+            "playlist_id": "2d35544628c8e3e337932a57"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "44b4ab8ed9be-0",
+          "tag": "a",
+          "href": "/user/home?id=3396360641",
+          "type": "",
+          "label": "云音乐摇滚星球"
+        },
+        {
+          "id": "44b4ab8ed9be-1",
+          "tag": "a",
+          "href": "/song?id=408055928",
+          "type": "",
+          "label": "你要跳舞吗"
+        },
+        {
+          "id": "44b4ab8ed9be-2",
+          "tag": "a",
+          "href": "/artist?id=13282",
+          "type": "",
+          "label": "新\n易明\n裤子"
+        },
+        {
+          "id": "44b4ab8ed9be-3",
+          "tag": "a",
+          "href": "/album?id=34555329",
+          "type": "",
+          "label": "生命因你而火热"
+        },
+        {
+          "id": "44b4ab8ed9be-4",
+          "tag": "a",
+          "href": "/song?id=386844",
+          "type": "",
+          "label": "杀死那个石家庄人"
+        },
+        {
+          "id": "44b4ab8ed9be-5",
+          "tag": "a",
+          "href": "/artist?id=13223",
+          "type": "",
+          "label": "万能\n誐鼆榱奘\n青年旅店"
+        },
+        {
+          "id": "44b4ab8ed9be-6",
+          "tag": "a",
+          "href": "/album?id=38306",
+          "type": "",
+          "label": "万能青年旅店 同名专辑"
+        },
+        {
+          "id": "44b4ab8ed9be-7",
+          "tag": "a",
+          "href": "/song?id=25706282",
+          "type": "",
+          "label": "夜空中最亮的星"
+        },
+        {
+          "id": "44b4ab8ed9be-8",
+          "tag": "a",
+          "href": "/artist?id=12977",
+          "type": "",
+          "label": "逃\n鶉鏎\n跑计划"
+        },
+        {
+          "id": "44b4ab8ed9be-9",
+          "tag": "a",
+          "href": "/album?id=2285010",
+          "type": "",
+          "label": "世界"
+        },
+        {
+          "id": "44b4ab8ed9be-10",
+          "tag": "a",
+          "href": "/song?id=486999662",
+          "type": "",
+          "label": "永远都会在 - (Always be there)"
+        },
+        {
+          "id": "44b4ab8ed9be-11",
+          "tag": "a",
+          "href": "/artist?id=12111",
+          "type": "",
+          "label": "旅\n軸狆讍瑟\n行团乐队"
+        },
+        {
+          "id": "44b4ab8ed9be-12",
+          "tag": "a",
+          "href": "/album?id=35663711",
+          "type": "",
+          "label": "永远都会在"
+        },
+        {
+          "id": "44b4ab8ed9be-13",
+          "tag": "a",
+          "href": "/song?id=27731261",
+          "type": "",
+          "label": "我爱你亲爱的姑娘"
+        },
+        {
+          "id": "44b4ab8ed9be-14",
+          "tag": "a",
+          "href": "/artist?id=2092",
+          "type": "",
+          "label": "布\n砿法翛\n衣乐队"
+        },
+        {
+          "id": "44b4ab8ed9be-15",
+          "tag": "a",
+          "href": "/album?id=2667042",
+          "type": "",
+          "label": "那么久"
+        },
+        {
+          "id": "44b4ab8ed9be-16",
+          "tag": "a",
+          "href": "/song?id=351059",
+          "type": "",
+          "label": "兰州 兰州"
+        },
+        {
+          "id": "44b4ab8ed9be-17",
+          "tag": "a",
+          "href": "/artist?id=11365",
+          "type": "",
+          "label": "低\n工已内\n苦艾"
+        },
+        {
+          "id": "44b4ab8ed9be-18",
+          "tag": "a",
+          "href": "/album?id=34590",
+          "type": "",
+          "label": "兰州 兰州"
+        },
+        {
+          "id": "44b4ab8ed9be-19",
+          "tag": "a",
+          "href": "/song?id=406072138",
+          "type": "",
+          "label": "心要野"
+        },
+        {
+          "id": "44b4ab8ed9be-20",
+          "tag": "a",
+          "href": "/artist?id=11760",
+          "type": "",
+          "label": "后\n宽譋產\n海大鲨鱼"
+        },
+        {
+          "id": "44b4ab8ed9be-21",
+          "tag": "a",
+          "href": "/album?id=3316050",
+          "type": "",
+          "label": "心要野"
+        },
+        {
+          "id": "44b4ab8ed9be-22",
+          "tag": "a",
+          "href": "/song?id=2086327879",
+          "type": "",
+          "label": "鲜花"
+        },
+        {
+          "id": "44b4ab8ed9be-23",
+          "tag": "a",
+          "href": "/artist?id=27730224",
+          "type": "",
+          "label": "回\n弼膕眮匘\n春丹"
+        },
+        {
+          "id": "44b4ab8ed9be-24",
+          "tag": "a",
+          "href": "/album?id=175805808",
+          "type": "",
+          "label": "鲜花"
+        },
+        {
+          "id": "44b4ab8ed9be-25",
+          "tag": "a",
+          "href": "/song?id=25731320",
+          "type": "",
+          "label": "男孩别哭"
+        },
+        {
+          "id": "44b4ab8ed9be-26",
+          "tag": "a",
+          "href": "/artist?id=11830",
+          "type": "",
+          "label": "海\n越干日边矿\n龟先生"
+        },
+        {
+          "id": "44b4ab8ed9be-27",
+          "tag": "a",
+          "href": "/album?id=2302169",
+          "type": "",
+          "label": "海龟先生"
+        },
+        {
+          "id": "44b4ab8ed9be-28",
+          "tag": "a",
+          "href": "/song?id=516728102",
+          "type": "",
+          "label": "浪子回头"
+        },
+        {
+          "id": "44b4ab8ed9be-29",
+          "tag": "a",
+          "href": "/artist?id=1039873",
+          "type": "",
+          "label": "茄\n小特商听\n子蛋"
+        },
+        {
+          "id": "44b4ab8ed9be-30",
+          "tag": "a",
+          "href": "/album?id=36693907",
+          "type": "",
+          "label": "卡通人物"
+        },
+        {
+          "id": "44b4ab8ed9be-31",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "44b4ab8ed9be-32",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "44b4ab8ed9be-33",
+          "tag": "a",
+          "href": "/playlist?id=2801364181",
+          "type": "",
+          "label": "在孤深的夜晚我们走向自己的便利店"
+        },
+        {
+          "id": "44b4ab8ed9be-34",
+          "tag": "a",
+          "href": "/playlist?id=2801364181",
+          "type": "",
+          "label": "在孤深的夜晚我们走向自己的便利店"
+        },
+        {
+          "id": "44b4ab8ed9be-35",
+          "tag": "a",
+          "href": "/user/home?id=9890112",
+          "type": "",
+          "label": "鮭魚先森"
+        },
+        {
+          "id": "44b4ab8ed9be-36",
+          "tag": "a",
+          "href": "/playlist?id=934779849",
+          "type": "",
+          "label": "浪漫系 | 梦中天堂的秋日暖阳"
+        },
+        {
+          "id": "44b4ab8ed9be-37",
+          "tag": "a",
+          "href": "/playlist?id=934779849",
+          "type": "",
+          "label": "浪漫系 | 梦中天堂的秋日暖阳"
+        },
+        {
+          "id": "44b4ab8ed9be-38",
+          "tag": "a",
+          "href": "/user/home?id=546079061",
+          "type": "",
+          "label": "账号已注销"
+        },
+        {
+          "id": "44b4ab8ed9be-39",
+          "tag": "a",
+          "href": "/playlist?id=5286606525",
+          "type": "",
+          "label": "青摇滚与荷尔蒙——公路之歌"
+        },
+        {
+          "id": "44b4ab8ed9be-40",
+          "tag": "a",
+          "href": "/playlist?id=5286606525",
+          "type": "",
+          "label": "青摇滚与荷尔蒙——公路之歌"
+        },
+        {
+          "id": "44b4ab8ed9be-41",
+          "tag": "a",
+          "href": "/user/home?id=7394345",
+          "type": "",
+          "label": "-音乐怪人-"
+        },
+        {
+          "id": "44b4ab8ed9be-42",
+          "tag": "a",
+          "href": "/playlist?id=5051992558",
+          "type": "",
+          "label": "浪漫摇滚｜爱在你身旁 你在我眼里"
+        },
+        {
+          "id": "44b4ab8ed9be-43",
+          "tag": "a",
+          "href": "/playlist?id=5051992558",
+          "type": "",
+          "label": "浪漫摇滚｜爱在你身旁 你在我眼里"
+        },
+        {
+          "id": "44b4ab8ed9be-44",
+          "tag": "a",
+          "href": "/user/home?id=1866769149",
+          "type": "",
+          "label": "GnaScheY"
+        },
+        {
+          "id": "44b4ab8ed9be-45",
+          "tag": "a",
+          "href": "/playlist?id=314630149",
+          "type": "",
+          "label": "在夏的断章里揉进一丝清凉"
+        },
+        {
+          "id": "44b4ab8ed9be-46",
+          "tag": "a",
+          "href": "/playlist?id=314630149",
+          "type": "",
+          "label": "在夏的断章里揉进一丝清凉"
+        },
+        {
+          "id": "44b4ab8ed9be-47",
+          "tag": "a",
+          "href": "/user/home?id=19389416",
+          "type": "",
+          "label": "YouTube热门日推"
+        },
+        {
+          "id": "44b4ab8ed9be-48",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "44b4ab8ed9be-49",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "44b4ab8ed9be-50",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "44b4ab8ed9be-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "44b4ab8ed9be-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "44b4ab8ed9be-53",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "44b4ab8ed9be-54",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "44b4ab8ed9be-55",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "44b4ab8ed9be-56",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "44b4ab8ed9be-57",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "44b4ab8ed9be-58",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "44b4ab8ed9be-59",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        }
+      ],
+      "goal": "摇滚",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "2d35544628c8e3e337932a57",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 11.3,
+      "usage": {
+        "actual": 8340,
+        "actions": 2,
+        "seconds": 11.279,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "https://music.163.com/playlist?id=8367637081",
+            "kind": "click",
+            "text": "",
+            "summary": "点击进入歌单‘好好运动 | 从一首好歌开始’详情页",
+            "revision": 1,
+            "element_id": "9e5770bd78c4-1"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单8",
+            "tracks": [
+              {
+                "title": "CARNIVAL",
+                "artist": "¥$/Kanye West/Ty Dolla $ign",
+                "provider": "netease",
+                "identifier": "2125538091",
+                "webpage_url": "https://music.163.com/song?id=2125538091"
+              },
+              {
+                "title": "Violet",
+                "artist": "Connor Price/Killa",
+                "provider": "netease",
+                "identifier": "1986893311",
+                "webpage_url": "https://music.163.com/song?id=1986893311"
+              },
+              {
+                "title": "版图（Hustle And Grind）",
+                "artist": "付思遥/艾志恒Asen",
+                "provider": "netease",
+                "identifier": "2110398076",
+                "webpage_url": "https://music.163.com/song?id=2110398076"
+              },
+              {
+                "title": "Straight A's",
+                "artist": "Connor Price",
+                "provider": "netease",
+                "identifier": "1979382551",
+                "webpage_url": "https://music.163.com/song?id=1979382551"
+              },
+              {
+                "title": "字典情人",
+                "artist": "828",
+                "provider": "netease",
+                "identifier": "3337577493",
+                "webpage_url": "https://music.163.com/song?id=3337577493"
+              },
+              {
+                "title": "21爱",
+                "artist": "柴行敏/Zy",
+                "provider": "netease",
+                "identifier": "3363142456",
+                "webpage_url": "https://music.163.com/song?id=3363142456"
+              },
+              {
+                "title": "玻璃渣",
+                "artist": "Sans 三水",
+                "provider": "netease",
+                "identifier": "3330972051",
+                "webpage_url": "https://music.163.com/song?id=3330972051"
+              },
+              {
+                "title": "Show Me Love",
+                "artist": "WizTheMC/bees & honey",
+                "provider": "netease",
+                "identifier": "2694872372",
+                "webpage_url": "https://music.163.com/song?id=2694872372"
+              },
+              {
+                "title": "SOMETHING AIN'T RIGHT",
+                "artist": "XG",
+                "provider": "netease",
+                "identifier": "2610226440",
+                "webpage_url": "https://music.163.com/song?id=2610226440"
+              },
+              {
+                "title": "Simp With Me",
+                "artist": "YungLex/Watergun Collective",
+                "provider": "netease",
+                "identifier": "1976940833",
+                "webpage_url": "https://music.163.com/song?id=1976940833"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=8367637081",
+            "playlist_id": "dbe39f81b40f9ee2d73e77d8"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "249386a55e1f-0",
+          "tag": "a",
+          "href": "/user/home?id=1463586082",
+          "type": "",
+          "label": "云音乐官方歌单"
+        },
+        {
+          "id": "249386a55e1f-1",
+          "tag": "a",
+          "href": "/song?id=2125538091",
+          "type": "",
+          "label": "CARNIVAL"
+        },
+        {
+          "id": "249386a55e1f-2",
+          "tag": "a",
+          "href": "/artist?id=59188409",
+          "type": "",
+          "label": "¥$"
+        },
+        {
+          "id": "249386a55e1f-3",
+          "tag": "a",
+          "href": "/artist?id=37520",
+          "type": "",
+          "label": "Kan\nmT\nye West"
+        },
+        {
+          "id": "249386a55e1f-4",
+          "tag": "a",
+          "href": "/artist?id=789235",
+          "type": "",
+          "label": "Ty Dolla $\n7\nign"
+        },
+        {
+          "id": "249386a55e1f-5",
+          "tag": "a",
+          "href": "/album?id=185643091",
+          "type": "",
+          "label": "VULTURES 1"
+        },
+        {
+          "id": "249386a55e1f-6",
+          "tag": "a",
+          "href": "/song?id=1986893311",
+          "type": "",
+          "label": "Violet"
+        },
+        {
+          "id": "249386a55e1f-7",
+          "tag": "a",
+          "href": "/artist?id=35023883",
+          "type": "",
+          "label": "Connor Pr\nAVUv\nice"
+        },
+        {
+          "id": "249386a55e1f-8",
+          "tag": "a",
+          "href": "/artist?id=49231565",
+          "type": "",
+          "label": "Kil\n7mZ\nla"
+        },
+        {
+          "id": "249386a55e1f-9",
+          "tag": "a",
+          "href": "/album?id=152713271",
+          "type": "",
+          "label": "Violet"
+        },
+        {
+          "id": "249386a55e1f-10",
+          "tag": "a",
+          "href": "/song?id=2110398076",
+          "type": "",
+          "label": "版图（Hustle And Grind）"
+        },
+        {
+          "id": "249386a55e1f-11",
+          "tag": "a",
+          "href": "/artist?id=51088331",
+          "type": "",
+          "label": "付\n义说东方\n思遥"
+        },
+        {
+          "id": "249386a55e1f-12",
+          "tag": "a",
+          "href": "/artist?id=12198387",
+          "type": "",
+          "label": "艾志恒\nHJi\nAsen"
+        },
+        {
+          "id": "249386a55e1f-13",
+          "tag": "a",
+          "href": "/album?id=181549066",
+          "type": "",
+          "label": "The Collections（集）"
+        },
+        {
+          "id": "249386a55e1f-14",
+          "tag": "a",
+          "href": "/song?id=1979382551",
+          "type": "",
+          "label": "Straight A's"
+        },
+        {
+          "id": "249386a55e1f-15",
+          "tag": "a",
+          "href": "/artist?id=35023883",
+          "type": "",
+          "label": "Co\nC\nnnor Price"
+        },
+        {
+          "id": "249386a55e1f-16",
+          "tag": "a",
+          "href": "/album?id=151151506",
+          "type": "",
+          "label": "Straight A's"
+        },
+        {
+          "id": "249386a55e1f-17",
+          "tag": "a",
+          "href": "/song?id=3337577493",
+          "type": "",
+          "label": "字典情人"
+        },
+        {
+          "id": "249386a55e1f-18",
+          "tag": "a",
+          "href": "/artist?id=32541931",
+          "type": "",
+          "label": "8\ngBE\n28"
+        },
+        {
+          "id": "249386a55e1f-19",
+          "tag": "a",
+          "href": "/album?id=357752326",
+          "type": "",
+          "label": "字典情人"
+        },
+        {
+          "id": "249386a55e1f-20",
+          "tag": "a",
+          "href": "/song?id=3363142456",
+          "type": "",
+          "label": "21爱"
+        },
+        {
+          "id": "249386a55e1f-21",
+          "tag": "a",
+          "href": "/artist?id=55701379",
+          "type": "",
+          "label": "柴\n煌脮枍桞\n行敏"
+        },
+        {
+          "id": "249386a55e1f-22",
+          "tag": "a",
+          "href": "/artist?id=37123911",
+          "type": "",
+          "label": "Z\ntG68\ny"
+        },
+        {
+          "id": "249386a55e1f-23",
+          "tag": "a",
+          "href": "/album?id=367845121",
+          "type": "",
+          "label": "世界路"
+        },
+        {
+          "id": "249386a55e1f-24",
+          "tag": "a",
+          "href": "/song?id=3330972051",
+          "type": "",
+          "label": "玻璃渣"
+        },
+        {
+          "id": "249386a55e1f-25",
+          "tag": "a",
+          "href": "/artist?id=34277043",
+          "type": "",
+          "label": "Sans\nZAE\n 三水"
+        },
+        {
+          "id": "249386a55e1f-26",
+          "tag": "a",
+          "href": "/album?id=355532191",
+          "type": "",
+          "label": "玻璃渣"
+        },
+        {
+          "id": "249386a55e1f-27",
+          "tag": "a",
+          "href": "/song?id=2694872372",
+          "type": "",
+          "label": "Show Me Love"
+        },
+        {
+          "id": "249386a55e1f-28",
+          "tag": "a",
+          "href": "/artist?id=31988286",
+          "type": "",
+          "label": "W\nBzne\nizTheMC"
+        },
+        {
+          "id": "249386a55e1f-29",
+          "tag": "a",
+          "href": "/artist?id=94332017",
+          "type": "",
+          "label": "bee\n4aKS\ns & honey"
+        },
+        {
+          "id": "249386a55e1f-30",
+          "tag": "a",
+          "href": "/album?id=268989385",
+          "type": "",
+          "label": "Show Me Love (with Tyla)"
+        },
+        {
+          "id": "249386a55e1f-31",
+          "tag": "a",
+          "href": "/song?id=2610226440",
+          "type": "",
+          "label": "SOMETHING AIN'T RIGHT"
+        },
+        {
+          "id": "249386a55e1f-32",
+          "tag": "a",
+          "href": "/artist?id=51849113",
+          "type": "",
+          "label": "X\nB\nG"
+        },
+        {
+          "id": "249386a55e1f-33",
+          "tag": "a",
+          "href": "/album?id=242812136",
+          "type": "",
+          "label": "SOMETHING AIN'T RIGHT"
+        },
+        {
+          "id": "249386a55e1f-34",
+          "tag": "a",
+          "href": "/song?id=1976940833",
+          "type": "",
+          "label": "Simp With Me"
+        },
+        {
+          "id": "249386a55e1f-35",
+          "tag": "a",
+          "href": "/artist?id=35153626",
+          "type": "",
+          "label": "Y\nW4oQ\nungLex"
+        },
+        {
+          "id": "249386a55e1f-36",
+          "tag": "a",
+          "href": "/artist?id=47540156",
+          "type": "",
+          "label": "Watergun \nEA9\nCollective"
+        },
+        {
+          "id": "249386a55e1f-37",
+          "tag": "a",
+          "href": "/album?id=150658763",
+          "type": "",
+          "label": "Simp With Me"
+        },
+        {
+          "id": "249386a55e1f-38",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "249386a55e1f-39",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "249386a55e1f-40",
+          "tag": "a",
+          "href": "/playlist?id=37432514",
+          "type": "",
+          "label": "那些只听前奏就中毒的英文歌"
+        },
+        {
+          "id": "249386a55e1f-41",
+          "tag": "a",
+          "href": "/playlist?id=37432514",
+          "type": "",
+          "label": "那些只听前奏就中毒的英文歌"
+        },
+        {
+          "id": "249386a55e1f-42",
+          "tag": "a",
+          "href": "/user/home?id=6438754",
+          "type": "",
+          "label": "Teeny"
+        },
+        {
+          "id": "249386a55e1f-43",
+          "tag": "a",
+          "href": "/playlist?id=117377955",
+          "type": "",
+          "label": "【欧美男团】秒杀耳朵系列"
+        },
+        {
+          "id": "249386a55e1f-44",
+          "tag": "a",
+          "href": "/playlist?id=117377955",
+          "type": "",
+          "label": "【欧美男团】秒杀耳朵系列"
+        },
+        {
+          "id": "249386a55e1f-45",
+          "tag": "a",
+          "href": "/user/home?id=54278024",
+          "type": "",
+          "label": "零下Young"
+        },
+        {
+          "id": "249386a55e1f-46",
+          "tag": "a",
+          "href": "/playlist?id=500471426",
+          "type": "",
+          "label": "YouTube上最受欢迎的音乐MV Top100"
+        },
+        {
+          "id": "249386a55e1f-47",
+          "tag": "a",
+          "href": "/playlist?id=500471426",
+          "type": "",
+          "label": "YouTube上最受欢迎的音乐MV Top100"
+        },
+        {
+          "id": "249386a55e1f-48",
+          "tag": "a",
+          "href": "/user/home?id=51803877",
+          "type": "",
+          "label": "喜欢失眠的梁先生"
+        },
+        {
+          "id": "249386a55e1f-49",
+          "tag": "a",
+          "href": "/playlist?id=5446157676",
+          "type": "",
+          "label": "好听到可以单曲循环哦"
+        },
+        {
+          "id": "249386a55e1f-50",
+          "tag": "a",
+          "href": "/playlist?id=5446157676",
+          "type": "",
+          "label": "好听到可以单曲循环哦"
+        },
+        {
+          "id": "249386a55e1f-51",
+          "tag": "a",
+          "href": "/user/home?id=1912007660",
+          "type": "",
+          "label": "哈儿憨胖"
+        },
+        {
+          "id": "249386a55e1f-52",
+          "tag": "a",
+          "href": "/playlist?id=2163517726",
+          "type": "",
+          "label": "熬夜和想你，我都该戒掉了"
+        },
+        {
+          "id": "249386a55e1f-53",
+          "tag": "a",
+          "href": "/playlist?id=2163517726",
+          "type": "",
+          "label": "熬夜和想你，我都该戒掉了"
+        },
+        {
+          "id": "249386a55e1f-54",
+          "tag": "a",
+          "href": "/user/home?id=7394345",
+          "type": "",
+          "label": "-音乐怪人-"
+        },
+        {
+          "id": "249386a55e1f-55",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "249386a55e1f-56",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "249386a55e1f-57",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "249386a55e1f-58",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "249386a55e1f-59",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        }
+      ],
+      "goal": "运动",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "dbe39f81b40f9ee2d73e77d8",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 15.025,
+      "usage": {
+        "actual": 8301,
+        "actions": 2,
+        "seconds": 15.002,
+        "unknown": false,
+        "reserved": 0
+      }
+    },
+    {
+      "actions": [
+        {
+          "tool": "browser_click",
+          "arguments": {
+            "url": "",
+            "kind": "click",
+            "text": "",
+            "summary": "点击睡眠小贴士歌单进入详情",
+            "revision": 1,
+            "element_id": "1bbef4559e15-10"
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "browser_extract",
+          "arguments": {
+            "url": "",
+            "kind": "extract",
+            "text": "",
+            "summary": "提取歌单曲目",
+            "revision": 3,
+            "element_id": ""
+          },
+          "status": "succeeded",
+          "error_code": null
+        },
+        {
+          "tool": "save_imported_playlist",
+          "arguments": {
+            "name": "测试歌单9",
+            "tracks": [
+              {
+                "title": "Lullaby",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2029943467",
+                "webpage_url": "https://music.163.com/song?id=2029943467"
+              },
+              {
+                "title": "优质睡眠",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2029960660",
+                "webpage_url": "https://music.163.com/song?id=2029960660"
+              },
+              {
+                "title": "梦境之旅.",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2029959172",
+                "webpage_url": "https://music.163.com/song?id=2029959172"
+              },
+              {
+                "title": "梦枕花香溢",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046767790",
+                "webpage_url": "https://music.163.com/song?id=2046767790"
+              },
+              {
+                "title": "梦境之城",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046767795",
+                "webpage_url": "https://music.163.com/song?id=2046767795"
+              },
+              {
+                "title": "梦中佳人",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046767775",
+                "webpage_url": "https://music.163.com/song?id=2046767775"
+              },
+              {
+                "title": "梦境之恋",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046766944",
+                "webpage_url": "https://music.163.com/song?id=2046766944"
+              },
+              {
+                "title": "枕边恬谧",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046767780",
+                "webpage_url": "https://music.163.com/song?id=2046767780"
+              },
+              {
+                "title": "Dreamland",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2029899014",
+                "webpage_url": "https://music.163.com/song?id=2029899014"
+              },
+              {
+                "title": "梦境之音",
+                "artist": "睡眠研究所",
+                "provider": "netease",
+                "identifier": "2046766974",
+                "webpage_url": "https://music.163.com/song?id=2046766974"
+              }
+            ],
+            "source_url": "https://music.163.com/#/playlist?id=8819423203",
+            "playlist_id": "e4cfb238b14085940935235a"
+          },
+          "status": "succeeded",
+          "error_code": null
+        }
+      ],
+      "elements": [
+        {
+          "id": "f08f22ef108f-0",
+          "tag": "a",
+          "href": "/user/home?id=1463586082",
+          "type": "",
+          "label": "云音乐官方歌单"
+        },
+        {
+          "id": "f08f22ef108f-1",
+          "tag": "a",
+          "href": "/song?id=2029943467",
+          "type": "",
+          "label": "Lullaby"
+        },
+        {
+          "id": "f08f22ef108f-2",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n滛\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-3",
+          "tag": "a",
+          "href": "/album?id=161733698",
+          "type": "",
+          "label": "Sleep Tight"
+        },
+        {
+          "id": "f08f22ef108f-4",
+          "tag": "a",
+          "href": "/song?id=2029960660",
+          "type": "",
+          "label": "优质睡眠"
+        },
+        {
+          "id": "f08f22ef108f-5",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡眠研\n汇槗婈\n究所"
+        },
+        {
+          "id": "f08f22ef108f-6",
+          "tag": "a",
+          "href": "/album?id=161736188",
+          "type": "",
+          "label": "入梦伴侣 （2023世界睡眠日特别呈现）"
+        },
+        {
+          "id": "f08f22ef108f-7",
+          "tag": "a",
+          "href": "/song?id=2029959172",
+          "type": "",
+          "label": "梦境之旅."
+        },
+        {
+          "id": "f08f22ef108f-8",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n蜆姝姪諯\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-9",
+          "tag": "a",
+          "href": "/album?id=161736188",
+          "type": "",
+          "label": "入梦伴侣 （2023世界睡眠日特别呈现）"
+        },
+        {
+          "id": "f08f22ef108f-10",
+          "tag": "a",
+          "href": "/song?id=2046767790",
+          "type": "",
+          "label": "梦枕花香溢"
+        },
+        {
+          "id": "f08f22ef108f-11",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡眠\n偒\n研究所"
+        },
+        {
+          "id": "f08f22ef108f-12",
+          "tag": "a",
+          "href": "/album?id=165466881",
+          "type": "",
+          "label": "你若是梦"
+        },
+        {
+          "id": "f08f22ef108f-13",
+          "tag": "a",
+          "href": "/song?id=2046767795",
+          "type": "",
+          "label": "梦境之城"
+        },
+        {
+          "id": "f08f22ef108f-14",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n銍爊睑籾\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-15",
+          "tag": "a",
+          "href": "/album?id=165467855",
+          "type": "",
+          "label": "游梦散心"
+        },
+        {
+          "id": "f08f22ef108f-16",
+          "tag": "a",
+          "href": "/song?id=2046767775",
+          "type": "",
+          "label": "梦中佳人"
+        },
+        {
+          "id": "f08f22ef108f-17",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n磇澊舂\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-18",
+          "tag": "a",
+          "href": "/album?id=165466881",
+          "type": "",
+          "label": "你若是梦"
+        },
+        {
+          "id": "f08f22ef108f-19",
+          "tag": "a",
+          "href": "/song?id=2046766944",
+          "type": "",
+          "label": "梦境之恋"
+        },
+        {
+          "id": "f08f22ef108f-20",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡眠\n嵏袔憆搁\n研究所"
+        },
+        {
+          "id": "f08f22ef108f-21",
+          "tag": "a",
+          "href": "/album?id=165466881",
+          "type": "",
+          "label": "你若是梦"
+        },
+        {
+          "id": "f08f22ef108f-22",
+          "tag": "a",
+          "href": "/song?id=2046767780",
+          "type": "",
+          "label": "枕边恬谧"
+        },
+        {
+          "id": "f08f22ef108f-23",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n林前军气儿\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-24",
+          "tag": "a",
+          "href": "/album?id=165466881",
+          "type": "",
+          "label": "你若是梦"
+        },
+        {
+          "id": "f08f22ef108f-25",
+          "tag": "a",
+          "href": "/song?id=2029899014",
+          "type": "",
+          "label": "Dreamland"
+        },
+        {
+          "id": "f08f22ef108f-26",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡\n缵戣咧\n眠研究所"
+        },
+        {
+          "id": "f08f22ef108f-27",
+          "tag": "a",
+          "href": "/album?id=161726533",
+          "type": "",
+          "label": "Night Music"
+        },
+        {
+          "id": "f08f22ef108f-28",
+          "tag": "a",
+          "href": "/song?id=2046766974",
+          "type": "",
+          "label": "梦境之音"
+        },
+        {
+          "id": "f08f22ef108f-29",
+          "tag": "a",
+          "href": "/artist?id=56004353",
+          "type": "",
+          "label": "睡眠\n璁鸲菺鬕\n研究所"
+        },
+        {
+          "id": "f08f22ef108f-30",
+          "tag": "a",
+          "href": "/album?id=165466893",
+          "type": "",
+          "label": "流梦之影"
+        },
+        {
+          "id": "f08f22ef108f-31",
+          "tag": "a",
+          "href": "/#/download",
+          "type": "",
+          "label": "立即下载"
+        },
+        {
+          "id": "f08f22ef108f-32",
+          "tag": "textarea",
+          "href": "",
+          "type": "",
+          "label": "评论"
+        },
+        {
+          "id": "f08f22ef108f-33",
+          "tag": "a",
+          "href": "/playlist?id=2411629173",
+          "type": "",
+          "label": "温柔英文歌-睡觉专用"
+        },
+        {
+          "id": "f08f22ef108f-34",
+          "tag": "a",
+          "href": "/playlist?id=2411629173",
+          "type": "",
+          "label": "温柔英文歌-睡觉专用"
+        },
+        {
+          "id": "f08f22ef108f-35",
+          "tag": "a",
+          "href": "/user/home?id=368570325",
+          "type": "",
+          "label": "柚悠u"
+        },
+        {
+          "id": "f08f22ef108f-36",
+          "tag": "a",
+          "href": "/playlist?id=879417602",
+          "type": "",
+          "label": "J.Fla丨音乐十载，独宠J.Fla，英文惊艳翻唱"
+        },
+        {
+          "id": "f08f22ef108f-37",
+          "tag": "a",
+          "href": "/playlist?id=879417602",
+          "type": "",
+          "label": "J.Fla丨音乐十载，独宠J.Fla，英文惊艳翻唱"
+        },
+        {
+          "id": "f08f22ef108f-38",
+          "tag": "a",
+          "href": "/user/home?id=247198483",
+          "type": "",
+          "label": "红盖头和荣喜糖"
+        },
+        {
+          "id": "f08f22ef108f-39",
+          "tag": "a",
+          "href": "/playlist?id=10188602218",
+          "type": "",
+          "label": "午后犯困的节奏这几首慢得刚好"
+        },
+        {
+          "id": "f08f22ef108f-40",
+          "tag": "a",
+          "href": "/playlist?id=10188602218",
+          "type": "",
+          "label": "午后犯困的节奏这几首慢得刚好"
+        },
+        {
+          "id": "f08f22ef108f-41",
+          "tag": "a",
+          "href": "/user/home?id=7883320608",
+          "type": "",
+          "label": "微雨染尘埃"
+        },
+        {
+          "id": "f08f22ef108f-42",
+          "tag": "a",
+          "href": "/playlist?id=561686874",
+          "type": "",
+          "label": "前任失恋博物馆［也许应该相信一次谎言］"
+        },
+        {
+          "id": "f08f22ef108f-43",
+          "tag": "a",
+          "href": "/playlist?id=561686874",
+          "type": "",
+          "label": "前任失恋博物馆［也许应该相信一次谎言］"
+        },
+        {
+          "id": "f08f22ef108f-44",
+          "tag": "a",
+          "href": "/user/home?id=395655156",
+          "type": "",
+          "label": "你你你是仙女叭"
+        },
+        {
+          "id": "f08f22ef108f-45",
+          "tag": "a",
+          "href": "/playlist?id=635903110",
+          "type": "",
+          "label": "一个天蝎座的听歌列表"
+        },
+        {
+          "id": "f08f22ef108f-46",
+          "tag": "a",
+          "href": "/playlist?id=635903110",
+          "type": "",
+          "label": "一个天蝎座的听歌列表"
+        },
+        {
+          "id": "f08f22ef108f-47",
+          "tag": "a",
+          "href": "/user/home?id=441514182",
+          "type": "",
+          "label": "欢欢酱-"
+        },
+        {
+          "id": "f08f22ef108f-48",
+          "tag": "a",
+          "href": "https://itunes.apple.com/cn/app/id590338362",
+          "type": "",
+          "label": "iPhone"
+        },
+        {
+          "id": "f08f22ef108f-49",
+          "tag": "a",
+          "href": "https://music.163.com/download/pc/latest",
+          "type": "",
+          "label": "PC"
+        },
+        {
+          "id": "f08f22ef108f-50",
+          "tag": "a",
+          "href": "https://music.163.com/api/android/download/latest2",
+          "type": "",
+          "label": "Android"
+        },
+        {
+          "id": "f08f22ef108f-51",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/service",
+          "type": "",
+          "label": "服务条款"
+        },
+        {
+          "id": "f08f22ef108f-52",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/privacy",
+          "type": "",
+          "label": "隐私政策"
+        },
+        {
+          "id": "f08f22ef108f-53",
+          "tag": "a",
+          "href": "//st.music.163.com/official-terms/children",
+          "type": "",
+          "label": "儿童隐私政策"
+        },
+        {
+          "id": "f08f22ef108f-54",
+          "tag": "a",
+          "href": "//music.163.com/st/staticdeal/complaints.html",
+          "type": "",
+          "label": "版权投诉"
+        },
+        {
+          "id": "f08f22ef108f-55",
+          "tag": "a",
+          "href": "http://ir.music.163.com",
+          "type": "",
+          "label": "投资者关系"
+        },
+        {
+          "id": "f08f22ef108f-56",
+          "tag": "a",
+          "href": "https://music.163.com/ui/resource",
+          "type": "",
+          "label": "广告合作"
+        },
+        {
+          "id": "f08f22ef108f-57",
+          "tag": "a",
+          "href": "//mp.music.163.com/600948c936c13f4d09752e73/contact-us-web/index.html?source=Music-Main-Station",
+          "type": "",
+          "label": "联系我们"
+        },
+        {
+          "id": "f08f22ef108f-58",
+          "tag": "a",
+          "href": "https://jubao.163.com",
+          "type": "",
+          "label": "廉正举报"
+        },
+        {
+          "id": "f08f22ef108f-59",
+          "tag": "a",
+          "href": "https://beian.miit.gov.cn/#/Integrated/index",
+          "type": "",
+          "label": "粤B2-20090191-18  浙ICP备15006616号-4  工业和信息化部备案管理系统网站"
+        }
+      ],
+      "goal": "睡眠",
+      "status": "succeeded",
+      "result": {
+        "verified": true,
+        "playlist_id": "e4cfb238b14085940935235a",
+        "track_count": 10
+      },
+      "message": "任务已完成",
+      "seconds": 9.723,
+      "usage": {
+        "actual": 8229,
+        "actions": 2,
+        "seconds": 9.696,
+        "unknown": false,
+        "reserved": 0
+      }
+    }
+  ],
+  "cleanup": {
+    "database_removed": "videodream_browser_test_93d6e3d6ab3f",
+    "browsers_closed": true
+  }
+}

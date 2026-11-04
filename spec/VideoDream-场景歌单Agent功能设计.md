@@ -1,12 +1,14 @@
 # VideoDream 场景歌单 Agent 功能设计
 
+> 2026-10-26 实施更新：新场景任务使用 LangGraph + 公共模型账本，旧任务按创建时引擎和 Skill 执行；原服务继续校验业务规则。桌面左侧及手机“我的”新增“Agent 任务中心”“知识库”；网易云浏览器导入确认实际曲目后保存并核验。V7/V8 完整结构与回滚见 [能力升级规格](VideoDream-Agent能力升级功能实现文档.md)，实测边界见 [评测记录](evaluations/agent-upgrade-2026-10-26.md)。Redis 无新增或修改。
+
 > 2026-10-23 数据库管理更新：表结构统一由 Flyway 管理，完整定义见 `backend/migrations/sql/V1__baseline.sql`。启动时只检查版本；本文早期自动建表、自动应用结构迁移的说明由 [Flyway 规格](Flyway数据库版本管理设计.md) 替代。历史业务和文件迁移保留为显式命令，已有业务表及 Redis 契约不变。
 
 | 属性名 | 备注 |
 |---|---|
 | 文档版本 | V1.2 |
 | 更新日期 | 2026-10-21 |
-| 技术方案 | Skill + MCP |
+| 技术方案 | LangChain + LangGraph + MySQL Checkpointer + Skill + MCP；legacy 可回退 |
 | 文档状态 | 功能已实施；本地闭环和网易云来源已验证；在线模型验收受服务余额限制 |
 | 核心交互 | 用户输入一句听歌需求，其他选项默认补全 |
 

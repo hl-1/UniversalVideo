@@ -1,0 +1,30 @@
+[
+  {
+    "width": 360,
+    "upload": true,
+    "answer_with_citation": true,
+    "approval_and_cancel": true,
+    "horizontal_overflow": false
+  },
+  {
+    "width": 390,
+    "upload": true,
+    "answer_with_citation": true,
+    "approval_and_cancel": true,
+    "horizontal_overflow": false
+  },
+  {
+    "width": 430,
+    "upload": true,
+    "answer_with_citation": true,
+    "approval_and_cancel": true,
+    "horizontal_overflow": false
+  },
+  {
+    "width": 1440,
+    "upload": true,
+    "answer_with_citation": true,
+    "approval_and_cancel": false,
+    "horizontal_overflow": false
+  }
+]

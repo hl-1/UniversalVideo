@@ -1,0 +1,1328 @@
+{
+  "fixture": "synthetic-labelled-v1",
+  "note": "合成标注测试集，非真实业务资料；不替代人工引用核验。",
+  "documents": [
+    {
+      "id": "manual-01",
+      "content": "# 海棠馆参观手册\n\n【合成测试资料，无真实服务承诺】海棠馆每天于08:30开放，闭馆时间为18:00。海棠馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为10元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-02",
+      "content": "# 青竹馆参观手册\n\n【合成测试资料，无真实服务承诺】青竹馆每天于09:30开放，闭馆时间为18:00。青竹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为13元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-03",
+      "content": "# 银杏馆参观手册\n\n【合成测试资料，无真实服务承诺】银杏馆每天于10:30开放，闭馆时间为18:00。银杏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为16元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-04",
+      "content": "# 白鹭馆参观手册\n\n【合成测试资料，无真实服务承诺】白鹭馆每天于11:30开放，闭馆时间为18:00。白鹭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为19元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-05",
+      "content": "# 星河馆参观手册\n\n【合成测试资料，无真实服务承诺】星河馆每天于08:30开放，闭馆时间为18:00。星河馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为22元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-06",
+      "content": "# 云杉馆参观手册\n\n【合成测试资料，无真实服务承诺】云杉馆每天于09:30开放，闭馆时间为18:00。云杉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为25元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-07",
+      "content": "# 松涛馆参观手册\n\n【合成测试资料，无真实服务承诺】松涛馆每天于10:30开放，闭馆时间为18:00。松涛馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为28元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-08",
+      "content": "# 荷风馆参观手册\n\n【合成测试资料，无真实服务承诺】荷风馆每天于11:30开放，闭馆时间为18:00。荷风馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为31元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-09",
+      "content": "# 桂影馆参观手册\n\n【合成测试资料，无真实服务承诺】桂影馆每天于08:30开放，闭馆时间为18:00。桂影馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为34元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-10",
+      "content": "# 翠屏馆参观手册\n\n【合成测试资料，无真实服务承诺】翠屏馆每天于09:30开放，闭馆时间为18:00。翠屏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为37元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-11",
+      "content": "# 听雨馆参观手册\n\n【合成测试资料，无真实服务承诺】听雨馆每天于10:30开放，闭馆时间为18:00。听雨馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为40元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-12",
+      "content": "# 观澜馆参观手册\n\n【合成测试资料，无真实服务承诺】观澜馆每天于11:30开放，闭馆时间为18:00。观澜馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为43元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-13",
+      "content": "# 流泉馆参观手册\n\n【合成测试资料，无真实服务承诺】流泉馆每天于08:30开放，闭馆时间为18:00。流泉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为46元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-14",
+      "content": "# 晴川馆参观手册\n\n【合成测试资料，无真实服务承诺】晴川馆每天于09:30开放，闭馆时间为18:00。晴川馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为49元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-15",
+      "content": "# 望岳馆参观手册\n\n【合成测试资料，无真实服务承诺】望岳馆每天于10:30开放，闭馆时间为18:00。望岳馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为52元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-16",
+      "content": "# 迎春馆参观手册\n\n【合成测试资料，无真实服务承诺】迎春馆每天于11:30开放，闭馆时间为18:00。迎春馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为55元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-17",
+      "content": "# 映雪馆参观手册\n\n【合成测试资料，无真实服务承诺】映雪馆每天于08:30开放，闭馆时间为18:00。映雪馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为58元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-18",
+      "content": "# 鸣琴馆参观手册\n\n【合成测试资料，无真实服务承诺】鸣琴馆每天于09:30开放，闭馆时间为18:00。鸣琴馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为61元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-19",
+      "content": "# 澄心馆参观手册\n\n【合成测试资料，无真实服务承诺】澄心馆每天于10:30开放，闭馆时间为18:00。澄心馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为64元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-20",
+      "content": "# 秋实馆参观手册\n\n【合成测试资料，无真实服务承诺】秋实馆每天于11:30开放，闭馆时间为18:00。秋实馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为67元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-21",
+      "content": "# 春晓馆参观手册\n\n【合成测试资料，无真实服务承诺】春晓馆每天于08:30开放，闭馆时间为18:00。春晓馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为70元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-22",
+      "content": "# 书香馆参观手册\n\n【合成测试资料，无真实服务承诺】书香馆每天于09:30开放，闭馆时间为18:00。书香馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为73元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-23",
+      "content": "# 月华馆参观手册\n\n【合成测试资料，无真实服务承诺】月华馆每天于10:30开放，闭馆时间为18:00。月华馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为76元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-24",
+      "content": "# 碧波馆参观手册\n\n【合成测试资料，无真实服务承诺】碧波馆每天于11:30开放，闭馆时间为18:00。碧波馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为79元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-25",
+      "content": "# 长虹馆参观手册\n\n【合成测试资料，无真实服务承诺】长虹馆每天于08:30开放，闭馆时间为18:00。长虹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为82元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-26",
+      "content": "# 玉兰馆参观手册\n\n【合成测试资料，无真实服务承诺】玉兰馆每天于09:30开放，闭馆时间为18:00。玉兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为85元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-27",
+      "content": "# 霜林馆参观手册\n\n【合成测试资料，无真实服务承诺】霜林馆每天于10:30开放，闭馆时间为18:00。霜林馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为88元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-28",
+      "content": "# 晨露馆参观手册\n\n【合成测试资料，无真实服务承诺】晨露馆每天于11:30开放，闭馆时间为18:00。晨露馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为91元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-29",
+      "content": "# 暮云馆参观手册\n\n【合成测试资料，无真实服务承诺】暮云馆每天于08:30开放，闭馆时间为18:00。暮云馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为94元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-30",
+      "content": "# 凌霄馆参观手册\n\n【合成测试资料，无真实服务承诺】凌霄馆每天于09:30开放，闭馆时间为18:00。凌霄馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为97元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-31",
+      "content": "# 丹枫馆参观手册\n\n【合成测试资料，无真实服务承诺】丹枫馆每天于10:30开放，闭馆时间为18:00。丹枫馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为100元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-32",
+      "content": "# 归燕馆参观手册\n\n【合成测试资料，无真实服务承诺】归燕馆每天于11:30开放，闭馆时间为18:00。归燕馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为103元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-33",
+      "content": "# 栖霞馆参观手册\n\n【合成测试资料，无真实服务承诺】栖霞馆每天于08:30开放，闭馆时间为18:00。栖霞馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为106元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-34",
+      "content": "# 若水馆参观手册\n\n【合成测试资料，无真实服务承诺】若水馆每天于09:30开放，闭馆时间为18:00。若水馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为109元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-35",
+      "content": "# 芷兰馆参观手册\n\n【合成测试资料，无真实服务承诺】芷兰馆每天于10:30开放，闭馆时间为18:00。芷兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为112元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-36",
+      "content": "# 兰亭馆参观手册\n\n【合成测试资料，无真实服务承诺】兰亭馆每天于11:30开放，闭馆时间为18:00。兰亭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为115元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-37",
+      "content": "# 清晖馆参观手册\n\n【合成测试资料，无真实服务承诺】清晖馆每天于08:30开放，闭馆时间为18:00。清晖馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为118元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-38",
+      "content": "# 雅韵馆参观手册\n\n【合成测试资料，无真实服务承诺】雅韵馆每天于09:30开放，闭馆时间为18:00。雅韵馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为121元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-39",
+      "content": "# 明月馆参观手册\n\n【合成测试资料，无真实服务承诺】明月馆每天于10:30开放，闭馆时间为18:00。明月馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为124元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "manual-40",
+      "content": "# 远山馆参观手册\n\n【合成测试资料，无真实服务承诺】远山馆每天于11:30开放，闭馆时间为18:00。远山馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为127元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+    },
+    {
+      "id": "conflict-00-A",
+      "content": "# 听雨馆特殊展览退款规定（A版）\n\n【合成测试资料】听雨馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-00-B",
+      "content": "# 听雨馆特殊展览退款规定（B版）\n\n【合成测试资料】听雨馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-01-A",
+      "content": "# 观澜馆特殊展览退款规定（A版）\n\n【合成测试资料】观澜馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-01-B",
+      "content": "# 观澜馆特殊展览退款规定（B版）\n\n【合成测试资料】观澜馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-02-A",
+      "content": "# 流泉馆特殊展览退款规定（A版）\n\n【合成测试资料】流泉馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-02-B",
+      "content": "# 流泉馆特殊展览退款规定（B版）\n\n【合成测试资料】流泉馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-03-A",
+      "content": "# 晴川馆特殊展览退款规定（A版）\n\n【合成测试资料】晴川馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-03-B",
+      "content": "# 晴川馆特殊展览退款规定（B版）\n\n【合成测试资料】晴川馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-04-A",
+      "content": "# 望岳馆特殊展览退款规定（A版）\n\n【合成测试资料】望岳馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-04-B",
+      "content": "# 望岳馆特殊展览退款规定（B版）\n\n【合成测试资料】望岳馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-05-A",
+      "content": "# 迎春馆特殊展览退款规定（A版）\n\n【合成测试资料】迎春馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-05-B",
+      "content": "# 迎春馆特殊展览退款规定（B版）\n\n【合成测试资料】迎春馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-06-A",
+      "content": "# 映雪馆特殊展览退款规定（A版）\n\n【合成测试资料】映雪馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-06-B",
+      "content": "# 映雪馆特殊展览退款规定（B版）\n\n【合成测试资料】映雪馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-07-A",
+      "content": "# 鸣琴馆特殊展览退款规定（A版）\n\n【合成测试资料】鸣琴馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-07-B",
+      "content": "# 鸣琴馆特殊展览退款规定（B版）\n\n【合成测试资料】鸣琴馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-08-A",
+      "content": "# 澄心馆特殊展览退款规定（A版）\n\n【合成测试资料】澄心馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-08-B",
+      "content": "# 澄心馆特殊展览退款规定（B版）\n\n【合成测试资料】澄心馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-09-A",
+      "content": "# 秋实馆特殊展览退款规定（A版）\n\n【合成测试资料】秋实馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    },
+    {
+      "id": "conflict-09-B",
+      "content": "# 秋实馆特殊展览退款规定（B版）\n\n【合成测试资料】秋实馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q-001",
+      "category": "answerable",
+      "question": "海棠馆每天几点开放？",
+      "sources": [
+        "manual-01"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-002",
+      "category": "answerable",
+      "question": "海棠馆成人票是多少钱？",
+      "sources": [
+        "manual-01"
+      ],
+      "expected_fragments": [
+        "10"
+      ]
+    },
+    {
+      "id": "q-003",
+      "category": "answerable",
+      "question": "青竹馆每天几点开放？",
+      "sources": [
+        "manual-02"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-004",
+      "category": "answerable",
+      "question": "青竹馆成人票是多少钱？",
+      "sources": [
+        "manual-02"
+      ],
+      "expected_fragments": [
+        "13"
+      ]
+    },
+    {
+      "id": "q-005",
+      "category": "answerable",
+      "question": "银杏馆每天几点开放？",
+      "sources": [
+        "manual-03"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-006",
+      "category": "answerable",
+      "question": "银杏馆成人票是多少钱？",
+      "sources": [
+        "manual-03"
+      ],
+      "expected_fragments": [
+        "16"
+      ]
+    },
+    {
+      "id": "q-007",
+      "category": "answerable",
+      "question": "白鹭馆每天几点开放？",
+      "sources": [
+        "manual-04"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-008",
+      "category": "answerable",
+      "question": "白鹭馆成人票是多少钱？",
+      "sources": [
+        "manual-04"
+      ],
+      "expected_fragments": [
+        "19"
+      ]
+    },
+    {
+      "id": "q-009",
+      "category": "answerable",
+      "question": "星河馆每天几点开放？",
+      "sources": [
+        "manual-05"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-010",
+      "category": "answerable",
+      "question": "星河馆成人票是多少钱？",
+      "sources": [
+        "manual-05"
+      ],
+      "expected_fragments": [
+        "22"
+      ]
+    },
+    {
+      "id": "q-011",
+      "category": "answerable",
+      "question": "云杉馆每天几点开放？",
+      "sources": [
+        "manual-06"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-012",
+      "category": "answerable",
+      "question": "云杉馆成人票是多少钱？",
+      "sources": [
+        "manual-06"
+      ],
+      "expected_fragments": [
+        "25"
+      ]
+    },
+    {
+      "id": "q-013",
+      "category": "answerable",
+      "question": "松涛馆每天几点开放？",
+      "sources": [
+        "manual-07"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-014",
+      "category": "answerable",
+      "question": "松涛馆成人票是多少钱？",
+      "sources": [
+        "manual-07"
+      ],
+      "expected_fragments": [
+        "28"
+      ]
+    },
+    {
+      "id": "q-015",
+      "category": "answerable",
+      "question": "荷风馆每天几点开放？",
+      "sources": [
+        "manual-08"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-016",
+      "category": "answerable",
+      "question": "荷风馆成人票是多少钱？",
+      "sources": [
+        "manual-08"
+      ],
+      "expected_fragments": [
+        "31"
+      ]
+    },
+    {
+      "id": "q-017",
+      "category": "answerable",
+      "question": "桂影馆每天几点开放？",
+      "sources": [
+        "manual-09"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-018",
+      "category": "answerable",
+      "question": "桂影馆成人票是多少钱？",
+      "sources": [
+        "manual-09"
+      ],
+      "expected_fragments": [
+        "34"
+      ]
+    },
+    {
+      "id": "q-019",
+      "category": "answerable",
+      "question": "翠屏馆每天几点开放？",
+      "sources": [
+        "manual-10"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-020",
+      "category": "answerable",
+      "question": "翠屏馆成人票是多少钱？",
+      "sources": [
+        "manual-10"
+      ],
+      "expected_fragments": [
+        "37"
+      ]
+    },
+    {
+      "id": "q-021",
+      "category": "answerable",
+      "question": "听雨馆每天几点开放？",
+      "sources": [
+        "manual-11"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-022",
+      "category": "answerable",
+      "question": "听雨馆成人票是多少钱？",
+      "sources": [
+        "manual-11"
+      ],
+      "expected_fragments": [
+        "40"
+      ]
+    },
+    {
+      "id": "q-023",
+      "category": "answerable",
+      "question": "观澜馆每天几点开放？",
+      "sources": [
+        "manual-12"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-024",
+      "category": "answerable",
+      "question": "观澜馆成人票是多少钱？",
+      "sources": [
+        "manual-12"
+      ],
+      "expected_fragments": [
+        "43"
+      ]
+    },
+    {
+      "id": "q-025",
+      "category": "answerable",
+      "question": "流泉馆每天几点开放？",
+      "sources": [
+        "manual-13"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-026",
+      "category": "answerable",
+      "question": "流泉馆成人票是多少钱？",
+      "sources": [
+        "manual-13"
+      ],
+      "expected_fragments": [
+        "46"
+      ]
+    },
+    {
+      "id": "q-027",
+      "category": "answerable",
+      "question": "晴川馆每天几点开放？",
+      "sources": [
+        "manual-14"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-028",
+      "category": "answerable",
+      "question": "晴川馆成人票是多少钱？",
+      "sources": [
+        "manual-14"
+      ],
+      "expected_fragments": [
+        "49"
+      ]
+    },
+    {
+      "id": "q-029",
+      "category": "answerable",
+      "question": "望岳馆每天几点开放？",
+      "sources": [
+        "manual-15"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-030",
+      "category": "answerable",
+      "question": "望岳馆成人票是多少钱？",
+      "sources": [
+        "manual-15"
+      ],
+      "expected_fragments": [
+        "52"
+      ]
+    },
+    {
+      "id": "q-031",
+      "category": "answerable",
+      "question": "迎春馆每天几点开放？",
+      "sources": [
+        "manual-16"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-032",
+      "category": "answerable",
+      "question": "迎春馆成人票是多少钱？",
+      "sources": [
+        "manual-16"
+      ],
+      "expected_fragments": [
+        "55"
+      ]
+    },
+    {
+      "id": "q-033",
+      "category": "answerable",
+      "question": "映雪馆每天几点开放？",
+      "sources": [
+        "manual-17"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-034",
+      "category": "answerable",
+      "question": "映雪馆成人票是多少钱？",
+      "sources": [
+        "manual-17"
+      ],
+      "expected_fragments": [
+        "58"
+      ]
+    },
+    {
+      "id": "q-035",
+      "category": "answerable",
+      "question": "鸣琴馆每天几点开放？",
+      "sources": [
+        "manual-18"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-036",
+      "category": "answerable",
+      "question": "鸣琴馆成人票是多少钱？",
+      "sources": [
+        "manual-18"
+      ],
+      "expected_fragments": [
+        "61"
+      ]
+    },
+    {
+      "id": "q-037",
+      "category": "answerable",
+      "question": "澄心馆每天几点开放？",
+      "sources": [
+        "manual-19"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-038",
+      "category": "answerable",
+      "question": "澄心馆成人票是多少钱？",
+      "sources": [
+        "manual-19"
+      ],
+      "expected_fragments": [
+        "64"
+      ]
+    },
+    {
+      "id": "q-039",
+      "category": "answerable",
+      "question": "秋实馆每天几点开放？",
+      "sources": [
+        "manual-20"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-040",
+      "category": "answerable",
+      "question": "秋实馆成人票是多少钱？",
+      "sources": [
+        "manual-20"
+      ],
+      "expected_fragments": [
+        "67"
+      ]
+    },
+    {
+      "id": "q-041",
+      "category": "answerable",
+      "question": "春晓馆每天几点开放？",
+      "sources": [
+        "manual-21"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-042",
+      "category": "answerable",
+      "question": "春晓馆成人票是多少钱？",
+      "sources": [
+        "manual-21"
+      ],
+      "expected_fragments": [
+        "70"
+      ]
+    },
+    {
+      "id": "q-043",
+      "category": "answerable",
+      "question": "书香馆每天几点开放？",
+      "sources": [
+        "manual-22"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-044",
+      "category": "answerable",
+      "question": "书香馆成人票是多少钱？",
+      "sources": [
+        "manual-22"
+      ],
+      "expected_fragments": [
+        "73"
+      ]
+    },
+    {
+      "id": "q-045",
+      "category": "answerable",
+      "question": "月华馆每天几点开放？",
+      "sources": [
+        "manual-23"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-046",
+      "category": "answerable",
+      "question": "月华馆成人票是多少钱？",
+      "sources": [
+        "manual-23"
+      ],
+      "expected_fragments": [
+        "76"
+      ]
+    },
+    {
+      "id": "q-047",
+      "category": "answerable",
+      "question": "碧波馆每天几点开放？",
+      "sources": [
+        "manual-24"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-048",
+      "category": "answerable",
+      "question": "碧波馆成人票是多少钱？",
+      "sources": [
+        "manual-24"
+      ],
+      "expected_fragments": [
+        "79"
+      ]
+    },
+    {
+      "id": "q-049",
+      "category": "answerable",
+      "question": "长虹馆每天几点开放？",
+      "sources": [
+        "manual-25"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-050",
+      "category": "answerable",
+      "question": "长虹馆成人票是多少钱？",
+      "sources": [
+        "manual-25"
+      ],
+      "expected_fragments": [
+        "82"
+      ]
+    },
+    {
+      "id": "q-051",
+      "category": "answerable",
+      "question": "玉兰馆每天几点开放？",
+      "sources": [
+        "manual-26"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-052",
+      "category": "answerable",
+      "question": "玉兰馆成人票是多少钱？",
+      "sources": [
+        "manual-26"
+      ],
+      "expected_fragments": [
+        "85"
+      ]
+    },
+    {
+      "id": "q-053",
+      "category": "answerable",
+      "question": "霜林馆每天几点开放？",
+      "sources": [
+        "manual-27"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-054",
+      "category": "answerable",
+      "question": "霜林馆成人票是多少钱？",
+      "sources": [
+        "manual-27"
+      ],
+      "expected_fragments": [
+        "88"
+      ]
+    },
+    {
+      "id": "q-055",
+      "category": "answerable",
+      "question": "晨露馆每天几点开放？",
+      "sources": [
+        "manual-28"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-056",
+      "category": "answerable",
+      "question": "晨露馆成人票是多少钱？",
+      "sources": [
+        "manual-28"
+      ],
+      "expected_fragments": [
+        "91"
+      ]
+    },
+    {
+      "id": "q-057",
+      "category": "answerable",
+      "question": "暮云馆每天几点开放？",
+      "sources": [
+        "manual-29"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-058",
+      "category": "answerable",
+      "question": "暮云馆成人票是多少钱？",
+      "sources": [
+        "manual-29"
+      ],
+      "expected_fragments": [
+        "94"
+      ]
+    },
+    {
+      "id": "q-059",
+      "category": "answerable",
+      "question": "凌霄馆每天几点开放？",
+      "sources": [
+        "manual-30"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-060",
+      "category": "answerable",
+      "question": "凌霄馆成人票是多少钱？",
+      "sources": [
+        "manual-30"
+      ],
+      "expected_fragments": [
+        "97"
+      ]
+    },
+    {
+      "id": "q-061",
+      "category": "answerable",
+      "question": "丹枫馆每天几点开放？",
+      "sources": [
+        "manual-31"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-062",
+      "category": "answerable",
+      "question": "丹枫馆成人票是多少钱？",
+      "sources": [
+        "manual-31"
+      ],
+      "expected_fragments": [
+        "100"
+      ]
+    },
+    {
+      "id": "q-063",
+      "category": "answerable",
+      "question": "归燕馆每天几点开放？",
+      "sources": [
+        "manual-32"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-064",
+      "category": "answerable",
+      "question": "归燕馆成人票是多少钱？",
+      "sources": [
+        "manual-32"
+      ],
+      "expected_fragments": [
+        "103"
+      ]
+    },
+    {
+      "id": "q-065",
+      "category": "answerable",
+      "question": "栖霞馆每天几点开放？",
+      "sources": [
+        "manual-33"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-066",
+      "category": "answerable",
+      "question": "栖霞馆成人票是多少钱？",
+      "sources": [
+        "manual-33"
+      ],
+      "expected_fragments": [
+        "106"
+      ]
+    },
+    {
+      "id": "q-067",
+      "category": "answerable",
+      "question": "若水馆每天几点开放？",
+      "sources": [
+        "manual-34"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-068",
+      "category": "answerable",
+      "question": "若水馆成人票是多少钱？",
+      "sources": [
+        "manual-34"
+      ],
+      "expected_fragments": [
+        "109"
+      ]
+    },
+    {
+      "id": "q-069",
+      "category": "answerable",
+      "question": "芷兰馆每天几点开放？",
+      "sources": [
+        "manual-35"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-070",
+      "category": "answerable",
+      "question": "芷兰馆成人票是多少钱？",
+      "sources": [
+        "manual-35"
+      ],
+      "expected_fragments": [
+        "112"
+      ]
+    },
+    {
+      "id": "q-071",
+      "category": "answerable",
+      "question": "兰亭馆每天几点开放？",
+      "sources": [
+        "manual-36"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-072",
+      "category": "answerable",
+      "question": "兰亭馆成人票是多少钱？",
+      "sources": [
+        "manual-36"
+      ],
+      "expected_fragments": [
+        "115"
+      ]
+    },
+    {
+      "id": "q-073",
+      "category": "answerable",
+      "question": "清晖馆每天几点开放？",
+      "sources": [
+        "manual-37"
+      ],
+      "expected_fragments": [
+        "08:30"
+      ]
+    },
+    {
+      "id": "q-074",
+      "category": "answerable",
+      "question": "清晖馆成人票是多少钱？",
+      "sources": [
+        "manual-37"
+      ],
+      "expected_fragments": [
+        "118"
+      ]
+    },
+    {
+      "id": "q-075",
+      "category": "answerable",
+      "question": "雅韵馆每天几点开放？",
+      "sources": [
+        "manual-38"
+      ],
+      "expected_fragments": [
+        "09:30"
+      ]
+    },
+    {
+      "id": "q-076",
+      "category": "answerable",
+      "question": "雅韵馆成人票是多少钱？",
+      "sources": [
+        "manual-38"
+      ],
+      "expected_fragments": [
+        "121"
+      ]
+    },
+    {
+      "id": "q-077",
+      "category": "answerable",
+      "question": "明月馆每天几点开放？",
+      "sources": [
+        "manual-39"
+      ],
+      "expected_fragments": [
+        "10:30"
+      ]
+    },
+    {
+      "id": "q-078",
+      "category": "answerable",
+      "question": "明月馆成人票是多少钱？",
+      "sources": [
+        "manual-39"
+      ],
+      "expected_fragments": [
+        "124"
+      ]
+    },
+    {
+      "id": "q-079",
+      "category": "answerable",
+      "question": "远山馆每天几点开放？",
+      "sources": [
+        "manual-40"
+      ],
+      "expected_fragments": [
+        "11:30"
+      ]
+    },
+    {
+      "id": "q-080",
+      "category": "answerable",
+      "question": "远山馆成人票是多少钱？",
+      "sources": [
+        "manual-40"
+      ],
+      "expected_fragments": [
+        "127"
+      ]
+    },
+    {
+      "id": "q-081",
+      "category": "unanswerable",
+      "question": "海棠馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-082",
+      "category": "unanswerable",
+      "question": "青竹馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-083",
+      "category": "unanswerable",
+      "question": "银杏馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-084",
+      "category": "unanswerable",
+      "question": "白鹭馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-085",
+      "category": "unanswerable",
+      "question": "星河馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-086",
+      "category": "unanswerable",
+      "question": "云杉馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-087",
+      "category": "unanswerable",
+      "question": "松涛馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-088",
+      "category": "unanswerable",
+      "question": "荷风馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-089",
+      "category": "unanswerable",
+      "question": "桂影馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-090",
+      "category": "unanswerable",
+      "question": "翠屏馆馆长的个人手机号码是什么？",
+      "sources": [],
+      "expected_fragments": []
+    },
+    {
+      "id": "q-091",
+      "category": "conflicting",
+      "question": "听雨馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-00-A",
+        "conflict-00-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-092",
+      "category": "conflicting",
+      "question": "观澜馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-01-A",
+        "conflict-01-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-093",
+      "category": "conflicting",
+      "question": "流泉馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-02-A",
+        "conflict-02-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-094",
+      "category": "conflicting",
+      "question": "晴川馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-03-A",
+        "conflict-03-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-095",
+      "category": "conflicting",
+      "question": "望岳馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-04-A",
+        "conflict-04-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-096",
+      "category": "conflicting",
+      "question": "迎春馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-05-A",
+        "conflict-05-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-097",
+      "category": "conflicting",
+      "question": "映雪馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-06-A",
+        "conflict-06-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-098",
+      "category": "conflicting",
+      "question": "鸣琴馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-07-A",
+        "conflict-07-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-099",
+      "category": "conflicting",
+      "question": "澄心馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-08-A",
+        "conflict-08-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    },
+    {
+      "id": "q-100",
+      "category": "conflicting",
+      "question": "秋实馆特殊展览退款到底几天到账？资料有没有冲突？请分别列出不同版本。",
+      "sources": [
+        "conflict-09-A",
+        "conflict-09-B"
+      ],
+      "expected_fragments": [
+        "5",
+        "9"
+      ]
+    }
+  ]
+}

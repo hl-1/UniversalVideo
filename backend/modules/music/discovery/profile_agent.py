@@ -41,6 +41,9 @@ def check_active(run_id):
 
 def complete(run_id,messages,tools):
     row=check_active(run_id);uid=row['user_id'];config=ai.load_config()
+    if row['context'].get('engine') == 'langgraph':
+        from backend.agents.music import complete as graph_complete
+        return graph_complete(run_id,messages,tools,max_output=1500,phase='profile',profile=True)
     estimated=model.input_tokens(messages,tools)
     max_output=1500
     if estimated>9000: raise ModelFault('画像任务上下文超出单次限制')
@@ -104,6 +107,9 @@ def execute_tool(name,arguments,snapshot):
 
 
 def run(row):
+    if row['context'].get('engine') == 'langgraph':
+        from backend.agents.music import execute_profile
+        return execute_profile(row)
     data=skill()
     if row['skill_version']!=data['version']: raise ModelFault('画像 Skill 已变化，停止旧任务')
     snapshot=row['input_snapshot'];run_id=row['run_id'];uid=row['user_id']

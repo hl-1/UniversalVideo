@@ -2,7 +2,7 @@
 from fastapi import HTTPException
 import pymysql
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "8"
 
 
 def initialize_schema(cursor):
@@ -15,8 +15,13 @@ def initialize_schema(cursor):
             raise
         raise HTTPException(503, "数据库尚未接入 Flyway，请先运行 scripts/database.py migrate；存量库请先 preflight、baseline。") from exc
     versions = [row["version"] for row in rows if row["version"] is not None]
-    if not rows or any(not row["success"] for row in rows) or not versions or versions[-1] != SCHEMA_VERSION:
+    # V6/V7 form the bridge for deployments with the new engine disabled.
+    # New-workflow entry points additionally require their V7/V8 tables.
+    if not rows or any(not row["success"] for row in rows) or not versions or versions[-1] not in {"6", "7", SCHEMA_VERSION}:
         raise HTTPException(503, f"数据库结构版本不匹配或迁移失败，当前应用要求 Flyway V{SCHEMA_VERSION}。")
+    from backend.agents.config import engine
+    if versions[-1] != SCHEMA_VERSION and engine() != "legacy":
+        raise HTTPException(503, "新 Agent 引擎要求 Flyway V8；桥接期间请设置 VIDEODREAM_AGENT_ENGINE=legacy。")
     cursor.execute("SELECT 1 FROM account_migrations WHERE id='users-snowflake-v1'")
     if not cursor.fetchone():
         raise HTTPException(503, "用户雪花 ID 离线迁移尚未完成，请运行 scripts/database.py migrate。")

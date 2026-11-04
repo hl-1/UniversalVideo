@@ -70,7 +70,7 @@ def run_profile(uid,run_id):
         heartbeat.start()
         if not row['context'].get('proposal_ready'):
             # A previously issued request is never automatically repeated after restart.
-            if row['context'].get('model_requests'):
+            if row['context'].get('model_requests') and row['context'].get('engine') != 'langgraph':
                 raise RuntimeError('画像请求已发出，禁止自动重发')
             profile_agent.run(row)
         with library.database() as cursor:

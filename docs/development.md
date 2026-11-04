@@ -66,7 +66,17 @@ cp .env.example .env.universal-video.local
 
 配置优先级沿用现有规则，也可使用 `--config <dotenv路径>`。可选 `VIDEODREAM_MIGRATION_USER/PASSWORD` 提供独立迁移身份；密码仅传给子进程环境变量。启动应用只检查结构，不自动安装或执行 Flyway。后端 8001、前端 5174 保持原端口。
 
-当前结构版本为 V4，包含每日发现候选池和音乐画像；`database.py migrate` 在 DDL 成功后幂等回填旧每日任务预算和有效候选，执行期间应用须停止。画像 Agent 默认开启，受管理员开关、用户学习开关、证据阈值及独立每日预算约束；可在管理页关闭。模型测试使用模拟响应，数据库测试复用共享 MySQL 的隔离库和 Redis 测试前缀，禁止测试脚本启动额外中间件。完整数据与回滚规则见[今日推荐规格](../spec/features/daily-music-discovery.md)。
+当前结构版本为 V8，V7 为公共 Agent 表、V8 为知识库表；完整字段、索引、关系见 [能力升级规格](../spec/VideoDream-Agent能力升级功能实现文档.md)，发布与保留数据回滚见 [V7](../deploy/sql/prod/v7/README.md) 和 [V8](../deploy/sql/prod/v8/README.md)。`database.py migrate` 同时幂等回填已有每日任务预算和候选，执行期间应用须停止。新场景/画像任务默认 LangGraph，旧任务保留原引擎，候选池增强保留原专项引擎。
+
+本机统一加载 `/Users/hl/Documents/Project/dev-infra/projects/videodream.env`。共享 MySQL/Redis/ES/MinIO 分别使用 13307/16379/19200/19000；不运行项目脚本启动重复中间件。包装启动示例：
+
+```bash
+python3 ../dev-infra/scripts/with-env.py videodream -- .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
+```
+
+Embedding 可复用文本模型的服务地址和账号密钥，但需向量模型：配置 `LLM_EMBEDDING_*`，本地实测 `BAAI/bge-m3` 为 1024 维；可选 Rerank 用 `BAAI/bge-reranker-v2-m3`。密钥仅在私有环境文件，示例见 `.env.example`。可选价格 JSON 为 `VIDEODREAM_AGENT_PRICING`，未配置费用显示未知。回退设 `VIDEODREAM_AGENT_ENGINE=legacy`、`VIDEODREAM_AGENT_ENABLED=false` 并重启应用，保留新表和用量账本。
+
+桌面入口在左侧“场景歌单”下方；手机为“我的” → “知识库”/“Agent 任务中心”。模型质量实测及未验收项见 [评测记录](../spec/evaluations/agent-upgrade-2026-10-26.md)。数据库测试仅使用共享 MySQL 的独立测试库和 Redis 测试前缀。
 
 ## 日常启动
 

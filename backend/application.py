@@ -52,6 +52,11 @@ async def validation_error_response(request, exc):
 app.include_router(watermark_router)
 app.include_router(music.router)
 app.include_router(music_agent_api.router)
+from backend.agents import api as agent_api, mcp as agent_mcp, runtime as agent_runtime
+from backend.modules.knowledge.api import router as knowledge_router
+app.include_router(agent_api.router)
+app.include_router(knowledge_router)
+app.router.routes.extend(agent_mcp.http_app.routes)
 from backend.modules.music.discovery.api import router as discovery_router
 app.include_router(discovery_router)
 app.router.routes.extend(music_agent_mcp.http_app.routes)
@@ -109,6 +114,7 @@ accounts.cancel_callbacks.append(video_tasks.cancel_user_tasks)
 accounts.cancel_callbacks.append(bilibili_session.disconnect)
 accounts.cancel_callbacks.append(browser_session_store.sessions.cancel_user)
 accounts.cancel_callbacks.append(music_agent_runtime.cancel_user)
+accounts.cancel_callbacks.append(agent_runtime.cancel_user)
 from backend.modules.music.discovery import profile_runtime as discovery_runtime
 accounts.cancel_callbacks.append(discovery_runtime.cancel_user)
 accounts.cancel_callbacks.append(preview_assets.cancel_user)
@@ -118,6 +124,7 @@ accounts.cancel_callbacks.append(delivery_service.cancel_user)
 
 @app.on_event("shutdown")
 def close_browser_sessions():
+    agent_runtime.stop()
     discovery_runtime.stop()
     from backend.modules.delivery import service as delivery
     delivery.stop_maintenance()
@@ -128,6 +135,7 @@ def close_browser_sessions():
 
 @app.on_event("startup")
 def restore_task_state():
+    agent_runtime.start()
     discovery_runtime.start()
     from backend.modules.delivery import service as delivery
     delivery.start_maintenance()

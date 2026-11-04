@@ -178,6 +178,8 @@ def delete_user(uid: int):
             raise HTTPException(409, "不能删除最后一个有效超级管理员。")
         cursor.execute("SELECT kind,resource_key FROM resources WHERE user_id=%s", (uid,))
         files = cursor.fetchall()
+        from backend.agents.accounts import clean_user as clean_agent_user
+        clean_agent_user(cursor, uid)
         from backend.modules.video import store as video_store
         from backend.modules.social.store import clean_user
         clean_user(cursor, uid)

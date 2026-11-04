@@ -6,10 +6,14 @@ import MusicPlayer from '../features/music/player/MusicPlayer.vue'
 import { currentTrack, pausePlayback } from '../features/music/player/musicPlayer'
 import type { MusicTrack } from '../features/music/musicLibrary'
 import VideoWorkspace from '../features/video/VideoWorkspace.vue'
+import AgentCenter from '../features/agents/AgentCenter.vue'
+import KnowledgeWorkspace from '../features/knowledge/KnowledgeWorkspace.vue'
 import AdminWorkspace from '../features/admin/AdminWorkspace.vue'
 import { useAndroidBack } from '../shared/native/navigation'
 
-const appPage = ref<'music' | 'tools' | 'admin'>('music')
+const appPage = ref<'music' | 'tools' | 'admin' | 'agents' | 'knowledge'>('music')
+const agentTaskId = ref<string>()
+function openAgents(taskId?: string) { agentTaskId.value = taskId; appPage.value = 'agents' }
 const musicCenter = ref<InstanceType<typeof MusicCenter> | null>(null)
 const videoWorkspace = ref<InstanceType<typeof VideoWorkspace> | null>(null)
 const keyboardOpen = ref(false)
@@ -60,7 +64,9 @@ function onToolsPlay(event: Event) {
 <template>
   <DownloadTray />
   <div class="page-shell" :class="{ 'music-page': appPage === 'music', 'has-music-player': Boolean(currentTrack), 'mobile-keyboard-open': keyboardOpen }">
-    <div v-show="appPage === 'music'"><MusicCenter ref="musicCenter" :active="appPage === 'music'" @open-tools="openMusicTools" @open-admin="pausePlayback(); appPage = 'admin'" /></div>
+    <div v-show="appPage === 'music'"><MusicCenter ref="musicCenter" :active="appPage === 'music'" @open-tools="openMusicTools" @open-agents="openAgents()" @open-knowledge="appPage = 'knowledge'" @open-admin="pausePlayback(); appPage = 'admin'" /></div>
+    <AgentCenter v-if="appPage === 'agents'" :task-id="agentTaskId" @back="returnMusicCenter" @knowledge="appPage = 'knowledge'" />
+    <KnowledgeWorkspace v-if="appPage === 'knowledge'" @back="returnMusicCenter" @tasks="openAgents" />
     <AdminWorkspace v-if="appPage === 'admin'" @back="appPage = 'music'" />
     <div v-show="appPage === 'tools'" @play.capture="onToolsPlay"><VideoWorkspace ref="videoWorkspace" @activate="appPage = 'tools'" @back="returnMusicCenter" /></div>
     <div v-show="appPage !== 'admin'"><MusicPlayer @download="downloadFromPlayer" /></div>

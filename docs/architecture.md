@@ -10,19 +10,22 @@ backend/
   infrastructure/          MySQL、网络、浏览器、音频、语音与 AI 适配
   migrations/              Flyway 操作、结构核对、只读版本检查
     sql/                   Flyway 版本迁移 SQL
+  agents/                  公共任务、模型账本、LangGraph、MySQL Checkpointer 与 MCP
   modules/
     accounts/              身份、会话和权限
     admin/                 管理后台
     workspace/             用户任务与文件
     video/                 解析、下载、预览、字幕、总结、导图、历史
     music/                 音源、音乐库、导入、歌词与场景歌单 Agent
+    knowledge/             文档解析、ES 混合检索、MinIO 原文、引用与权限
+    browser_agent/         网易云观察、动作、人工接管与审批保存核验
     watermark/             去水印与本地修复模型
   skills/                  Agent 使用的版本化资源
   tests/                   accounts、video、music 等业务测试
 frontend/
   src/
     app/                   入口、认证根组件与应用布局
-    features/              accounts、admin、workspace、video、music、watermark
+    features/              accounts、admin、workspace、video、music、watermark、agents、knowledge
     shared/                公共 API 请求、工具和基础样式
   tests/                   Node 测试
 spec/                      当前功能规格及工程调整方案
@@ -45,13 +48,16 @@ downloads/                 用户媒体及导出文件
 - `backend/migrations/sql/` 是版本 SQL 来源；`deploy/sql/prod/v1/` 是对应拆分部署 SQL 和逐脚本回滚 SQL。两者通过集成测试核对结构，回滚目录不在 Flyway 扫描范围内。
 - `modules/video/` 内，`api.py` 和 `files.py` 处理 HTTP；`parsing.py` 编排平台解析；`browser.py`、`douyin.py`、`sniffing.py` 等实现解析细节；`subtitles.py`、`summary.py` 负责字幕和 AI 生成；`tasks.py`、`downloads.py` 负责任务状态和下载。
 - `modules/music/agent/` 保留原有 Agent 分层；`backend/skills/` 是应用资源，不能当作本地临时文件删除。
+- `agents/` 为新场景/画像、知识入库/问答、浏览器任务提供租约、重放、用量预留与人工核对。模型调用经 LangChain；LangGraph 状态、pending writes 与事件持久化 MySQL。音乐业务服务继续校验，旧任务固定原引擎。
+- 知识库使用项目 ES 索引和 MinIO Bucket；检索、模型调用、结果返回时复核权限与版本。先使删除文档不可见，再持文档锁异步清理。Redis 无新增 Key。
+- 浏览器只允许网易云公开读取，跨进程并发 1；保存动作绑定实际曲目、用户、观察与审批版本，保存后查询核验。Cookie、输入和接管截图只留进程内存。
 - `modules/music/discovery/` 中，`feeds` 只负责候选过滤与每批六首的算法换歌，`pool` 维护候选及补充准入，`usage` 汇总每日发现预算；`profile_store` 冻结证据、校验提案和发布版本，`profile_agent` 只读取冻结证据，`profile_runtime` 扫描 MySQL 队列、续租并恢复任务，同时循环检查活跃用户的低候选池，补充间隔结束后自动续补。画像与候选增强各自记账，共享原 Agent 模型适配及全局并发。
 
 业务模块内部可调用同一业务的服务和数据访问函数。跨业务协作通过明确导入的服务函数完成；新增公共能力放入 `core/` 或 `infrastructure/`，避免加入 `main.py`。现有模块中的 SQL 与服务代码可在后续功能调整时继续细分，无需预先创建空层级。
 
 ## 前端职责
 
-- `app/App.vue` 只负责音乐、视频工具、管理页面的切换和全局播放器。
+- `app/App.vue` 负责音乐、视频工具、管理、任务中心、知识库的切换和全局播放器。桌面侧栏直接进入知识库/任务中心，移动端从“我的”进入；音乐中心保持挂载。
 - `features/video/VideoWorkspace.vue` 负责工具区视图；`useVideoWorkspace.ts` 编排历史、解析和预览；`useVideoSummary.ts`、`useVideoDownload.ts`、`useBrowserSession.ts` 分别管理任务和会话。
 - 工作区继续使用 `v-show` 保持挂载，切换页面保留播放器和视频状态。
 - `features/music/` 按组件、播放器、外观设置归类；其他业务组件放在各自功能目录。

@@ -181,6 +181,10 @@ def complete(run_id, messages, tools=None, max_output=4000, decision=False, json
         time.time()-row["context"].get("active_started_at", time.time()))
     deadline = time.time() + min(90 if phase == "semantic" else 60, max(0, remaining))
     signature = signature or hashlib.sha256(store.encode([messages, tools]).encode()).hexdigest()
+    if row["context"].get("engine") == "langgraph":
+        from backend.agents.music import complete as graph_complete
+        return graph_complete(run_id, messages, tools, max_output=max_output, phase=phase,
+                              json_output=json_output, signature=signature, correction=correction)
     request = budget.reserve(run_id, estimated+max_output, phase, signature, deadline, correction)
     mode = row["context"]["limits"].get("api", "auto")
     if mode == "auto":

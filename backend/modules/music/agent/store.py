@@ -96,6 +96,8 @@ def update(cursor, row, **changes):
         raise HTTPException(409, "任务已更新，请刷新")
     merged["revision"] += 1
     sync_resource(cursor, merged)
+    from backend.agents.music import sync
+    sync(cursor, merged)
     return merged
 
 
@@ -167,6 +169,8 @@ def create(request, key, skill_version, parent=None, seed=None):
 
 def insert(cursor, row):
     """Insert using the caller's transaction (daily quota and run are atomic)."""
+    from backend.agents.music import attach
+    attach(cursor, row)
     columns = list(row)
     cursor.execute("INSERT INTO music_recommendation_runs (" + ",".join(f"`{k}`" for k in columns) + ") VALUES (" + ",".join(["%s"]*len(columns)) + ")",
                    tuple(encode(row[k]) if k in {"request","context","steps","result"} else row[k] for k in columns))

@@ -103,7 +103,10 @@ async def lifespan(app):
         instance.add_tool(globals()[name])
     loop = asyncio.get_running_loop()
     transports[loop] = instance.streamable_http_app()
-    async with instance.session_manager.run():
+    from backend.agents import mcp as agent_mcp
+    agent_instance = agent_mcp.create_server()
+    agent_mcp.transports[loop] = agent_instance.streamable_http_app()
+    async with instance.session_manager.run(), agent_instance.session_manager.run():
         for callback in app.router.on_startup:
             result = callback()
             if inspect.isawaitable(result):
@@ -112,6 +115,7 @@ async def lifespan(app):
             yield
         finally:
             transports.pop(loop,None)
+            agent_mcp.transports.pop(loop,None)
             for callback in app.router.on_shutdown:
                 result = callback()
                 if inspect.isawaitable(result):

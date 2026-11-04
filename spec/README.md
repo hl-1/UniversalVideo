@@ -10,6 +10,8 @@
 - [视频模块持久化](VideoDream-视频模块持久化功能设计.md)
 - [用户与管理员](VideoDream-用户与管理员功能设计.md)
 - [场景歌单 Agent](VideoDream-场景歌单Agent功能设计.md)
+- [Agent 能力升级：LangGraph、知识库与浏览器任务](VideoDream-Agent能力升级功能实现文档.md)
+- [Agent 升级实测记录（2026-10-26）](evaluations/agent-upgrade-2026-10-26.md)
 - [AI 视频总结](features/ai-video-summary.md)
 - [思维导图](features/ai-summary-mindmap.md)
 - [平台字幕](features/video-summary-platform-subtitles.md)

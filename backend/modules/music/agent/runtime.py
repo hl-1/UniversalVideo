@@ -349,6 +349,9 @@ def prioritize_adjustment(row, name, response, client, attempted):
 
 
 def execute_run(row, last):
+    if row["context"].get("engine") == "langgraph":
+        from backend.agents.music import execute_scene
+        return execute_scene(row, last)
     with work.task(row):
         return _execute_run(row, last)
 

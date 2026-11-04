@@ -1,0 +1,1423 @@
+{
+  "fixture": "synthetic-labelled-v1",
+  "production_quality_claim": false,
+  "cases": [
+    {
+      "id": "q-001",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "海棠馆每天于08:30开放。",
+      "citations": [
+        "# 海棠馆参观手册",
+        "【合成测试资料，无真实服务承诺】海棠馆每天于08:30开放，闭馆时间为18:00。海棠馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为10元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.82,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-002",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "10元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】海棠馆每天于08:30开放，闭馆时间为18:00。海棠馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为10元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.278,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-003",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "青竹馆每天于09:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】青竹馆每天于09:30开放，闭馆时间为18:00。青竹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为13元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.586,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-004",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "青竹馆成人入馆票价为13元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】青竹馆每天于09:30开放，闭馆时间为18:00。青竹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为13元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.897,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-005",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "银杏馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】银杏馆每天于10:30开放，闭馆时间为18:00。银杏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为16元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.639,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-006",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "16元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】银杏馆每天于10:30开放，闭馆时间为18:00。银杏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为16元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.838,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-007",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "11:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】白鹭馆每天于11:30开放，闭馆时间为18:00。白鹭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为19元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.622,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-008",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "白鹭馆成人入馆票价为19元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】白鹭馆每天于11:30开放，闭馆时间为18:00。白鹭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为19元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.458,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-009",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "08:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】星河馆每天于08:30开放，闭馆时间为18:00。星河馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为22元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.854,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-010",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": false,
+      "reference_fact_found": false,
+      "insufficient": true,
+      "answer": "证据不足，未找到星河馆成人票价信息。",
+      "citations": [],
+      "seconds": 5.194,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-011",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "09:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】云杉馆每天于09:30开放，闭馆时间为18:00。云杉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为25元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.552,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-012",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "25元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】云杉馆每天于09:30开放，闭馆时间为18:00。云杉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为25元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.267,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-013",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "10:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】松涛馆每天于10:30开放，闭馆时间为18:00。松涛馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为28元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.36,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-014",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "松涛馆成人入馆票价为28元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】松涛馆每天于10:30开放，闭馆时间为18:00。松涛馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为28元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.385,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-015",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "荷风馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】荷风馆每天于11:30开放，闭馆时间为18:00。荷风馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为31元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.529,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-016",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "31元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】荷风馆每天于11:30开放，闭馆时间为18:00。荷风馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为31元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.352,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-017",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "桂影馆每天于08:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】桂影馆每天于08:30开放，闭馆时间为18:00。桂影馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为34元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.664,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-018",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "桂影馆成人票价为34元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】桂影馆每天于08:30开放，闭馆时间为18:00。桂影馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为34元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.838,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-019",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "翠屏馆每天于09:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】翠屏馆每天于09:30开放，闭馆时间为18:00。翠屏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为37元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.068,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-020",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "翠屏馆成人入馆票价为37元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】翠屏馆每天于09:30开放，闭馆时间为18:00。翠屏馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为37元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.003,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-021",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "听雨馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】听雨馆每天于10:30开放，闭馆时间为18:00。听雨馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为40元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.654,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-022",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "40元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】听雨馆每天于10:30开放，闭馆时间为18:00。听雨馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为40元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 6.712,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-023",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "观澜馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】观澜馆每天于11:30开放，闭馆时间为18:00。观澜馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为43元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 4.017,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-024",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "43元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】观澜馆每天于11:30开放，闭馆时间为18:00。观澜馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为43元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.055,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-025",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "08:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】流泉馆每天于08:30开放，闭馆时间为18:00。流泉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为46元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.153,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-026",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "46元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】流泉馆每天于08:30开放，闭馆时间为18:00。流泉馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为46元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.718,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-027",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "09:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】晴川馆每天于09:30开放，闭馆时间为18:00。晴川馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为49元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.656,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-028",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "49元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】晴川馆每天于09:30开放，闭馆时间为18:00。晴川馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为49元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.372,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-029",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "望岳馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】望岳馆每天于10:30开放，闭馆时间为18:00。望岳馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为52元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 14.342,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-030",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "52元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】望岳馆每天于10:30开放，闭馆时间为18:00。望岳馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为52元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 14.16,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-031",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "迎春馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】迎春馆每天于11:30开放，闭馆时间为18:00。迎春馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为55元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.157,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-032",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "迎春馆成人入馆票价为55元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】迎春馆每天于11:30开放，闭馆时间为18:00。迎春馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为55元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.983,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-033",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "08:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】映雪馆每天于08:30开放，闭馆时间为18:00。映雪馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为58元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.431,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-034",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "58元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】映雪馆每天于08:30开放，闭馆时间为18:00。映雪馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为58元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.815,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-035",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "鸣琴馆每天09:30开放",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】鸣琴馆每天于09:30开放，闭馆时间为18:00。鸣琴馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为61元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.164,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-036",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "61元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】鸣琴馆每天于09:30开放，闭馆时间为18:00。鸣琴馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为61元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.335,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-037",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "澄心馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】澄心馆每天于10:30开放，闭馆时间为18:00。澄心馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为64元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.109,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-038",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "64元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】澄心馆每天于10:30开放，闭馆时间为18:00。澄心馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为64元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.413,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-039",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "秋实馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】秋实馆每天于11:30开放，闭馆时间为18:00。秋实馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为67元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.362,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-040",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "67元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】秋实馆每天于11:30开放，闭馆时间为18:00。秋实馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为67元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.72,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-041",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "08:30",
+      "citations": [
+        "# 春晓馆参观手册"
+      ],
+      "seconds": 3.796,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-042",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "70元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】春晓馆每天于08:30开放，闭馆时间为18:00。春晓馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为70元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.504,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-043",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "书香馆每天于09:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】书香馆每天于09:30开放，闭馆时间为18:00。书香馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为73元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.22,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-044",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "书香馆成人入馆票价为73元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】书香馆每天于09:30开放，闭馆时间为18:00。书香馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为73元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.832,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-045",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "月华馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】月华馆每天于10:30开放，闭馆时间为18:00。月华馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为76元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.598,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-046",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "76元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】月华馆每天于10:30开放，闭馆时间为18:00。月华馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为76元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.08,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-047",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "碧波馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】碧波馆每天于11:30开放，闭馆时间为18:00。碧波馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为79元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.361,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-048",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "79元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】碧波馆每天于11:30开放，闭馆时间为18:00。碧波馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为79元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.369,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-049",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "长虹馆每天于08:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】长虹馆每天于08:30开放，闭馆时间为18:00。长虹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为82元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.497,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-050",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "82元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】长虹馆每天于08:30开放，闭馆时间为18:00。长虹馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为82元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 9.057,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-051",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "玉兰馆每天于09:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】玉兰馆每天于09:30开放，闭馆时间为18:00。玉兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为85元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 4.097,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-052",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "玉兰馆成人票价为85元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】玉兰馆每天于09:30开放，闭馆时间为18:00。玉兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为85元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.584,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-053",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "10:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】霜林馆每天于10:30开放，闭馆时间为18:00。霜林馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为88元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.978,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-054",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "88元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】霜林馆每天于10:30开放，闭馆时间为18:00。霜林馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为88元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 4.06,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-055",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "晨露馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】晨露馆每天于11:30开放，闭馆时间为18:00。晨露馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为91元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.757,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-056",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "晨露馆成人入馆票价为91元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】晨露馆每天于11:30开放，闭馆时间为18:00。晨露馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为91元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.961,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-057",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "暮云馆每天于08:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】暮云馆每天于08:30开放，闭馆时间为18:00。暮云馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为94元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.806,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-058",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "暮云馆成人入馆票价为94元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】暮云馆每天于08:30开放，闭馆时间为18:00。暮云馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为94元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.891,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-059",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "09:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】凌霄馆每天于09:30开放，闭馆时间为18:00。凌霄馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为97元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.207,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-060",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "凌霄馆成人入馆票价为97元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】凌霄馆每天于09:30开放，闭馆时间为18:00。凌霄馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为97元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.625,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-061",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "丹枫馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】丹枫馆每天于10:30开放，闭馆时间为18:00。丹枫馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为100元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.685,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-062",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "丹枫馆成人入馆票价为100元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】丹枫馆每天于10:30开放，闭馆时间为18:00。丹枫馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为100元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.818,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-063",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "归燕馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】归燕馆每天于11:30开放，闭馆时间为18:00。归燕馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为103元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.711,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-064",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "归燕馆成人入馆票价为103元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】归燕馆每天于11:30开放，闭馆时间为18:00。归燕馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为103元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.7,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-065",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "08:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】栖霞馆每天于08:30开放，闭馆时间为18:00。栖霞馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为106元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.169,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-066",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "106元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】栖霞馆每天于08:30开放，闭馆时间为18:00。栖霞馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为106元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.693,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-067",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "09:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】若水馆每天于09:30开放，闭馆时间为18:00。若水馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为109元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.618,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-068",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": false,
+      "reference_fact_found": false,
+      "insufficient": true,
+      "answer": "证据不足，无法确定若水馆成人票价格。",
+      "citations": [],
+      "seconds": 18.601,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-069",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "芷兰馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】芷兰馆每天于10:30开放，闭馆时间为18:00。芷兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为112元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.761,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-070",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "112元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】芷兰馆每天于10:30开放，闭馆时间为18:00。芷兰馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为112元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.811,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-071",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "兰亭馆每天于11:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】兰亭馆每天于11:30开放，闭馆时间为18:00。兰亭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为115元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.272,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-072",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "兰亭馆成人票价为115元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】兰亭馆每天于11:30开放，闭馆时间为18:00。兰亭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为115元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.205,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-073",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "清晖馆每天08:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】清晖馆每天于08:30开放，闭馆时间为18:00。清晖馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为118元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.294,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-074",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "118元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】清晖馆每天于08:30开放，闭馆时间为18:00。清晖馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为118元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.857,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-075",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "09:30",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】雅韵馆每天于09:30开放，闭馆时间为18:00。雅韵馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为121元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.591,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-076",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "121元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】雅韵馆每天于09:30开放，闭馆时间为18:00。雅韵馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为121元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.174,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-077",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "明月馆每天于10:30开放。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】明月馆每天于10:30开放，闭馆时间为18:00。明月馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为124元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 5.114,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-078",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "124元",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】明月馆每天于10:30开放，闭馆时间为18:00。明月馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为124元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 2.001,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-079",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "远山馆每天于11:30开放，闭馆时间为18:00。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】远山馆每天于11:30开放，闭馆时间为18:00。远山馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为127元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 5.841,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-080",
+      "category": "answerable",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "远山馆成人入馆票价为127元。",
+      "citations": [
+        "【合成测试资料，无真实服务承诺】远山馆每天于11:30开放，闭馆时间为18:00。远山馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为127元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 4.214,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-081",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "根据提供的证据，未找到关于海棠馆馆长的个人手机号码的任何信息。",
+      "citations": [],
+      "seconds": 3.092,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-082",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "未提供青竹馆馆长的个人手机号码信息",
+      "citations": [],
+      "seconds": 2.357,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-083",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未提供银杏馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 3.995,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-084",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": false,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未提及白鹭馆馆长的个人手机号码，无法回答。",
+      "citations": [
+        "# 白鹭馆参观手册",
+        "【合成测试资料，无真实服务承诺】白鹭馆每天于11:30开放，闭馆时间为18:00。白鹭馆预约需出示预约二维码；团体预约应提前三天。成人入馆票价为19元，儿童需由成年人陪同。退票仅限预约日前一天18:00之前，原路退款在三个工作日到账。失物招领设在一楼服务台，失物记录保留三十天。"
+      ],
+      "seconds": 3.934,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-085",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未包含星河馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 3.369,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-086",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "未在提供的证据中找到云杉馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 2.603,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-087",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "现有资料未提供松涛馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 2.023,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-088",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未提供荷风馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 6.11,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-089",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未提供桂影馆馆长的个人手机号码，无法回答。",
+      "citations": [],
+      "seconds": 2.668,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-090",
+      "category": "unanswerable",
+      "recall20": null,
+      "expected_sources_cited": false,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "证据中未提供翠屏馆馆长的个人手机号码，无法回答。",
+      "citations": [
+        "# 翠屏馆参观手册"
+      ],
+      "seconds": 2.696,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-091",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": true,
+      "answer": "听雨馆特殊展览退款到账时间存在冲突：A版规定为5个工作日，B版规定为9个工作日。两份资料均未标注生效时间，无法判断新旧优先级，因此无法确定哪个版本当前有效。",
+      "citations": [
+        "【合成测试资料】听雨馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】听雨馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 11.357,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-092",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "观澜馆特殊展览退款到账时间存在冲突：A版规定为5个工作日（证据chunk 7aaed057...），B版规定为9个工作日（证据edcfdb06...）。两份文件均未标注生效时间，无法判断新旧优先级，因此不能确定唯一答案。",
+      "citations": [
+        "【合成测试资料】观澜馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】观澜馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 5.333,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-093",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "流泉馆特殊展览退款到账时间存在冲突：A版规定为5个工作日，B版规定为9个工作日。两个版本均未标注生效时间，无法判断新旧优先级。",
+      "citations": [
+        "【合成测试资料】流泉馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】流泉馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 3.779,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-094",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "根据现有证据，晴川馆特殊展览退款到账时间存在两个版本的独立规定：A版规定为5个工作日，B版规定为9个工作日，两个版本均未标注生效时间，无法确定新旧优先级，因此存在明显冲突。具体为：晴川馆特殊展览退款规定（A版）（chunk_id: 2500a8bfc3a5f39663c352f598da09a57f8eb37dfc8cc10de5d0263601097af1）明确“退款到账时间为5个工作日”；晴川馆特殊展览退款规定（B版）（chunk_id: 6b5c640801c858b3c213150921a3fce52d7800d778bb1b8dc36bc8c91acfaf12）明确“退款到账时间为9个工作日”。由于两者冲突且无法判断优先级，需进一步确认有效版本。",
+      "citations": [
+        "【合成测试资料】晴川馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】晴川馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 12.2,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-095",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "望岳馆特殊展览退款存在两个不同版本的规定：A版规定退款到账时间为5个工作日（chunk_id: 8a5e2c0e9a68b7b31976fc5ce74bfae8ea212cd19fe02331e391d5a56c027df6），B版规定为9个工作日（chunk_id: 2185698fcfa0e22575c7dd93fb9bc4b45bbe062c6a8cab362d913ef5d762bda6）。两份资料均未标注生效时间，无法判断新旧优先级，因此存在冲突。",
+      "citations": [
+        "【合成测试资料】望岳馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】望岳馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 5.966,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-096",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "迎春馆特殊展览退款到账时间存在两个不同版本的规定：A版规定为5个工作日（证据：efdf4a0b2f0063a2c2a83011a0eee046869c5b0dae0042233ca6375797d80cc4），B版规定为9个工作日（证据：9b567368839a00604dbab34f2ae73f0b1c227120a8fbc8361660967ad9363cb7）。两版本均未标注生效时间，因此无法判断哪一个更新或优先（证据：efdf4a0b2f0063a2c2a83011a0eee046869c5b0dae0042233ca6375797d80cc4和9b567368839a00604dbab34f2ae73f0b1c227120a8fbc8361660967ad9363cb7均明确说明）。此外，普通参观手册对特殊展览不适用。资料存在冲突，因为A版和B版规定不同且无优先级信息。",
+      "citations": [
+        "【合成测试资料】迎春馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】迎春馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 12.077,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-097",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "映雪馆特殊展览退款到账时间存在两种不同版本：A版规定为5个工作日，B版规定为9个工作日。资料显示两版均未标注生效时间，无法判断新旧优先级，因此存在冲突。",
+      "citations": [
+        "【合成测试资料】映雪馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】映雪馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 8.569,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-098",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "鸣琴馆特殊展览退款规定存在两个版本：A版规定退款到账时间为5个工作日，B版规定为9个工作日。两个版本均未标注生效时间，无法判断新旧优先级，存在冲突。",
+      "citations": [
+        "【合成测试资料】鸣琴馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】鸣琴馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "# 鸣琴馆特殊展览退款规定（A版）",
+        "# 鸣琴馆特殊展览退款规定（B版）"
+      ],
+      "seconds": 3.531,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-099",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "澄心馆特殊展览退款到账时间存在冲突：A版规定为5个工作日，B版规定为9个工作日。两份规定均未标注生效时间，无法判断新旧优先级，因此无法确定哪个版本有效。",
+      "citations": [
+        "【合成测试资料】澄心馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】澄心馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 6.726,
+      "status": "succeeded"
+    },
+    {
+      "id": "q-100",
+      "category": "conflicting",
+      "recall20": 1.0,
+      "expected_sources_cited": true,
+      "reference_fact_found": true,
+      "insufficient": false,
+      "answer": "秋实馆特殊展览退款到账时间存在冲突：A版规定为5个工作日，B版规定为9个工作日。两份规定均未标注生效时间，无法判断新旧优先级。",
+      "citations": [
+        "【合成测试资料】秋实馆特殊展览退款到账时间为5个工作日。这是未标注生效时间的A版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。",
+        "【合成测试资料】秋实馆特殊展览退款到账时间为9个工作日。这是未标注生效时间的B版独立规定，无法据此判断新旧优先级。普通参观手册对特殊展览不适用。"
+      ],
+      "seconds": 3.226,
+      "status": "succeeded"
+    }
+  ],
+  "errors": [],
+  "rerank_results": 2,
+  "calls": {
+    "count": 261,
+    "actual_tokens": 187327,
+    "unknown": 0
+  },
+  "metrics": {
+    "cases": 100,
+    "succeeded": 100,
+    "recall20": 1.0,
+    "p50_seconds": 3.0615,
+    "p95_seconds": 12.077,
+    "citation_metric": "expected source match; not a human correctness score",
+    "cost_estimate": null,
+    "cost_note": "供应商价格未配置，不虚构费用"
+  },
+  "elapsed_seconds": 272.793,
+  "cleanup": {
+    "database": "videodream_acceptance_test_75b0cfc1abf8",
+    "index": "videodream_rag_test_75b0cfc1abf8",
+    "objects_removed": true
+  }
+}

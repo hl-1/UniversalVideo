@@ -22,8 +22,6 @@ from backend.modules.music import lyrics, site
 class MySQLMusicLibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.principal_marker = accounts.principal.set(accounts.Principal(1, 'admin', 'super_admin'))
-        cls.addClassCleanup(accounts.principal.reset, cls.principal_marker)
         cls.original_ready = database_store.schema_ready
         cls.config = database_store.database_config()
         cls.database_name = "videodream_test_" + secrets.token_hex(6)
@@ -37,9 +35,13 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         from backend.tests.support import migrate_test_database
         migrate_test_database(cls.config)
         database_store.schema_ready = False
+        cls.uid = accounts.create_user(accounts.Credentials(username="library_admin", password="Library-test-123!"), role="super_admin")
+        cls.other = accounts.create_user(accounts.Credentials(username="library_other", password="Library-test-123!"))
+        cls.principal_marker = accounts.principal.set(accounts.Principal(cls.uid, 'library_admin', 'super_admin'))
+        cls.addClassCleanup(accounts.principal.reset, cls.principal_marker)
         cls.work = tempfile.TemporaryDirectory()
         cls.storage_root = Path(cls.work.name)
-        cls.directory = cls.storage_root / "users" / "1" / "files"
+        cls.directory = cls.storage_root / "users" / str(cls.uid) / "files"
         cls.directory.mkdir(parents=True)
         cls.paths_patch = patch.object(paths, "DOWNLOAD_DIR", cls.storage_root)
         cls.paths_patch.start()
@@ -98,7 +100,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
                 cursor.execute("SELECT payload FROM resources WHERE kind='music_import' AND resource_key=%s", (key,))
                 import json
                 self.assertEqual(json.loads(cursor.fetchone()['payload'])['status'], 'failed')
-            marker = accounts.principal.set(accounts.Principal(2, 'other', 'user'))
+            marker = accounts.principal.set(accounts.Principal(self.other, 'library_other', 'user'))
             try:
                 with self.assertRaises(Exception) as failure:
                     imports.get_job(key)
@@ -197,7 +199,7 @@ class MySQLMusicLibraryTests(unittest.TestCase):
         result = library.downloaded_status([track, alias])
         self.assertTrue(all(item["file_available"] for item in result))
         self.assertEqual(result[1]["filename"], name)
-        marker = accounts.principal.set(accounts.Principal(2, "other", "super_admin"))
+        marker = accounts.principal.set(accounts.Principal(self.other, "library_other", "super_admin"))
         try:
             self.assertFalse(library.downloaded_status([track])[0]["file_available"])
         finally:
@@ -214,8 +216,8 @@ class MySQLMusicLibraryTests(unittest.TestCase):
             for index in range(1001):
                 track = library.TrackInput.model_validate(self.track | {"identifier": f"large-{index}"})
                 identifier = library.save_track(cursor, track)
-                cursor.execute("INSERT INTO music_downloads (id,track_id,filename,created_at,user_id) VALUES (%s,%s,%s,%s,1)",
-                    (secrets.token_hex(12), identifier, f"missing-large-{index}.mp3", 9999999999 + index))
+                cursor.execute("INSERT INTO music_downloads (id,track_id,filename,created_at,user_id) VALUES (%s,%s,%s,%s,%s)",
+                    (secrets.token_hex(12), identifier, f"missing-large-{index}.mp3", 9999999999 + index, self.uid))
         with patch.object(storage, "owned_path", wraps=storage.owned_path) as stat:
             result = library.downloaded_status([library.TrackInput.model_validate(self.track)])
         self.assertTrue(result[0]["file_available"])
